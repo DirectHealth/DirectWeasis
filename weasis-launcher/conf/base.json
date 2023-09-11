@@ -304,7 +304,7 @@
     },
     {
       "code": "weasis.name",
-      "value": "Weasis",
+      "value": "DirectViewer",
       "description": "Change the name of the application everywhere in UI",
       "type": "AP",
       "category": "LAUNCH"
@@ -384,7 +384,7 @@
     },
     {
       "code": "weasis.copyrights",
-      "value": "© 2009-${build.year} Weasis Team",
+      "value": "© ${build.year} DirectHealth",
       "description": "Copyrights",
       "type": "A",
       "category": "DOC"

@@ -80,7 +80,7 @@
 				<key>CFBundleTypeRole</key>
 				<string>Editor</string>
 				<key>CFBundleURLName</key>
-				<string>Weasis URI Handler</string>
+				<string>DirectViewer URI Handler</string>
 				<key>LSIsAppleDefaultForType</key>
 				<string>Yes</string>
 				<key>CFBundleURLSchemes</key>

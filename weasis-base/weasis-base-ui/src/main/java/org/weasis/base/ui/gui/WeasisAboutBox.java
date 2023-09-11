@@ -95,7 +95,7 @@ public class WeasisAboutBox extends JDialog {
                 Messages.getString("WeasisWin.release"),
                 BundleTools.SYSTEM_PREFERENCES.getProperty("weasis.copyrights", ""),
                 AppProperties.WEASIS_NAME,
-                "https://github.com/nroduit/Weasis/blob/master/3rd-party-licenses.md",
+                "",
                 Messages.getString("WeasisWin.otherSoft"),
                 System.getProperty("os.name"),
                 System.getProperty("os.version"),

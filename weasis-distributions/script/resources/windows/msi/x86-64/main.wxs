@@ -76,11 +76,11 @@
         <Component Id="URIHandlerRegistry" Guid="D99D1C53-7173-414B-81F8-AFC94641B3C0">
             <!-- Register weasis protocol -->
 		        <RegistryKey Key="weasis" Root="HKCR">
-		          <RegistryValue Type="string" Value="Weasis URI handler"/>
+		          <RegistryValue Type="string" Value="DirectViewer URI handler"/>
 		          <RegistryValue Name="URL Protocol" Type="string" Value=""/>
-		          <RegistryValue Name="DefaultIcon" Type="string" Value="&quot;[INSTALLDIR]Weasis.ico&quot;,1"/>
+		          <RegistryValue Name="DefaultIcon" Type="string" Value="&quot;[INSTALLDIR]DirectViewer.ico&quot;,1"/>
 		          <RegistryKey Key="shell\open\command">
-		            <RegistryValue Type="string" Value="&quot;[INSTALLDIR]Weasis.exe&quot; &quot;%1&quot;"/>
+		            <RegistryValue Type="string" Value="&quot;[INSTALLDIR]DirectViewer.exe&quot; &quot;%1&quot;"/>
 		          </RegistryKey>
 		        </RegistryKey>
             <!-- Remove popup on Edge and IE for weasis protocol -->
