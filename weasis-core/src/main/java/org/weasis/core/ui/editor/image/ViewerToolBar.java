@@ -165,6 +165,21 @@ public class ViewerToolBar<E extends ImageElement> extends WtoolBar implements A
       synchButton = null;
     }
 
+    if(1 == 1) {
+      final DropDownButton customButton =
+          new DropDownButton(
+              "jupy", // NON-NLS
+              new DropButtonIcon(ResourceUtil.getToolBarIcon(ActionIcon.LAYOUT))) {
+
+            @Override
+            protected JPopupMenu getPopupMenu() {
+              return getLayoutPopupMenuButton(this);
+            }
+          };
+      customButton.setToolTipText(Messages.getString("ViewerToolBar.jupy"));
+      add(customButton);
+    }
+
     if (props.getBooleanProperty("weasis.toolbar.reset", true)) {
       final JButton resetButton = new JButton();
       resetButton.setToolTipText(Messages.getString("ViewerToolBar.disReset"));
