@@ -24,12 +24,12 @@ import javax.swing.JMenuItem;
 import javax.swing.JSeparator;
 import javax.swing.KeyStroke;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.FrameworkUtil;
 import org.osgi.service.prefs.Preferences;
 import org.weasis.core.api.gui.Insertable.Type;
 import org.weasis.core.api.gui.InsertableUtil;
 import org.weasis.core.api.gui.util.ActionState;
 import org.weasis.core.api.gui.util.ActionW;
+import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.BasicActionState;
 import org.weasis.core.api.gui.util.ComboItemListener;
 import org.weasis.core.api.gui.util.Feature;
@@ -45,7 +45,6 @@ import org.weasis.core.api.image.ImageOpNode;
 import org.weasis.core.api.image.OpManager;
 import org.weasis.core.api.image.PseudoColorOp;
 import org.weasis.core.api.image.WindowOp;
-import org.weasis.core.api.image.op.ByteLut;
 import org.weasis.core.api.image.op.ByteLutCollection;
 import org.weasis.core.api.image.util.KernelData;
 import org.weasis.core.api.image.util.Unit;
@@ -68,6 +67,8 @@ import org.weasis.core.ui.editor.image.ViewCanvas;
 import org.weasis.core.ui.editor.image.ZoomToolBar;
 import org.weasis.core.ui.model.graphic.Graphic;
 import org.weasis.core.util.LangUtil;
+import org.weasis.opencv.op.lut.ByteLut;
+import org.weasis.opencv.op.lut.ColorLut;
 import org.weasis.opencv.op.lut.DefaultWlPresentation;
 
 /**
@@ -89,7 +90,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
     setAction(new BasicActionState(ActionW.DRAW));
     setAction(new BasicActionState(ActionW.MEASURE));
 
-    setAction(getMoveTroughSliceAction(10, TIME.MINUTE, 0.1));
+    setAction(getMoveTroughSliceAction(10.0, TIME.MINUTE, 0.1));
     setAction(newWindowAction());
     setAction(newLevelAction());
     setAction(newRotateAction());
@@ -115,7 +116,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
     setAction(newPanAction());
     setAction(new BasicActionState(ActionW.RESET));
 
-    final BundleContext context = FrameworkUtil.getBundle(this.getClass()).getBundleContext();
+    final BundleContext context = AppProperties.getBundleContext(this.getClass());
     Preferences prefs = BundlePreferences.getDefaultPreferences(context);
     zoomSetting.applyPreferences(prefs);
     mouseActions.applyPreferences(prefs);
@@ -166,11 +167,11 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
 
   private ComboItemListener<ByteLut> newLutAction() {
     List<ByteLut> luts = new ArrayList<>();
-    luts.add(ByteLutCollection.Lut.GRAY.getByteLut());
+    luts.add(ColorLut.GRAY.getByteLut());
     ByteLutCollection.readLutFilesFromResourcesDir(
         luts, ResourceUtil.getResource("luts")); // NON-NLS
     // Set default first as the list has been sorted
-    luts.add(0, ByteLutCollection.Lut.IMAGE.getByteLut());
+    luts.add(0, ColorLut.IMAGE.getByteLut());
 
     return new ComboItemListener<>(ActionW.LUT, luts.toArray(new ByteLut[0])) {
       @Override
@@ -449,7 +450,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
                     (Filter<ImageElement>) view2d.getActionValue(ActionW.FILTERED_SERIES.cmd())),
                 view2d.getFrameIndex() + 1,
                 false));
-    final Integer speed = (Integer) series.getTagValue(TagW.get("CineRate"));
+    Double speed = (Double) series.getTagValue(TagW.get("CineRate"));
     if (speed != null) {
       cineAction.ifPresent(a -> a.setSpeed(speed));
     }
@@ -478,9 +479,10 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
       setSliderPreference(prefNode, ActionW.ROTATION);
       setSliderPreference(prefNode, ActionW.ZOOM);
 
-      Preferences containerNode = prefs.node(View2dContainer.class.getSimpleName().toLowerCase());
-      InsertableUtil.savePreferences(View2dContainer.TOOLBARS, containerNode, Type.TOOLBAR);
-      InsertableUtil.savePreferences(View2dContainer.TOOLS, containerNode, Type.TOOL);
+      Preferences containerNode =
+          prefs.node(View2dContainer.UI.clazz.getSimpleName().toLowerCase());
+      InsertableUtil.savePreferences(View2dContainer.UI.toolBars, containerNode, Type.TOOLBAR);
+      InsertableUtil.savePreferences(View2dContainer.UI.tools, containerNode, Type.TOOL);
     }
   }
 
@@ -611,7 +613,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
 
   // public JMenu getSortStackMenu(String prop) {
   // JMenu menu = null;
-  // if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+  // if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
   // menu =
   // sortStackAction.createUnregisteredRadioMenu(Messages.getString("View2dContainer.sort_stack"));
   //

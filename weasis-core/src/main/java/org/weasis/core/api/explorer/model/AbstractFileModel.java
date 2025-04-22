@@ -23,13 +23,7 @@ import org.weasis.core.api.command.Options;
 import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
-import org.weasis.core.api.media.data.Codec;
-import org.weasis.core.api.media.data.MediaElement;
-import org.weasis.core.api.media.data.MediaSeriesGroup;
-import org.weasis.core.api.media.data.MediaSeriesGroupNode;
-import org.weasis.core.api.media.data.Series;
-import org.weasis.core.api.media.data.TagView;
-import org.weasis.core.api.media.data.TagW;
+import org.weasis.core.api.media.data.*;
 
 public abstract class AbstractFileModel implements TreeModel, DataExplorerModel {
   private static final Logger LOGGER = LoggerFactory.getLogger(AbstractFileModel.class);
@@ -53,7 +47,7 @@ public abstract class AbstractFileModel implements TreeModel, DataExplorerModel 
   }
 
   @Override
-  public List<Codec> getCodecPlugins() {
+  public List<Codec<MediaElement>> getCodecPlugins() {
     return GuiUtils.getUICore().getCodecPlugins();
   }
 
@@ -182,7 +176,7 @@ public abstract class AbstractFileModel implements TreeModel, DataExplorerModel 
   }
 
   @Override
-  public boolean applySplittingRules(Series original, MediaElement media) {
+  public boolean applySplittingRules(Series<?> original, MediaElement media) {
     return false;
   }
 
@@ -206,39 +200,37 @@ public abstract class AbstractFileModel implements TreeModel, DataExplorerModel 
       return;
     }
 
-    GuiExecutor.instance()
-        .execute(
-            () -> {
-              AbstractFileModel dataModel = AbstractFileModel.this;
-              firePropertyChange(
-                  new ObservableEvent(
-                      ObservableEvent.BasicAction.SELECT, dataModel, null, dataModel));
-              if (opt.isSet("all")) { // NON-NLS
-                for (MediaSeriesGroup g : model.getSuccessors(MediaSeriesGroupNode.rootNode)) {
-                  dataModel.removeTopGroup(g);
-                }
-              } else {
-                if (opt.isSet("group")) { // NON-NLS
+    GuiExecutor.execute(
+        () -> {
+          AbstractFileModel dataModel = AbstractFileModel.this;
+          firePropertyChange(
+              new ObservableEvent(ObservableEvent.BasicAction.SELECT, dataModel, null, dataModel));
+          if (opt.isSet("all")) { // NON-NLS
+            for (MediaSeriesGroup g : model.getSuccessors(MediaSeriesGroupNode.rootNode)) {
+              dataModel.removeTopGroup(g);
+            }
+          } else {
+            if (opt.isSet("group")) { // NON-NLS
 
-                  for (String gUID : gargs) {
-                    dataModel.removeTopGroup(getHierarchyNode(MediaSeriesGroupNode.rootNode, gUID));
-                  }
-                }
+              for (String gUID : gargs) {
+                dataModel.removeTopGroup(getHierarchyNode(MediaSeriesGroupNode.rootNode, gUID));
+              }
+            }
 
-                if (opt.isSet("series")) { // NON-NLS
-                  for (String uid : iargs) {
-                    for (MediaSeriesGroup topGroup :
-                        model.getSuccessors(MediaSeriesGroupNode.rootNode)) {
-                      MediaSeriesGroup s = getHierarchyNode(topGroup, uid);
-                      if (s != null) {
-                        removeSeries(s);
-                        break;
-                      }
-                    }
+            if (opt.isSet("series")) { // NON-NLS
+              for (String uid : iargs) {
+                for (MediaSeriesGroup topGroup :
+                    model.getSuccessors(MediaSeriesGroupNode.rootNode)) {
+                  MediaSeriesGroup s = getHierarchyNode(topGroup, uid);
+                  if (s != null) {
+                    removeSeries(s);
+                    break;
                   }
                 }
               }
-            });
+            }
+          }
+        });
   }
 
   @Override

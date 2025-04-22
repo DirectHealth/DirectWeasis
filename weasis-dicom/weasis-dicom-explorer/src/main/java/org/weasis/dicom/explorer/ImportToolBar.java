@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import org.weasis.core.api.gui.util.AbstractItemDialogPage;
 import org.weasis.core.api.gui.util.AbstractWizardDialog;
 import org.weasis.core.api.gui.util.GuiUtils;
+import org.weasis.core.api.gui.util.WinUtil;
 import org.weasis.core.api.service.WProperties;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.ActionIcon;
@@ -35,7 +36,7 @@ public class ImportToolBar extends WtoolBar {
   private static final Logger LOGGER = LoggerFactory.getLogger(ImportToolBar.class);
 
   public ImportToolBar(int index, DicomExplorer explorer) {
-    super(Messages.getString("ImportToolBar.dcm_import_bar"), index);
+    super(Messages.getString("ImportToolBar.import_dcm"), index);
     setAttachedInsertable(explorer);
 
     final DicomModel model = (DicomModel) explorer.getDataExplorerModel();
@@ -64,7 +65,7 @@ public class ImportToolBar extends WtoolBar {
     if (file == null) {
       int response =
           JOptionPane.showConfirmDialog(
-              SwingUtilities.getWindowAncestor(parent),
+              WinUtil.getValidComponent(SwingUtilities.getWindowAncestor(parent)),
               Messages.getString("ImportToolBar.import_cd_question"),
               actionName,
               JOptionPane.YES_NO_OPTION,
@@ -84,7 +85,7 @@ public class ImportToolBar extends WtoolBar {
 
         int response =
             JOptionPane.showConfirmDialog(
-                SwingUtilities.getWindowAncestor(parent),
+                WinUtil.getValidComponent(SwingUtilities.getWindowAncestor(parent)),
                 Messages.getString("DicomExplorer.mes_import_manual"),
                 actionName,
                 JOptionPane.YES_NO_OPTION,

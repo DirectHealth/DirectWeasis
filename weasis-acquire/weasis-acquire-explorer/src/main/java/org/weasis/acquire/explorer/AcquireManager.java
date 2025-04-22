@@ -43,6 +43,7 @@ import javax.xml.parsers.ParserConfigurationException;
 import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.ElementDictionary;
 import org.dcm4che3.data.Tag;
+import org.dcm4che3.data.VR;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
@@ -56,6 +57,7 @@ import org.weasis.core.api.command.Options;
 import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
+import org.weasis.core.api.gui.util.WinUtil;
 import org.weasis.core.api.media.MimeInspector;
 import org.weasis.core.api.media.data.ImageElement;
 import org.weasis.core.api.media.data.MediaElement;
@@ -475,19 +477,19 @@ public class AcquireManager {
     final Option opt = Options.compile(usage).parse(argv);
     final List<String> args = opt.args();
 
-    if (opt.isSet("help") || args.isEmpty()) {
+    if (opt.isSet("help") || args.isEmpty()) { // NON-NLS
       opt.usage();
       return;
     }
 
-    GuiExecutor.instance().execute(() -> patientCommand(opt, args.get(0)));
+    GuiExecutor.execute(() -> patientCommand(opt, args.getFirst()));
   }
 
   private void patientCommand(Option opt, String arg) {
 
     final Document newPatientContext;
 
-    if (opt.isSet("xml")) {
+    if (opt.isSet("xml")) { // NON-NLS
       newPatientContext = getPatientContext(arg, OPT_NONE);
     } else if (opt.isSet("inbound")) { // NON-NLS
       newPatientContext = getPatientContext(arg, OPT_B64ZIP);
@@ -528,6 +530,7 @@ public class AcquireManager {
     if (tag instanceof TagSeq && node.hasChildNodes()) {
       NodeList nodeList = node.getChildNodes();
       Attributes attributes = new Attributes();
+      attributes.setString(Tag.SpecificCharacterSet, VR.CS, "ISO_IR 192"); // NON-NLS
       // FIXME handle only one sequence element
       Attributes[] list = new Attributes[1];
       for (int i = 0; i < nodeList.getLength(); i++) {
@@ -557,7 +560,7 @@ public class AcquireManager {
       } else {
         if (!isAcquireImagesAllPublished()
             && JOptionPane.showConfirmDialog(
-                    getExplorerViewComponent(),
+                    WinUtil.getValidComponent(getExplorerViewComponent()),
                     Messages.getString("AcquireManager.new_patient_load_warn"),
                     Messages.getString("AcquireManager.new_patient_load_title"),
                     JOptionPane.OK_CANCEL_OPTION,

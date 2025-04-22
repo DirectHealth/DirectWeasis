@@ -70,6 +70,7 @@ import java.net.http.HttpResponse.BodyHandlers;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Hashtable;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -97,6 +98,8 @@ import javax.swing.KeyStroke;
 import javax.swing.RootPaneContainer;
 import javax.swing.TransferHandler.DropLocation;
 import javax.swing.WindowConstants;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.ServiceReference;
 import org.osgi.framework.Version;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -108,6 +111,8 @@ import org.weasis.core.api.explorer.model.DataExplorerModel;
 import org.weasis.core.api.explorer.model.TreeModel;
 import org.weasis.core.api.explorer.model.TreeModelNode;
 import org.weasis.core.api.gui.Insertable;
+import org.weasis.core.api.gui.LicenseTabFactory;
+import org.weasis.core.api.gui.util.AbstractTabLicense;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.DynamicMenu;
 import org.weasis.core.api.gui.util.GuiExecutor;
@@ -129,11 +134,14 @@ import org.weasis.core.ui.docking.DockableTool;
 import org.weasis.core.ui.editor.MimeSystemAppViewer;
 import org.weasis.core.ui.editor.SeriesViewer;
 import org.weasis.core.ui.editor.SeriesViewerFactory;
+import org.weasis.core.ui.editor.SeriesViewerUI;
 import org.weasis.core.ui.editor.ViewerPluginBuilder;
 import org.weasis.core.ui.editor.image.ImageViewerPlugin;
 import org.weasis.core.ui.editor.image.SequenceHandler;
 import org.weasis.core.ui.editor.image.ViewCanvas;
 import org.weasis.core.ui.editor.image.ViewerPlugin;
+import org.weasis.core.ui.launcher.Launcher;
+import org.weasis.core.ui.launcher.Launcher.Type;
 import org.weasis.core.ui.pref.Monitor;
 import org.weasis.core.ui.pref.PreferenceDialog;
 import org.weasis.core.ui.util.ColorLayerUI;
@@ -520,17 +528,16 @@ public class WeasisWin {
             CLocation.external(
                 screenBound.x, screenBound.y, screenBound.width - 150, screenBound.height - 150));
         plugin.showDockable();
-        GuiExecutor.instance()
-            .execute(
-                () -> {
-                  if (dock.isVisible()) {
-                    CControl control = GuiUtils.getUICore().getDockingControl();
-                    CVetoFocusListener vetoFocus = GuiUtils.getUICore().getDockingVetoFocus();
-                    control.addVetoFocusListener(vetoFocus);
-                    dock.setExtendedMode(ExtendedMode.MAXIMIZED);
-                    control.removeVetoFocusListener(vetoFocus);
-                  }
-                });
+        GuiExecutor.execute(
+            () -> {
+              if (dock.isVisible()) {
+                CControl control = GuiUtils.getUICore().getDockingControl();
+                CVetoFocusListener vetoFocus = GuiUtils.getUICore().getDockingVetoFocus();
+                control.addVetoFocusListener(vetoFocus);
+                dock.setExtendedMode(ExtendedMode.MAXIMIZED);
+                control.removeVetoFocusListener(vetoFocus);
+              }
+            });
       } else {
         ConfiguredBackgroundPanel parent =
             WinUtil.getParentOfClass(oldWin, ConfiguredBackgroundPanel.class);
@@ -565,7 +572,8 @@ public class WeasisWin {
       GuiUtils.getUICore()
           .getToolbarContainer()
           .registerToolBar(GuiUtils.getUICore().getExplorerPluginToolbars());
-      List<DockableTool> oldTool = selectedPlugin == null ? null : selectedPlugin.getToolPanel();
+      List<DockableTool> oldTool =
+          selectedPlugin == null ? null : selectedPlugin.getSeriesViewerUI().tools;
       if (oldTool != null) {
         for (DockableTool p : oldTool) {
           p.closeDockable();
@@ -586,8 +594,8 @@ public class WeasisWin {
     selectedPlugin = plugin;
     menuSelectedPlugin.setText(selectedPlugin.getName());
 
-    GuiUtils.getUICore().updateTools(oldPlugin, selectedPlugin, false);
-    GuiUtils.getUICore().updateToolbars(oldPlugin, selectedPlugin, false);
+    SeriesViewerUI.updateTools(oldPlugin, selectedPlugin, false);
+    SeriesViewerUI.updateToolbars(oldPlugin, selectedPlugin, false);
 
     selectedPlugin.setSelected(true);
   }
@@ -623,19 +631,27 @@ public class WeasisWin {
         int y = localPersistence.getIntProperty("last.window.y", 0);
         int w = localPersistence.getIntProperty("last.window.width", Integer.MAX_VALUE);
         int h = localPersistence.getIntProperty("last.window.height", Integer.MAX_VALUE);
-        if (x < b.x) {
-          x = b.x;
+        Rectangle lastWin = new Rectangle(x, y, w, h);
+        Rectangle intersection = lastWin.intersection(b);
+        int localArea = lastWin.width * lastWin.height;
+        int intersectionArea = intersection.width * intersection.height;
+
+        // Only If window is more than 25% within the screen
+        if (intersectionArea >= 0.25 * localArea) {
+          if (x < b.x) {
+            x = b.x;
+          }
+          if (y < b.y) {
+            y = b.y;
+          }
+          if (w > b.width) {
+            w = b.width;
+          }
+          if (h > b.height) {
+            h = b.height;
+          }
+          b = new Rectangle(x, y, w, h);
         }
-        if (y < b.y) {
-          y = b.y;
-        }
-        if (w > b.width) {
-          w = b.width;
-        }
-        if (h > b.height) {
-          h = b.height;
-        }
-        b = new Rectangle(x, y, w, h);
       }
     } else {
       b = new Rectangle(new Point(0, 0), kit.getScreenSize());
@@ -701,14 +717,13 @@ public class WeasisWin {
             if (vNew.compareTo(vOld) > 0) {
               openBrowser(updateMenuItem, release.getUrl());
             } else {
-              GuiExecutor.instance()
-                  .execute(
-                      () ->
-                          JOptionPane.showMessageDialog(
-                              updateMenuItem,
-                              Messages.getString("current.release.latest"),
-                              Messages.getString("update"),
-                              JOptionPane.INFORMATION_MESSAGE));
+              GuiExecutor.execute(
+                  () ->
+                      JOptionPane.showMessageDialog(
+                          WinUtil.getValidComponent(updateMenuItem),
+                          Messages.getString("current.release.latest"),
+                          Messages.getString("update"),
+                          JOptionPane.INFORMATION_MESSAGE));
             }
           }
         });
@@ -727,6 +742,43 @@ public class WeasisWin {
         e -> openBrowser(reportMenuItem, "https://github.com/nroduit/Weasis/issues"));
     helpMenuItem.add(reportMenuItem);
     helpMenuItem.add(new JSeparator());
+    WProperties p = GuiUtils.getUICore().getSystemPreferences();
+    if (p.getBooleanProperty("weasis.plugins.license", false)) {
+      final JMenuItem licencesMenuItem = new JMenuItem(Messages.getString("LicencesDialog.title"));
+      licencesMenuItem.addActionListener(
+          e -> {
+            ColorLayerUI layer = ColorLayerUI.createTransparentLayerUI(rootPaneContainer);
+            final List<AbstractTabLicense> list = new ArrayList<>();
+            try {
+              BundleContext context = AppProperties.getBundleContext(this.getClass());
+              Hashtable<String, Object> properties = new Hashtable<>();
+              for (ServiceReference<LicenseTabFactory> service :
+                  context.getServiceReferences(LicenseTabFactory.class, null)) {
+                LicenseTabFactory factory = context.getService(service);
+                if (factory != null) {
+                  AbstractTabLicense page = factory.createInstance(properties);
+                  if (page != null) {
+                    list.add(page);
+                  }
+                }
+              }
+            } catch (Exception ex) {
+              LOGGER.error("Get License from OSGI service", ex);
+            }
+            if (list.isEmpty()) {
+              JOptionPane.showMessageDialog(
+                  WinUtil.getValidComponent(licencesMenuItem),
+                  Messages.getString("LicencesDialog.no.licence"),
+                  Messages.getString("LicencesDialog.title"),
+                  JOptionPane.INFORMATION_MESSAGE);
+            } else {
+              LicencesDialog dialog = new LicencesDialog(getFrame(), list);
+              ColorLayerUI.showCenterScreen(dialog, layer);
+            }
+          });
+      helpMenuItem.add(licencesMenuItem);
+      helpMenuItem.add(new JSeparator());
+    }
 
     final JMenuItem aboutMenuItem =
         new JMenuItem(
@@ -781,26 +833,25 @@ public class WeasisWin {
       Version vOld = AppProperties.getVersion(AppProperties.WEASIS_VERSION);
       Version vNew = AppProperties.getVersion(release.getVersion());
       if (vNew.compareTo(vOld) > 0) {
-        GuiExecutor.instance()
-            .execute(
-                () -> {
-                  JLabel label = new JLabel(Messages.getString("new.release.available"));
-                  label.setAlignmentX(JLabel.RIGHT_ALIGNMENT);
-                  JCheckBox dontAskMeAgain = new JCheckBox(Messages.getString("don.t.ask.again"));
-                  dontAskMeAgain.setAlignmentX(JLabel.RIGHT_ALIGNMENT);
-                  JPanel panel = GuiUtils.getVerticalBoxLayoutPanel(label, dontAskMeAgain);
-                  int confirm =
-                      JOptionPane.showConfirmDialog(
-                          parent, panel, Messages.getString("update"), JOptionPane.YES_NO_OPTION);
-                  if (confirm == 0) {
-                    openBrowser(parent, release.getUrl());
-                  }
-                  if (dontAskMeAgain.isSelected()) {
-                    GuiUtils.getUICore()
-                        .getSystemPreferences()
-                        .putBooleanProperty("weasis.show.update.next.release", false);
-                  }
-                });
+        GuiExecutor.execute(
+            () -> {
+              JLabel label = new JLabel(Messages.getString("new.release.available"));
+              label.setAlignmentX(JLabel.RIGHT_ALIGNMENT);
+              JCheckBox dontAskMeAgain = new JCheckBox(Messages.getString("don.t.ask.again"));
+              dontAskMeAgain.setAlignmentX(JLabel.RIGHT_ALIGNMENT);
+              JPanel panel = GuiUtils.getVerticalBoxLayoutPanel(label, dontAskMeAgain);
+              int confirm =
+                  JOptionPane.showConfirmDialog(
+                      parent, panel, Messages.getString("update"), JOptionPane.YES_NO_OPTION);
+              if (confirm == 0) {
+                openBrowser(parent, release.getUrl());
+              }
+              if (dontAskMeAgain.isSelected()) {
+                GuiUtils.getUICore()
+                    .getSystemPreferences()
+                    .putBooleanProperty("weasis.show.update.next.release", false);
+              }
+            });
       }
     }
   }
@@ -834,7 +885,8 @@ public class WeasisWin {
   }
 
   private void buildToolSubMenu(final JMenu toolMenu) {
-    List<DockableTool> tools = selectedPlugin == null ? null : selectedPlugin.getToolPanel();
+    List<DockableTool> tools =
+        selectedPlugin == null ? null : selectedPlugin.getSeriesViewerUI().tools;
     if (tools != null) {
       for (final DockableTool t : tools) {
         buildSubMenu(toolMenu, t);
@@ -896,6 +948,14 @@ public class WeasisWin {
     GuiUtils.getUICore()
         .getExplorerPlugins()
         .forEach(d -> fillMenu(exportMenu, d.getOpenExportDialogAction()));
+  }
+
+  private void buildLauncherSubMenu(final JMenu exportMenu) {
+    if (selectedPlugin instanceof ImageViewerPlugin<?> viewerPlugin) {
+      fillMenu(exportMenu, Launcher.getLauncherActions(viewerPlugin.getEventManager(), null));
+    } else {
+      fillMenu(exportMenu, Launcher.getLauncherActions(null, Type.OTHER));
+    }
   }
 
   private static void fillMenu(final JMenu menu, List<Action> actions) {
@@ -987,6 +1047,19 @@ public class WeasisWin {
     exportMenu.addPopupMenuListener();
 
     menuFile.add(exportMenu);
+
+    DynamicMenu launcherMenu =
+        new DynamicMenu(Messages.getString("launcher")) {
+
+          @Override
+          public void popupMenuWillBecomeVisible() {
+            buildLauncherSubMenu(this);
+          }
+        };
+    launcherMenu.addPopupMenuListener();
+
+    menuFile.add(launcherMenu);
+
     menuFile.add(new JSeparator());
     DynamicMenu printMenu =
         new DynamicMenu(Messages.getString("WeasisWin.print")) {
@@ -1100,7 +1173,7 @@ public class WeasisWin {
           for (final DataExplorerView dataExplorerView : explorers) {
             DataExplorerModel model = dataExplorerView.getDataExplorerModel();
             if (model != null) {
-              List<Codec> cList = model.getCodecPlugins();
+              List<Codec<MediaElement>> cList = model.getCodecPlugins();
               if (cList != null && cList.contains(entry.getKey())) {
                 exps.add(dataExplorerView);
               }
@@ -1124,7 +1197,7 @@ public class WeasisWin {
   private void importInExplorer(
       List<DataExplorerView> exps, final List<File> vals, DropLocation dropLocation) {
     if (exps.size() == 1) {
-      exps.get(0).importFiles(vals.toArray(new File[0]), true);
+      exps.getFirst().importFiles(vals.toArray(new File[0]), true);
     } else {
       Point p;
       if (dropLocation == null) {
@@ -1209,54 +1282,56 @@ public class WeasisWin {
       "Usage: weasis:ui (-q | -v)", // NON-NLS
       "  -q --quit        shutdown Weasis", // NON-NLS
       "  -v --visible     set window on top", // NON-NLS
+      "  -m --minimized   minimize the window", // NON-NLS
       "  -? --help        show help" // NON-NLS
     };
 
     Option opt = Options.compile(usage).parse(argv);
     if (opt.isSet("quit")) { // NON-NLS
       System.exit(0);
+    } else if (opt.isSet("minimized")) { // NON-NLS
+      GuiExecutor.execute(() -> getFrame().setState(Frame.ICONIFIED));
     } else if (opt.isSet("visible")) { // NON-NLS
-      GuiExecutor.instance()
-          .execute(
-              () -> {
-                Frame app = getFrame();
-                app.setVisible(true);
-                int state = app.getExtendedState();
-                state &= ~Frame.ICONIFIED;
-                app.setExtendedState(state);
-                app.setVisible(true);
-                /*
-                 * Sets the window to be "always on top" instead using toFront() method that does not always bring the
-                 * window to the front. It depends on the platform, Windows XP or Ubuntu has the facility to prevent
-                 * windows from stealing focus; instead it flashes the taskbar icon.
-                 */
-                if (app.isAlwaysOnTopSupported()) {
-                  app.setAlwaysOnTop(true);
+      GuiExecutor.execute(
+          () -> {
+            Frame app = getFrame();
+            app.setVisible(true);
+            int state = app.getExtendedState();
+            state &= ~Frame.ICONIFIED;
+            app.setExtendedState(state);
+            app.setVisible(true);
+            /*
+             * Sets the window to be "always on top" instead using toFront() method that does not always bring the
+             * window to the front. It depends on the platform, Windows XP or Ubuntu has the facility to prevent
+             * windows from stealing focus; instead it flashes the taskbar icon.
+             */
+            if (app.isAlwaysOnTopSupported()) {
+              app.setAlwaysOnTop(true);
 
-                  try {
-                    Thread.sleep(500L);
-                    Robot robot = new Robot();
-                    Point old = MouseInfo.getPointerInfo().getLocation();
-                    Point p = app.getLocationOnScreen();
-                    int x = p.x + app.getWidth() / 2;
-                    int y = p.y + app.getHeight() / 2;
-                    robot.mouseMove(x, y);
-                    // Simulate a mouse click
-                    robot.mousePress(InputEvent.BUTTON1_MASK);
-                    robot.mouseRelease(InputEvent.BUTTON1_MASK);
-                    robot.mouseMove(old.x, old.y);
-                  } catch (AWTException e1) {
-                    // DO nothing
-                  } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                  } finally {
-                    app.setAlwaysOnTop(false);
-                  }
+              try {
+                Thread.sleep(500L);
+                Robot robot = new Robot();
+                Point old = MouseInfo.getPointerInfo().getLocation();
+                Point p = app.getLocationOnScreen();
+                int x = p.x + app.getWidth() / 2;
+                int y = p.y + app.getHeight() / 2;
+                robot.mouseMove(x, y);
+                // Simulate a mouse click
+                robot.mousePress(InputEvent.BUTTON1_MASK);
+                robot.mouseRelease(InputEvent.BUTTON1_MASK);
+                robot.mouseMove(old.x, old.y);
+              } catch (AWTException e1) {
+                // DO nothing
+              } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+              } finally {
+                app.setAlwaysOnTop(false);
+              }
 
-                } else {
-                  app.toFront();
-                }
-              });
+            } else {
+              app.toFront();
+            }
+          });
 
     } else {
       opt.usage();

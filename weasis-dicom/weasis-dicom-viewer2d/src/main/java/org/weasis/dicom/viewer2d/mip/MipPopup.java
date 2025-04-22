@@ -21,6 +21,7 @@ import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
+import javax.swing.border.Border;
 import javax.swing.border.TitledBorder;
 import javax.swing.event.ChangeListener;
 import org.weasis.core.api.gui.Insertable;
@@ -36,7 +37,10 @@ import org.weasis.core.api.media.data.SeriesComparator;
 import org.weasis.core.api.util.FontItem;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.DicomImageElement;
+import org.weasis.dicom.codec.utils.DicomMediaUtils;
+import org.weasis.dicom.viewer2d.EventManager;
 import org.weasis.dicom.viewer2d.Messages;
+import org.weasis.dicom.viewer2d.dockable.ImageTool;
 
 public class MipPopup {
 
@@ -71,6 +75,7 @@ public class MipPopup {
   }
 
   public static class MipDialog extends JDialog {
+    private final Border spaceY = GuiUtils.getEmptyBorder(15, 3, 0, 3);
     final MipView view;
     JSliderW frameSlider;
     JSliderW thickness;
@@ -134,9 +139,11 @@ public class MipPopup {
             }
           });
 
-      ActionListener close = e -> dispose();
+      ActionListener close = _ -> dispose();
 
-      JPanel contentPane = GuiUtils.getVerticalBoxLayoutPanel(framePanel);
+      JPanel contentPane =
+          GuiUtils.getVerticalBoxLayoutPanel(
+              framePanel, ImageTool.getWindowLevelPanel(EventManager.getInstance(), spaceY, false));
       contentPane.setBorder(GuiUtils.getEmptyBorder(10, 15, 10, 15));
 
       SliderCineListener sequence =
@@ -178,7 +185,7 @@ public class MipPopup {
 
       JButton btnExitMipMode = new JButton(Messages.getString("MipPopup.rebuild_series"));
       btnExitMipMode.addActionListener(
-          e -> {
+          _ -> {
             MipView.buildMip(view, true);
             dispose();
           });
@@ -216,7 +223,11 @@ public class MipPopup {
 
         if (fimg != null && limg != null) {
           buf.append(" (");
-          buf.append(DecFormatter.allNumber(SeriesBuilder.getThickness(fimg, limg, max - min)));
+          double thickness = DicomMediaUtils.getThickness(fimg, limg);
+          if (thickness <= 0.0) {
+            thickness = (double) max - min;
+          }
+          buf.append(DecFormatter.allNumber(thickness));
           buf.append(" ");
           buf.append(fimg.getPixelSpacingUnit().getAbbreviation());
           buf.append(")");

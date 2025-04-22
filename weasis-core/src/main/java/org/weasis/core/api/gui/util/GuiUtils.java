@@ -38,6 +38,7 @@ import java.awt.event.KeyEvent;
 import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;
+import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.text.ParseException;
@@ -435,7 +436,15 @@ public class GuiUtils {
   }
 
   public static void formatCheckAction(JSpinner spin) {
+    formatCheckAction(spin, null);
+  }
+
+  public static void formatCheckAction(
+      JSpinner spin, JFormattedTextField.AbstractFormatter defaultFormat) {
     final JFormattedTextField ftf = ((JSpinner.DefaultEditor) spin.getEditor()).getTextField();
+    if (defaultFormat != null) {
+      ftf.setFormatterFactory(new DefaultFormatterFactory(defaultFormat));
+    }
     addCheckActionToJFormattedTextField(ftf);
   }
 
@@ -478,6 +487,7 @@ public class GuiUtils {
   public static JButton createHelpButton(String topic) {
     JButton jButtonHelp = new JButton();
     jButtonHelp.putClientProperty("JButton.buttonType", "help");
+    jButtonHelp.setToolTipText(Messages.getString("online.documentation"));
     jButtonHelp.addActionListener(createHelpActionListener(jButtonHelp, topic));
     return jButtonHelp;
   }
@@ -502,9 +512,19 @@ public class GuiUtils {
 
   public static void openInDefaultBrowser(Component parent, URL url) {
     if (url != null) {
+      try {
+        openInDefaultBrowser(parent, url.toURI());
+      } catch (URISyntaxException e) {
+        throw new RuntimeException(e);
+      }
+    }
+  }
+
+  public static void openInDefaultBrowser(Component parent, URI uri) {
+    if (uri != null) {
       if (SystemInfo.isLinux) {
         try {
-          String[] cmd = new String[] {"xdg-open", url.toString()}; // NON-NLS
+          String[] cmd = new String[] {"xdg-open", uri.toString()}; // NON-NLS
           Runtime.getRuntime().exec(cmd);
         } catch (IOException e) {
           LOGGER.error("Cannot open URL to the system browser", e);
@@ -513,15 +533,15 @@ public class GuiUtils {
         final Desktop desktop = Desktop.getDesktop();
         if (desktop.isSupported(Desktop.Action.BROWSE)) {
           try {
-            desktop.browse(url.toURI());
-          } catch (IOException | URISyntaxException e) {
+            desktop.browse(uri);
+          } catch (IOException e) {
             LOGGER.error("Cannot open URL to the desktop browser", e);
           }
         }
       } else {
         JOptionPane.showMessageDialog(
-            parent,
-            Messages.getString("JMVUtils.browser") + StringUtil.COLON_AND_SPACE + url,
+            WinUtil.getValidComponent(parent),
+            Messages.getString("JMVUtils.browser") + StringUtil.COLON_AND_SPACE + uri,
             Messages.getString("JMVUtils.error"),
             JOptionPane.ERROR_MESSAGE);
       }
@@ -541,7 +561,7 @@ public class GuiUtils {
         openCommand("/usr/bin/open", file); // NON-NLS
       } else {
         JOptionPane.showMessageDialog(
-            parent,
+            WinUtil.getValidComponent(parent),
             Messages.getString("JMVUtils.browser") + StringUtil.COLON_AND_SPACE + file.getPath(),
             Messages.getString("JMVUtils.error"),
             JOptionPane.ERROR_MESSAGE);
@@ -567,9 +587,18 @@ public class GuiUtils {
         pane.setToolTipText(null);
       } else if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
         Component parent = e.getSource() instanceof Component c ? c : null;
-        openInDefaultBrowser(parent, e.getURL());
+        openInDefaultBrowser(WinUtil.getValidComponent(parent), e.getURL());
       }
     };
+  }
+
+  public static JTextPane getPanelWithHyperlink(String html) {
+    JTextPane jTextPane1 = new JTextPane();
+    jTextPane1.setContentType("text/html");
+    jTextPane1.setEditable(false);
+    jTextPane1.addHyperlinkListener(buildHyperlinkListener());
+    jTextPane1.setText(html);
+    return jTextPane1;
   }
 
   public static void addItemToMenu(JMenu menu, JMenuItem item) {
@@ -618,5 +647,25 @@ public class GuiUtils {
       g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, oldRenderingHints[1]);
       g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, oldRenderingHints[2]);
     }
+  }
+
+  public static int insetWidth(JPanel panel) {
+    if (panel != null) {
+      Insets insets = panel.getInsets();
+      if (insets != null) {
+        return insets.left + insets.right;
+      }
+    }
+    return 0;
+  }
+
+  public static int insetHeight(JPanel panel) {
+    if (panel != null) {
+      Insets insets = panel.getInsets();
+      if (insets != null) {
+        return insets.top + insets.bottom;
+      }
+    }
+    return 0;
   }
 }

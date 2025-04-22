@@ -18,7 +18,6 @@ import java.awt.print.PrinterJob;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import javax.print.attribute.HashPrintRequestAttributeSet;
@@ -30,11 +29,11 @@ import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.FrameworkUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.gui.InsertableUtil;
+import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.image.GridBagLayoutModel;
@@ -45,15 +44,16 @@ import org.weasis.core.api.service.WProperties;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.ActionIcon;
 import org.weasis.core.api.util.ResourceUtil.FileIcon;
-import org.weasis.core.ui.docking.DockableTool;
 import org.weasis.core.ui.docking.PluginTool;
 import org.weasis.core.ui.editor.SeriesViewerListener;
+import org.weasis.core.ui.editor.SeriesViewerUI;
 import org.weasis.core.ui.editor.image.DefaultView2d;
 import org.weasis.core.ui.editor.image.ImageViewerEventManager;
 import org.weasis.core.ui.editor.image.ImageViewerPlugin;
 import org.weasis.core.ui.editor.image.SynchView;
 import org.weasis.core.ui.editor.image.ViewCanvas;
 import org.weasis.core.ui.editor.image.dockable.MeasureTool;
+import org.weasis.core.ui.pref.LauncherToolBar;
 import org.weasis.core.ui.util.ForcedAcceptPrintService;
 import org.weasis.core.ui.util.Toolbar;
 import org.weasis.dicom.codec.DicomImageElement;
@@ -61,6 +61,7 @@ import org.weasis.dicom.codec.DicomSeries;
 import org.weasis.dicom.codec.DicomSpecialElement;
 import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.TagD.Level;
+import org.weasis.dicom.explorer.DicomExportAction;
 import org.weasis.dicom.explorer.DicomFieldsView;
 import org.weasis.dicom.explorer.DicomModel;
 import org.weasis.dicom.explorer.DicomViewerPlugin;
@@ -83,15 +84,7 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
 
   public static final List<SynchView> SYNCH_LIST = List.of(SynchView.NONE);
 
-  // Static tools shared by all the View2dContainer instances, tools are registered when a container
-  // is selected
-  // Do not initialize tools in a static block (order initialization issue with eventManager), use
-  // instead a lazy
-  // initialization with a method.
-  protected static final List<Toolbar> TOOLBARS = Collections.synchronizedList(new ArrayList<>(1));
-  protected static final List<DockableTool> TOOLS =
-      Collections.synchronizedList(new ArrayList<>(1));
-  private static volatile boolean initComponents = false;
+  public static final SeriesViewerUI UI = new SeriesViewerUI(WaveContainer.class);
   static final ImageViewerEventManager<DicomImageElement> ECG_EVENT_MANAGER =
       new ImageViewerEventManager<>() {
 
@@ -126,6 +119,11 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
         public void keyReleased(KeyEvent e) {
           // Do nothing
         }
+
+        @Override
+        public String resolvePlaceholders(String template) {
+          return DicomExportAction.resolvePlaceholders(template, this);
+        }
       };
   protected WaveView ecgView;
 
@@ -142,10 +140,15 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
         ResourceUtil.getIcon(FileIcon.ECG),
         null);
     setSynchView(SynchView.NONE);
-    if (!initComponents) {
-      initComponents = true;
+
+    if (!UI.init.getAndSet(true)) {
+      List<Toolbar> toolBars = UI.toolBars;
       // Add standard toolbars
-      final BundleContext context = FrameworkUtil.getBundle(this.getClass()).getBundleContext();
+      final BundleContext context = AppProperties.getBundleContext(this.getClass());
+      if (context == null) {
+        LOGGER.error("Cannot get BundleContext");
+        return;
+      }
       String bundleName = context.getBundle().getSymbolicName();
       String componentName = InsertableUtil.getCName(this.getClass());
       String key = "enable"; // NON-NLS
@@ -162,7 +165,7 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
             GuiUtils.getUICore().getExplorerPluginToolbars().stream()
                 .filter(ImportToolBar.class::isInstance)
                 .findFirst();
-        b.ifPresent(TOOLBARS::add);
+        b.ifPresent(toolBars::add);
       }
       if (InsertableUtil.getBooleanProperty(
           preferences,
@@ -175,9 +178,8 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
             GuiUtils.getUICore().getExplorerPluginToolbars().stream()
                 .filter(ExportToolBar.class::isInstance)
                 .findFirst();
-        b.ifPresent(TOOLBARS::add);
+        b.ifPresent(toolBars::add);
       }
-
       if (InsertableUtil.getBooleanProperty(
           preferences,
           bundleName,
@@ -185,7 +187,16 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
           InsertableUtil.getCName(WaveformToolBar.class),
           key,
           true)) {
-        TOOLBARS.add(new WaveformToolBar(20));
+        toolBars.add(new WaveformToolBar(20));
+      }
+      if (InsertableUtil.getBooleanProperty(
+          preferences,
+          bundleName,
+          componentName,
+          InsertableUtil.getCName(LauncherToolBar.class),
+          key,
+          true)) {
+        toolBars.add(new LauncherToolBar(getEventManager(), 130));
       }
 
       PluginTool tool;
@@ -198,7 +209,7 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
           true)) {
         tool = new MeasureAnnotationTool();
         eventManager.addSeriesViewerListener((SeriesViewerListener) tool);
-        TOOLS.add(tool);
+        UI.tools.add(tool);
       }
     }
   }
@@ -228,8 +239,8 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
   }
 
   @Override
-  public List<DockableTool> getToolPanel() {
-    return TOOLS;
+  public SeriesViewerUI getSeriesViewerUI() {
+    return UI;
   }
 
   @Override
@@ -237,8 +248,8 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
     super.setSelected(true);
     if (selected) {
       if (ecgView != null
-          && !TOOLS.isEmpty()
-          && TOOLS.get(0) instanceof MeasureAnnotationTool tool) {
+          && !UI.tools.isEmpty()
+          && UI.tools.getFirst() instanceof MeasureAnnotationTool tool) {
         ecgView.setAnnotationTool(tool);
         tool.setSeries(ecgView.getSeries());
         ecgView.updateMarkersTable();
@@ -251,13 +262,12 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
     super.close();
     WaveFactory.closeSeriesViewer(this);
 
-    GuiExecutor.instance()
-        .execute(
-            () -> {
-              if (ecgView != null) {
-                ecgView.dispose();
-              }
-            });
+    GuiExecutor.execute(
+        () -> {
+          if (ecgView != null) {
+            ecgView.dispose();
+          }
+        });
   }
 
   @Override
@@ -343,11 +353,6 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
   @Override
   public GridBagLayoutModel getDefaultLayoutModel() {
     return DEFAULT_VIEW;
-  }
-
-  @Override
-  public synchronized List<Toolbar> getToolBars() {
-    return TOOLBARS;
   }
 
   @Override
@@ -448,7 +453,7 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
             // so they'll know there may be a problem.
             int response =
                 JOptionPane.showConfirmDialog(
-                    null,
+                    GuiUtils.getUICore().getApplicationWindow(),
                     org.weasis.core.Messages.getString("ImagePrint.issue_desc"),
                     org.weasis.core.Messages.getString("ImagePrint.status"),
                     JOptionPane.YES_NO_OPTION,

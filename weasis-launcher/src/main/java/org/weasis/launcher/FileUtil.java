@@ -9,6 +9,8 @@
  */
 package org.weasis.launcher;
 
+import static org.weasis.pref.ConfigData.P_HTTP_AUTHORIZATION;
+
 import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -18,8 +20,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.lang.System.Logger;
-import java.lang.System.Logger.Level;
 import java.net.URL;
 import java.net.URLConnection;
 import java.nio.file.Files;
@@ -32,10 +32,11 @@ import java.util.zip.ZipInputStream;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import org.apache.felix.framework.util.Util;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class FileUtil {
-
-  private static final Logger LOGGER = System.getLogger(FileUtil.class.getName());
+  private static final Logger LOGGER = LoggerFactory.getLogger(FileUtil.class);
 
   public static final int FILE_BUFFER = 4096;
 
@@ -46,7 +47,7 @@ public class FileUtil {
       try {
         object.close();
       } catch (Exception e) {
-        LOGGER.log(Level.WARNING, "Cannot close AutoCloseable", e);
+        LOGGER.warn("Cannot close AutoCloseable", e);
       }
     }
   }
@@ -56,7 +57,7 @@ public class FileUtil {
       try {
         xmler.close();
       } catch (XMLStreamException e) {
-        LOGGER.log(Level.WARNING, "Cannot close XMLStreamReader", e);
+        LOGGER.warn("Cannot close XMLStreamReader", e);
       }
     }
   }
@@ -105,7 +106,7 @@ public class FileUtil {
     try {
       Files.delete(fileOrDirectory.toPath());
     } catch (Exception e) {
-      LOGGER.log(Level.ERROR, "Cannot delete", e);
+      LOGGER.error("Cannot delete", e);
       return false;
     }
     return true;
@@ -139,7 +140,7 @@ public class FileUtil {
       }
       out.flush();
     } catch (IOException e) {
-      LOGGER.log(Level.ERROR, "Error when writing stream", e);
+      LOGGER.error("Error when writing stream", e);
     } finally {
       FileUtil.safeClose(inputStream);
       FileUtil.safeClose(out);
@@ -164,8 +165,7 @@ public class FileUtil {
         props.load(fis);
         return true;
       } catch (Exception e) {
-        LOGGER.log(
-            Level.ERROR, () -> String.format("Loading %s", propsFile.getPath()), e); // NON-NLS
+        LOGGER.error("Loading {%s}", propsFile.getPath(), e); // NON-NLS
       }
     }
     return false;
@@ -176,7 +176,7 @@ public class FileUtil {
       try (FileOutputStream fout = new FileOutputStream(propsFile)) {
         props.store(fout, comments);
       } catch (IOException e) {
-        LOGGER.log(Level.ERROR, "Error when writing properties", e);
+        LOGGER.error("Error when writing properties", e);
       }
     }
   }
@@ -209,22 +209,26 @@ public class FileUtil {
 
   public static URLConnection getAdaptedConnection(URL url, boolean useCaches) throws IOException {
     URLConnection connection = url.openConnection();
-    // Prevent caching of Java WebStart.
     connection.setUseCaches(useCaches);
-    // Support for http proxy authentication.
-    String p = url.getProtocol();
+    // Support for http proxy authentication. To remove in version 5
+    String protocol = url.getProtocol();
     String pauth = System.getProperty("http.proxyAuth", null);
-    if (Utils.hasText(pauth) && ("http".equals(p) || "https".equals(p))) { // NON-NLS
+    if (hasProxyProperty(pauth, protocol)) {
       String base64 = Util.base64Encode(pauth);
       connection.setRequestProperty("Proxy-Authorization", "Basic " + base64); // NON-NLS
     }
 
-    String auth = System.getProperty("http.authorization", null);
-    if (Utils.hasText(auth) && ("http".equals(p) || "https".equals(p))) { // NON-NLS
+    String auth = System.getProperty(P_HTTP_AUTHORIZATION, null);
+    if (hasProxyProperty(auth, protocol)) {
       connection.setRequestProperty("Authorization", auth);
     }
 
     return connection;
+  }
+
+  private static boolean hasProxyProperty(String propertyValue, String protocol) {
+    return Utils.hasText(propertyValue)
+        && ("http".equals(protocol) || "https".equals(protocol)); // NON-NLS
   }
 
   private static void copyZip(InputStream in, File file) throws IOException {

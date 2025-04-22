@@ -20,8 +20,6 @@ import javax.swing.JComponent;
 import javax.swing.JPanel;
 import javax.swing.tree.DefaultMutableTreeNode;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.FrameworkUtil;
-import org.osgi.framework.InvalidSyntaxException;
 import org.osgi.framework.ServiceReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +28,7 @@ import org.weasis.core.api.gui.InsertableUtil;
 import org.weasis.core.api.gui.PreferencesPageFactory;
 import org.weasis.core.api.gui.util.AbstractItemDialogPage;
 import org.weasis.core.api.gui.util.AbstractWizardDialog;
+import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.util.StringUtil;
 
@@ -81,12 +80,14 @@ public class PreferenceDialog extends AbstractWizardDialog {
     ArrayList<AbstractItemDialogPage> list = new ArrayList<>();
     GeneralSetting generalSetting = new GeneralSetting(this);
     list.add(generalSetting);
-    ViewerPrefView viewerSetting = new ViewerPrefView(this);
+    ViewerPrefView viewerSetting = new ViewerPrefView();
     list.add(viewerSetting);
-    DicomPrefView dicomPrefView = new DicomPrefView(this);
+    DicomPrefView dicomPrefView = new DicomPrefView();
     list.add(dicomPrefView);
+    DrawPrefView drawPrefView = new DrawPrefView(this);
+    list.add(drawPrefView);
 
-    BundleContext context = FrameworkUtil.getBundle(this.getClass()).getBundleContext();
+    BundleContext context = AppProperties.getBundleContext(this.getClass());
     try {
       for (ServiceReference<PreferencesPageFactory> service :
           context.getServiceReferences(PreferencesPageFactory.class, null)) {
@@ -104,6 +105,8 @@ public class PreferenceDialog extends AbstractWizardDialog {
                   mainPage = viewerSetting;
                 } else if (position > 600 && position < 700) {
                   mainPage = dicomPrefView;
+                } else if (position > 700 && position < 800) {
+                  mainPage = drawPrefView;
                 } else {
                   mainPage = generalSetting;
                 }
@@ -120,7 +123,7 @@ public class PreferenceDialog extends AbstractWizardDialog {
           }
         }
       }
-    } catch (InvalidSyntaxException e) {
+    } catch (Exception e) {
       LOGGER.error("Get Preference pages from service", e);
     }
 

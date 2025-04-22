@@ -64,28 +64,26 @@ public class FileModel extends AbstractFileModel {
     final List<String> fargs = opt.getList("file"); // NON-NLS
     final List<String> uargs = opt.getList("url"); // NON-NLS
 
-    if (opt.isSet("help") || (fargs.isEmpty() && uargs.isEmpty())) {
+    if (opt.isSet("help") || (fargs.isEmpty() && uargs.isEmpty())) { // NON-NLS
       opt.usage();
       return;
     }
-    GuiExecutor.instance()
-        .execute(
-            () -> {
-              AbstractFileModel dataModel = ViewerPluginBuilder.DefaultDataModel;
-              dataModel.firePropertyChange(
-                  new ObservableEvent(
-                      ObservableEvent.BasicAction.SELECT, dataModel, null, dataModel));
-              if (opt.isSet("file")) { // NON-NLS
-                fargs.stream()
-                    .map(File::new)
-                    .filter(File::isFile)
-                    .forEach(f -> ViewerPluginBuilder.openSequenceInDefaultPlugin(f, true, true));
-              }
-              if (opt.isSet("url")) { // NON-NLS
-                uargs.stream()
-                    .map(this::getFile)
-                    .forEach(f -> ViewerPluginBuilder.openSequenceInDefaultPlugin(f, true, true));
-              }
-            });
+    GuiExecutor.execute(
+        () -> {
+          AbstractFileModel dataModel = ViewerPluginBuilder.DefaultDataModel;
+          dataModel.firePropertyChange(
+              new ObservableEvent(ObservableEvent.BasicAction.SELECT, dataModel, null, dataModel));
+          if (opt.isSet("file")) { // NON-NLS
+            fargs.stream()
+                .map(File::new)
+                .filter(File::isFile)
+                .forEach(f -> ViewerPluginBuilder.openSequenceInDefaultPlugin(f, true, true));
+          }
+          if (opt.isSet("url")) { // NON-NLS
+            uargs.stream()
+                .map(this::getFile)
+                .forEach(f -> ViewerPluginBuilder.openSequenceInDefaultPlugin(f, true, true));
+          }
+        });
   }
 }

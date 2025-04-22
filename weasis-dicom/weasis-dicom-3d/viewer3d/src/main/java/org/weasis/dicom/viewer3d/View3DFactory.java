@@ -35,6 +35,7 @@ import org.weasis.core.api.explorer.DataExplorerView;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.ComboItemListener;
 import org.weasis.core.api.gui.util.GuiUtils;
+import org.weasis.core.api.gui.util.WinUtil;
 import org.weasis.core.api.image.GridBagLayoutModel;
 import org.weasis.core.api.image.LayoutConstraints;
 import org.weasis.core.api.media.data.MediaSeries;
@@ -63,6 +64,8 @@ public class View3DFactory implements SeriesViewerFactory {
   public static final String P_DEFAULT_LAYOUT = "volume.default.layout";
   public static final String P_OPENGL_ENABLE = "opengl.enable";
   public static final String P_OPENGL_PREV_INIT = "opengl.prev.init";
+
+  private static final String JOGL_THREAD_CONFIG = "jogl.1thread";
 
   private static OpenGLInfo openGLInfo;
 
@@ -270,7 +273,10 @@ public class View3DFactory implements SeriesViewerFactory {
     JPanel panel =
         GuiUtils.getVerticalBoxLayoutPanel(GuiUtils.getScaleLength(7), new JLabel(msg), prefButton);
     JOptionPane.showMessageDialog(
-        parent, panel, Messages.getString("opengl.error"), JOptionPane.ERROR_MESSAGE);
+        WinUtil.getValidComponent(parent),
+        panel,
+        Messages.getString("opengl.error"),
+        JOptionPane.ERROR_MESSAGE);
   }
 
   // ================================================================================
@@ -280,7 +286,12 @@ public class View3DFactory implements SeriesViewerFactory {
   @Activate
   protected void activate(ComponentContext context) throws Exception {
     LOGGER.info("3D Viewer is activated");
-    System.setProperty("jogl.1thread", "worker"); // TODO set to auto
+    String joglThreadConfig =
+        GuiUtils.getUICore().getSystemPreferences().getProperty(JOGL_THREAD_CONFIG);
+    if (StringUtil.hasText(joglThreadConfig)) {
+      System.setProperty(JOGL_THREAD_CONFIG, joglThreadConfig);
+      LOGGER.debug("Custom " + JOGL_THREAD_CONFIG + " value: {}", joglThreadConfig);
+    }
 
     WProperties prefs = GuiUtils.getUICore().getLocalPersistence();
     if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty("weasis.force.3d", false)) {

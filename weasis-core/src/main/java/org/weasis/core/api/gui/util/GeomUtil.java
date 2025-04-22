@@ -11,10 +11,13 @@ package org.weasis.core.api.gui.util;
 
 import java.awt.Shape;
 import java.awt.geom.AffineTransform;
+import java.awt.geom.FlatteningPathIterator;
 import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
+import java.awt.geom.PathIterator;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
+import java.util.Arrays;
 import java.util.List;
 import org.weasis.core.util.MathUtil;
 
@@ -27,7 +30,7 @@ public final class GeomUtil {
   }
 
   /**
-   * @return angle between BA & BC line segment in Degree <br>
+   * @return angle between BA & BC line segment in Radiant<br>
    *     0 is returned if any argument is invalid
    */
   public static double getAngleRad(Point2D ptA, Point2D ptB, Point2D ptC) {
@@ -38,7 +41,7 @@ public final class GeomUtil {
   }
 
   /**
-   * @return angle between BA & BC line segment in Radiant<br>
+   * @return angle between BA & BC line segment in Degree<br>
    *     0 is returned if any argument is invalid
    */
   public static double getAngleDeg(Point2D ptA, Point2D ptB, Point2D ptC) {
@@ -71,8 +74,25 @@ public final class GeomUtil {
   }
 
   /**
+   * Normalizes angle in the range of [-π, +π]
+   *
    * @param angle in Radiant
-   * @return angle in the range of [ -pi ; pi ]
+   * @return the normalized angle in radiant in the range of [-π, +π]
+   */
+  public static double normalizeAngle(double angle) {
+    angle = (angle + Math.PI) % (2 * Math.PI) - Math.PI;
+    // Normalize angle to [-π, +π]
+    if (angle > Math.PI) {
+      angle -= 2 * Math.PI;
+    } else if (angle < -Math.PI) {
+      angle += 2 * Math.PI;
+    }
+    return angle;
+  }
+
+  /**
+   * @param angle in Radiant
+   * @return angle in the range of [-π, +π]
    */
   public static double getSmallestRotationAngleRad(double angle) {
     double a = angle % (2 * Math.PI);
@@ -84,7 +104,7 @@ public final class GeomUtil {
 
   /**
    * @param angle in Degree
-   * @return angle in the range of [ -180 ; 180 ]
+   * @return angle in the range of [ -180, 180 ]
    */
   public static double getSmallestRotationAngleDeg(double angle) {
     double a = angle % 360.0;
@@ -96,7 +116,7 @@ public final class GeomUtil {
 
   /**
    * @param angle in Radiant
-   * @return angle in the range of [ -pi ; pi ]
+   * @return angle in the range of [-π, +π]
    */
   public static double getSmallestAngleRad(double angle) {
     double a = angle % Math.PI;
@@ -139,7 +159,7 @@ public final class GeomUtil {
    */
   public static Point2D getColinearPointWithLength(Point2D ptA, Point2D ptB, double newLength) {
     if (ptA != null && ptB != null) {
-      return getColinearPointWithRatio(ptA, ptB, newLength / ptA.distance(ptB));
+      return getCollinearPointWithRatio(ptA, ptB, newLength / ptA.distance(ptB));
     }
     return null;
   }
@@ -154,7 +174,7 @@ public final class GeomUtil {
    *     If >0 && <AB , ptC point will be interior of AB<br>
    * @return New point ptC coordinates or null if any argument is invalid
    */
-  public static Point2D.Double getColinearPointWithRatio(Point2D ptA, Point2D ptB, double k) {
+  public static Point2D.Double getCollinearPointWithRatio(Point2D ptA, Point2D ptB, double k) {
     if (ptA != null && ptB != null) {
       return new Point2D.Double(
           ptB.getX() * k + ptA.getX() * (1 - k), ptB.getY() * k + ptA.getY() * (1 - k));
@@ -272,6 +292,109 @@ public final class GeomUtil {
     return p;
   }
 
+  public static Line2D cropLine(Line2D line, Rectangle2D rect) {
+    if (line == null || rect == null || rect.isEmpty()) {
+      return line;
+    }
+
+    Point2D p1 =
+        lineIntersection(
+            line,
+            new Line2D.Double(rect.getMinX(), rect.getMinY(), rect.getMaxX(), rect.getMinY()));
+    Point2D p2 =
+        lineIntersection(
+            line,
+            new Line2D.Double(rect.getMinX(), rect.getMaxY(), rect.getMaxX(), rect.getMaxY()));
+    Point2D p3 =
+        lineIntersection(
+            line,
+            new Line2D.Double(rect.getMinX(), rect.getMinY(), rect.getMinX(), rect.getMaxY()));
+    Point2D p4 =
+        lineIntersection(
+            line,
+            new Line2D.Double(rect.getMaxX(), rect.getMinY(), rect.getMaxX(), rect.getMaxY()));
+
+    Point2D pl1 = null;
+    Point2D pl2 = null;
+
+    for (Point2D p : Arrays.asList(p1, p2, p3, p4)) {
+      if (p != null) {
+        if (pl1 == null) {
+          pl1 = p;
+        } else {
+          pl2 = p;
+          break;
+        }
+      }
+    }
+
+    return getLine2D(line, pl1, pl2, rect);
+  }
+
+  /**
+   * Crops the given line (Line2D) to the boundaries of the provided Path2D.
+   *
+   * @param line The line to crop.
+   * @param path The boundary Path2D to which the line should be cropped.
+   * @return A new cropped Line2D, or the original line if no intersection occurs.
+   */
+  public static Line2D cropLine(Line2D line, Path2D path) {
+    if (line == null || path == null) {
+      return line;
+    }
+
+    Point2D pl1 = null;
+    Point2D pl2 = null;
+
+    PathIterator iterator = new FlatteningPathIterator(path.getPathIterator(null), 2);
+    double[] coords = new double[6];
+    Point2D.Double lastPoint = null;
+
+    while (!iterator.isDone()) {
+      int segmentType = iterator.currentSegment(coords);
+      if (segmentType == PathIterator.SEG_MOVETO) {
+        lastPoint = new Point2D.Double(coords[0], coords[1]);
+      } else if (segmentType == PathIterator.SEG_LINETO) {
+        Point2D.Double currentPoint = new Point2D.Double(coords[0], coords[1]);
+        Point2D intersection = lineIntersection(line, new Line2D.Double(lastPoint, currentPoint));
+        if (intersection != null) {
+          if (pl1 == null) {
+            pl1 = intersection;
+          } else {
+            pl2 = intersection;
+            break;
+          }
+        }
+        lastPoint = currentPoint;
+      }
+      iterator.next();
+    }
+
+    return getLine2D(line, pl1, pl2, path);
+  }
+
+  private static Line2D getLine2D(Line2D line, Point2D pl1, Point2D pl2, Shape path) {
+    if (pl1 != null && pl2 != null) {
+      return keepLineOrientation(line, pl1, pl2);
+    } else if (pl1 != null) {
+      if (path.contains(line.getP1())) {
+        return keepLineOrientation(line, pl1, line.getP1());
+      } else if (path.contains(line.getP2())) {
+        return keepLineOrientation(line, pl1, line.getP2());
+      }
+    }
+
+    return line;
+  }
+
+  private static Line2D keepLineOrientation(Line2D line, Point2D pl1, Point2D pl2) {
+    if (line.getP1().distance(pl1) < line.getP1().distance(pl2)) {
+      return new Line2D.Double(pl1, pl2);
+    } else {
+      return new Line2D.Double(pl2, pl1);
+    }
+  }
+
   private static Point2D lineIntersection(Line2D line1, Line2D line2) {
     if (line1.intersectsLine(line2)) {
       return GeomUtil.getIntersectPoint(line1, line2);
@@ -387,9 +510,10 @@ public final class GeomUtil {
 
     return switch (ptList.size()) {
       case 3 -> getCircleCenter(ptList.get(0), ptList.get(1), ptList.get(2));
-      case 2 -> new Point2D.Double(
-          (ptList.get(0).getX() + ptList.get(1).getX()) / 2.0,
-          (ptList.get(0).getY() + ptList.get(1).getY()) / 2.0);
+      case 2 ->
+          new Point2D.Double(
+              (ptList.get(0).getX() + ptList.get(1).getX()) / 2.0,
+              (ptList.get(0).getY() + ptList.get(1).getY()) / 2.0);
       default -> null;
     };
   }

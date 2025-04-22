@@ -20,6 +20,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.DoubleStream;
@@ -116,7 +117,6 @@ public class TagW {
   public static final TagW SeriesOpen =
       new TagW("SeriesOpen", Messages.getString("TagElement.open"), TagType.BOOLEAN);
   public static final TagW SeriesFocused = new TagW("SeriesFocused", TagType.BOOLEAN);
-  public static final TagW StudyDicomRT = new TagW("RadiotherapyStudy", TagType.BOOLEAN);
   public static final TagW ImageWidth =
       new TagW("ImageWidth", Messages.getString("TagElement.img_w"), TagType.INTEGER);
   public static final TagW ImageHeight =
@@ -177,6 +177,11 @@ public class TagW {
 
   public static final TagW MonoChrome = new TagW("MonoChrome", TagType.BOOLEAN);
 
+  public static TagW AnatomicRegion = new TagW("AnatomicRegion", TagType.OBJECT);
+
+  // Date and Time
+  public static final TagW Timezone = new TagW("Timezone", TagType.OBJECT); // NON-NLS
+
   /** Basic EXIF tags: https://www.media.mit.edu/pia/Research/deepview/exif.html */
   public static final TagW ExifImageDescription = new TagW("ExifImageDescription", TagType.STRING);
 
@@ -198,7 +203,6 @@ public class TagW {
     addTag(ImageOrientationPlane);
     addTag(ImageWidth);
     addTag(SeriesFocused);
-    addTag(StudyDicomRT);
     addTag(SeriesLoading);
     addTag(SeriesOpen);
     addTag(SeriesSelected);
@@ -221,6 +225,7 @@ public class TagW {
     addTag(PRLUTsExplanation);
     addTag(PrDicomObject);
     addTag(MonoChrome);
+    addTag(AnatomicRegion);
   }
 
   protected final int id;
@@ -440,6 +445,21 @@ public class TagW {
     this.anonymizationType = anonymizationType;
   }
 
+  public String addGMTOffset(String format, TagReadable readable) {
+    if (TagType.DICOM_TIME.equals(type)) {
+      TimeZone timeZone = TagW.getTagValue(readable, TagW.Timezone, TimeZone.class);
+      if (timeZone != null) {
+        String offset = timeZone.getDisplayName(true, TimeZone.SHORT);
+        if (StringUtil.hasText(format)) {
+          return format + " " + offset;
+        } else {
+          return "$V " + offset; // NON-NLS
+        }
+      }
+    }
+    return format;
+  }
+
   public String getFormattedTagValue(Object value, String format) {
     return getFormattedText(value, format);
   }
@@ -488,7 +508,7 @@ public class TagW {
       // If the value ($V) is followed by ':' that means a number formatter is used
       if (suffix && format.charAt(index + fmLength) == ':') {
         fmLength++;
-        if (format.charAt(index + fmLength) == 'f' && decimal) {
+        if (format.charAt(index + fmLength) == 'f' && decimal) { // NON-NLS
           fmLength++;
           String pattern = getPattern(index + fmLength, format);
           if (pattern != null) {

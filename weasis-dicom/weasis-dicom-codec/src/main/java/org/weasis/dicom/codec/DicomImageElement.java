@@ -41,16 +41,15 @@ import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.image.OpManager;
 import org.weasis.core.api.image.SimpleOpManager;
 import org.weasis.core.api.image.WindowOp;
-import org.weasis.core.api.image.ZoomOp;
 import org.weasis.core.api.image.util.Unit;
 import org.weasis.core.api.media.data.ImageElement;
 import org.weasis.core.api.media.data.TagW;
 import org.weasis.core.util.MathUtil;
+import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.display.OverlayOp;
 import org.weasis.dicom.codec.display.ShutterOp;
 import org.weasis.dicom.codec.display.WindowAndPresetsOp;
 import org.weasis.dicom.codec.geometry.GeometryOfSlice;
-import org.weasis.dicom.codec.utils.DicomMediaUtils;
 import org.weasis.dicom.codec.utils.Ultrasound;
 import org.weasis.dicom.param.AttributeEditorContext;
 import org.weasis.opencv.data.ImageCV;
@@ -139,15 +138,18 @@ public class DicomImageElement extends ImageElement implements DicomElement {
       pixelValueUnit = TagD.getTagValue(this, Tag.Units, String.class);
     }
     if (pixelValueUnit == null && "CT".equals(modality)) {
-      pixelValueUnit = "HU";
+      String sopClass = TagD.getTagValue(mediaIO, Tag.SOPClassUID, String.class);
+      if (StringUtil.hasText(sopClass) && !sopClass.startsWith(UID.SecondaryCaptureImageStorage)) {
+        pixelValueUnit = "HU";
+      }
     } else if (pixelSpacingUnit == Unit.PIXEL && "US".equals(modality)) {
       Attributes spatialCalibration =
           Ultrasound.getUniqueSpatialRegion(getMediaReader().getDicomObject());
       if (spatialCalibration != null) {
         Double calibX =
-            DicomMediaUtils.getDoubleFromDicomElement(spatialCalibration, Tag.PhysicalDeltaX, null);
+            DicomUtils.getDoubleFromDicomElement(spatialCalibration, Tag.PhysicalDeltaX, null);
         Double calibY =
-            DicomMediaUtils.getDoubleFromDicomElement(spatialCalibration, Tag.PhysicalDeltaY, null);
+            DicomUtils.getDoubleFromDicomElement(spatialCalibration, Tag.PhysicalDeltaY, null);
         if (calibX != null && calibY != null) {
           calibX = Math.abs(calibX);
           calibY = Math.abs(calibY);
@@ -179,8 +181,7 @@ public class DicomImageElement extends ImageElement implements DicomElement {
   private double[] getMagnifiedPixelSpacing(boolean useMagnificationFactor) {
     double[] val = TagD.getTagValue(mediaIO, Tag.ImagerPixelSpacing, double[].class);
     // Follows D. Clunie recommendations
-    pixelSizeCalibrationDescription =
-        val == null ? null : Messages.getString("DicomImageElement.detector");
+    pixelSizeCalibrationDescription = val == null ? null : "At Detector"; // NON-NLS
     if (useMagnificationFactor && val != null && val.length == 2 && val[0] > 0.0 && val[1] > 0.0) {
       Double estimatedFactor =
           TagD.getTagValue(mediaIO, Tag.EstimatedRadiographicMagnificationFactor, Double.class);
@@ -454,37 +455,16 @@ public class DicomImageElement extends ImageElement implements DicomElement {
     return null;
   }
 
-  public GeometryOfSlice getDispSliceGeometry() {
-    // The geometry is adapted to get square pixel as all the images are displayed with square
-    // pixel.
-    double[] imgOr = TagD.getTagValue(this, Tag.ImageOrientationPatient, double[].class);
-    if (imgOr != null && imgOr.length == 6) {
-      double[] pos = TagD.getTagValue(this, Tag.ImagePositionPatient, double[].class);
-      if (pos != null && pos.length == 3) {
-        Double sliceTickness = TagD.getTagValue(this, Tag.SliceThickness, Double.class);
-        if (sliceTickness == null) {
-          sliceTickness = getPixelSize();
-        }
-        Vector3d spacing = new Vector3d(getPixelSize(), getPixelSize(), sliceTickness);
-        Integer rows = TagD.getTagValue(this, Tag.Rows, Integer.class);
-        Integer columns = TagD.getTagValue(this, Tag.Columns, Integer.class);
-        if (rows != null && columns != null && rows > 0 && columns > 0) {
-          // SliceTickness is only use in IntersectVolume
-          // Multiply rows and columns by getZoomScale() to have square pixel image size
-          return new GeometryOfSlice(
-              new Vector3d(imgOr[0], imgOr[1], imgOr[2]),
-              new Vector3d(imgOr[3], imgOr[4], imgOr[5]),
-              new Vector3d(pos),
-              spacing,
-              sliceTickness,
-              new Vector3d(rows * getRescaleY(), columns * getRescaleX(), 1));
-        }
-      }
-    }
-    return null;
+  public GeometryOfSlice getSliceGeometry() {
+    // This geometry is adapted to get square pixel  for display
+    return getGeometry(true);
   }
 
-  public GeometryOfSlice getSliceGeometry() {
+  public GeometryOfSlice getRawSliceGeometry() {
+    return getGeometry(false);
+  }
+
+  private GeometryOfSlice getGeometry(boolean isDisplay) {
     double[] imgOr = TagD.getTagValue(this, Tag.ImageOrientationPatient, double[].class);
     if (imgOr != null && imgOr.length == 6) {
       double[] pos = TagD.getTagValue(this, Tag.ImagePositionPatient, double[].class);
@@ -493,18 +473,25 @@ public class DicomImageElement extends ImageElement implements DicomElement {
         if (sliceTickness == null) {
           sliceTickness = getPixelSize();
         }
-        double[] pixSize = getDisplayPixelSize();
+        double[] pixSize =
+            isDisplay ? new double[] {getPixelSize(), getPixelSize()} : getDisplayPixelSize();
         Vector3d spacing = new Vector3d(pixSize[0], pixSize[1], sliceTickness);
         Integer rows = TagD.getTagValue(this, Tag.Rows, Integer.class);
         Integer columns = TagD.getTagValue(this, Tag.Columns, Integer.class);
         if (rows != null && columns != null && rows > 0 && columns > 0) {
+          // SliceThickness is only use in IntersectVolume
+          // With isDisplay, adapt rows and columns to have square pixel image size
+          Vector3d dimensions =
+              isDisplay
+                  ? new Vector3d(rows * getRescaleY(), columns * getRescaleX(), 1)
+                  : new Vector3d(rows, columns, 1);
           return new GeometryOfSlice(
               new Vector3d(imgOr[0], imgOr[1], imgOr[2]),
               new Vector3d(imgOr[3], imgOr[4], imgOr[5]),
               new Vector3d(pos),
               spacing,
               sliceTickness,
-              new Vector3d(rows, columns, 1));
+              dimensions);
         }
       }
     }
@@ -586,13 +573,7 @@ public class DicomImageElement extends ImageElement implements DicomElement {
         manager.setParamValue(OverlayOp.OP_NAME, OverlayOp.P_IMAGE_ELEMENT, this);
         manager.setParamValue(OverlayOp.OP_NAME, OverlayOp.P_SHOW, true);
       }
-
-      ZoomOp node = new ZoomOp();
-      node.setParam(ZoomOp.P_RATIO_X, getRescaleX() * ratio);
-      node.setParam(ZoomOp.P_RATIO_Y, getRescaleY() * ratio);
-      node.setParam(ZoomOp.P_INTERPOLATION, ZoomOp.Interpolation.BICUBIC);
-      manager.addImageOperationAction(node);
-
+      manager.addImageOperationAction(buildZoomOp(ratio));
       manager.setFirstNode(image);
     }
     return manager;

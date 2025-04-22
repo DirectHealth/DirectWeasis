@@ -10,13 +10,13 @@ jobs:
       cleanversion: ${{ env.WEASIS_CLEAN_VERSION }}
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up JDK for compilation
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '24'
           cache: 'maven'
 
       - name: Build with Maven
@@ -34,24 +34,18 @@ jobs:
       - name: Set compatible version
         shell: bash
         run: |
-          CVERSION=$(echo $WEASIS_VERSION | sed -e 's/"//g' -e 's/-.*//')
+          CVERSION=$(echo $WEASIS_VERSION | sed -e 's/"//g' -e 's/-.*//' -e 's/\(\([0-9]\+\.\)\{2\}[0-9]\+\)\.[0-9]\+/\1/')
           echo "WEASIS_CLEAN_VERSION=${CVERSION}" >> $GITHUB_ENV
 
       - name: Upload the weasis package for building the native distribution
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: weasis-native-${{ env.WEASIS_VERSION }}
           path: weasis-distributions/target/native-dist/weasis-native.zip
 
-      - name: Upload the weasis web distribution
-        uses: actions/upload-artifact@v3
-        with:
-          name: weasis-web-${{ env.WEASIS_VERSION }}
-          path: weasis-distributions/target/web-dist/weasis.war
-
   jpackage:
     env:
-      JDK_MODULES: "java.base,java.compiler,java.datatransfer,java.net.http,java.desktop,java.logging,java.management,java.prefs,java.xml,jdk.localedata,jdk.charsets,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.unsupported,jdk.jdwp.agent"
+      JDK_MODULES: "java.base,java.compiler,java.datatransfer,java.net.http,java.desktop,java.logging,java.management,java.prefs,java.xml,jdk.localedata,jdk.charsets,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.unsupported,jdk.jdwp.agent,java.sql"
       NAME: "Weasis"
       IDENTIFIER: "org.weasis.launcher"
       WEASIS_INPUT: "native-dist/weasis-native/bin-dist"
@@ -64,9 +58,8 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest, platform: x64, wsystem: linux, warc: x86-64 }
-          - { os: macos-latest, platform: x64, wsystem: macosx, warc: x86-64 }
-          - { os: macos-latest-xlarge, platform: arm64, wsystem: macosx, warc: aarch64 }
-          #  - { os: windows-latest, platform: x86, wsystem: windows, warc: x86 }
+          - { os: macos-13, platform: x64, wsystem: macosx, warc: x86-64 }
+          - { os: macos-latest, platform: arm64, wsystem: macosx, warc: aarch64 }
           - { os: windows-latest, platform: x64, wsystem: windows, warc: x86-64 }
 
     steps:
@@ -79,13 +72,13 @@ jobs:
           echo "WEASIS_CLEAN_VERSION=${{needs.build.outputs.cleanversion}}" >> $GITHUB_ENV
 
       - name: Set up JDK
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '24'
 
       - name: Download weasis-native
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: weasis-native-${{ env.WEASIS_VERSION }}
           path: native-dist
@@ -109,7 +102,7 @@ jobs:
           echo "$(ls ${{ env.WEASIS_INPUT_BIN }}/bundle/)"
 
       - name: Import Developer Certificate
-        uses: apple-actions/import-codesign-certs@v2
+        uses: apple-actions/import-codesign-certs@v3
         if: matrix.wsystem == 'macosx'
         id: cert
         with:
@@ -117,7 +110,7 @@ jobs:
           p12-password: ${{ secrets.MACOS_CERTIFICATE_PWD }}
 
       - name: Import Installer Certificate
-        uses: apple-actions/import-codesign-certs@v2
+        uses: apple-actions/import-codesign-certs@v3
         if: matrix.wsystem == 'macosx'
         with:
           create-keychain: "false"
@@ -132,6 +125,13 @@ jobs:
         run: |
           machine=${{ matrix.wsystem }}
           if [ "$machine" = "macosx" ] ; then
+            mkdir jar_contents
+            unzip "${{ env.WEASIS_INPUT_BIN }}"/weasis-launcher.jar -d jar_contents
+            codesign --force --deep --timestamp --sign "${{ secrets.MACOS__DEVELOPER_ID }}" -vvv --keychain "$HOME/Library/Keychains/signing_temp.keychain-db" jar_contents/com/formdev/flatlaf/natives/libflatlaf-macos-arm64.dylib
+            codesign --force --deep --timestamp --sign "${{ secrets.MACOS__DEVELOPER_ID }}" -vvv --keychain "$HOME/Library/Keychains/signing_temp.keychain-db" jar_contents/com/formdev/flatlaf/natives/libflatlaf-macos-x86_64.dylib
+            jar cfv weasis-launcher.jar -C jar_contents .
+            mv -f weasis-launcher.jar "${{ env.WEASIS_INPUT_BIN }}"/weasis-launcher.jar
+            rm -rf jar_contents
             declare -a customOptions=("--java-options" "-splash:\$APPDIR/resources/images/about-round.png" "--java-options" "-Dapple.laf.useScreenMenuBar=true" "--java-options" "-Dapple.awt.application.appearance=NSAppearanceNameDarkAqua")
             declare -a signArgs=("--mac-package-identifier" "${{ env.IDENTIFIER }}" "--mac-signing-keychain" "$HOME/Library/Keychains/signing_temp.keychain-db" "--mac-sign")
           elif [ "$machine" = "windows" ] ; then
@@ -143,7 +143,7 @@ jobs:
           fi
           declare -a commonOptions=("--java-options" "-Dgosh.port=17179" \
           "--java-options" "-Djavax.accessibility.assistive_technologies=org.weasis.launcher.EmptyAccessibilityProvider" \
-          "--java-options" "-Djavax.accessibility.screen_magnifier_present=false" "--java-options" "--enable-preview" \
+          "--java-options" "-Djavax.accessibility.screen_magnifier_present=false" \
           "--java-options" "--add-exports=java.base/sun.net.www.protocol.http=ALL-UNNAMED" "--java-options" "--add-exports=java.base/sun.net.www.protocol.file=ALL-UNNAMED" \
           "--java-options" "--add-exports=java.base/sun.net.www.protocol.https=ALL-UNNAMED" "--java-options" "--add-exports=java.base/sun.net.www.protocol.ftp=ALL-UNNAMED" \
           "--java-options" "--add-exports=java.base/sun.net.www.protocol.jar=ALL-UNNAMED" "--java-options" "--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED" \
@@ -158,8 +158,6 @@ jobs:
           "${signArgs[@]}" "${customOptions[@]}" "${commonOptions[@]}"
 
           if [ "$machine" = "macosx" ] ; then
-              codesign --timestamp --entitlements "${{ env.RES }}/uri-launcher.entitlements" --options runtime --force -vvv --keychain "$HOME/Library/Keychains/signing_temp.keychain-db" --sign "${{ secrets.MACOS__DEVELOPER_ID }}" "${{ env.RES }}/weasis-url-handler.app"
-              cp -Rf "${{ env.RES }}/weasis-url-handler.app" "${{ env.WEASIS_OUTPUT }}/${{ env.NAME }}.app/Contents/MacOS/"
               codesign --timestamp --entitlements "${{ env.RES }}/uri-launcher.entitlements" --options runtime --force -vvv --keychain "$HOME/Library/Keychains/signing_temp.keychain-db" --sign "${{ secrets.MACOS__DEVELOPER_ID }}" "${{ env.WEASIS_OUTPUT }}/${{ env.NAME }}.app"
           fi
 
@@ -171,7 +169,7 @@ jobs:
           RES: "native-dist/weasis-native/build/script/resources/${{ matrix.wsystem }}"
           FILE_ASSOC: "native-dist/weasis-native/build/script/file-associations.properties"
           VENDOR: "Weasis Team"
-          COPYRIGHT: "© 2009-2023 Weasis Team"
+          COPYRIGHT: "© 2009-2025 Weasis Team"
         run: |
           mkdir -p final-dist
           machine=${{ matrix.wsystem }}
@@ -207,50 +205,33 @@ jobs:
           fi
           echo "APP_ARTIFACT=weasis-${machine}-${ARC_NAME}-${{ env.WEASIS_CLEAN_VERSION }}" >> $GITHUB_ENV
 
-      - name: Notarize Build
-        shell: bash
+      - name: "Notarize Release Build"
         if: matrix.wsystem == 'macosx'
         run: |
-          BUNDLE_PKG="final-dist/${{ env.NAME }}-${{ env.WEASIS_CLEAN_VERSION }}-${{ matrix.warc }}.pkg"
-          # create temporary files
-          NOTARIZE_APP_LOG=$(mktemp -t notarize-app)
-          NOTARIZE_INFO_LOG=$(mktemp -t notarize-info)
+          xcrun notarytool submit \
+            "final-dist/${{ env.NAME }}-${{ env.WEASIS_CLEAN_VERSION }}-${{ matrix.warc }}.pkg" \
+            --apple-id "${{ secrets.APPLE_DEVELOPER_AC_USERNAME }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            --password "${{ secrets.WEASIS_PWD }}" \
+            --wait
 
-          # delete temporary files on exit
-          function finish {
-          rm "$NOTARIZE_APP_LOG" "$NOTARIZE_INFO_LOG"
-          }
-          trap finish EXIT
+      - name: "Staple Release Build"
+        if: matrix.wsystem == 'macosx'
+        run: |
+          xcrun stapler staple \
+            "final-dist/${{ env.NAME }}-${{ env.WEASIS_CLEAN_VERSION }}-${{ matrix.warc }}.pkg"
 
-
-          # submit app for notarization
-          if xcrun altool --notarize-app --primary-bundle-id "org.test.${{ env.NAME }}" --username "${{ secrets.MACOS_NOTARIZATION_USER}}" --password "${{ secrets.MACOS_NOTARIZATION_PWD }}" -f "$BUNDLE_PKG" > "$NOTARIZE_APP_LOG" 2>&1; then
-          cat "$NOTARIZE_APP_LOG"
-          RequestUUID=$(awk -F ' = ' '/RequestUUID/ {print $2}' "$NOTARIZE_APP_LOG")
-
-          # check status periodically
-          while sleep 60 && date; do
-           # check notarization status
-           if xcrun altool --notarization-info "$RequestUUID" --username "${{ secrets.MACOS_NOTARIZATION_USER}}" --password "${{ secrets.MACOS_NOTARIZATION_PWD }}" > "$NOTARIZE_INFO_LOG" 2>&1; then
-             cat "$NOTARIZE_INFO_LOG"
-
-             # once notarization is complete, run stapler and exit
-             if ! grep -q "Status: in progress" "$NOTARIZE_INFO_LOG"; then
-               xcrun stapler staple "$BUNDLE_PKG"
-               exit $?
-             fi
-           else
-             cat "$NOTARIZE_INFO_LOG" 1>&2
-             exit 1
-           fi
-          done
-          else
-          cat "$NOTARIZE_APP_LOG" 1>&2
-          exit 1
-          fi
+      - name: "Add checksum sha256 file"
+        shell: bash
+        run: |
+            for file in "final-dist/*"; do
+              if [[ -f "$file" ]]; then
+                sha256sum "$file" >> "$file.sha256"
+              fi
+            done
 
       - name: Upload the installer
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APP_ARTIFACT }}
           path: final-dist

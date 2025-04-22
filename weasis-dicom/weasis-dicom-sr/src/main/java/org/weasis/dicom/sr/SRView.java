@@ -31,6 +31,7 @@ import org.weasis.core.api.explorer.DataExplorerView;
 import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
+import org.weasis.core.api.gui.util.WinUtil;
 import org.weasis.core.api.media.data.ImageElement;
 import org.weasis.core.api.media.data.MediaElement;
 import org.weasis.core.api.media.data.MediaSeries;
@@ -60,7 +61,6 @@ import org.weasis.dicom.codec.DicomSpecialElement;
 import org.weasis.dicom.codec.KOSpecialElement;
 import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.TagD.Level;
-import org.weasis.dicom.codec.macro.SOPInstanceReference;
 import org.weasis.dicom.codec.utils.DicomMediaUtils;
 import org.weasis.dicom.explorer.DicomExplorer;
 import org.weasis.dicom.explorer.DicomModel;
@@ -68,6 +68,7 @@ import org.weasis.dicom.explorer.DicomSeriesHandler;
 import org.weasis.dicom.explorer.HangingProtocols.OpeningViewer;
 import org.weasis.dicom.explorer.LoadDicomObjects;
 import org.weasis.dicom.explorer.MimeSystemAppFactory;
+import org.weasis.dicom.macro.SOPInstanceReference;
 
 public class SRView extends JScrollPane implements SeriesViewerListener {
 
@@ -224,6 +225,7 @@ public class SRView extends JScrollPane implements SeriesViewerListener {
                       TagD.getTagValue(s, Tag.SeriesInstanceUID, String.class),
                       ref.getReferencedSOPInstanceUID(),
                       ref.getReferencedSOPClassUID(),
+                      TagD.getTagValue(s, Tag.InstanceNumber, Integer.class),
                       ref.getReferencedFrameNumber());
               keyReferences.addKeyObject(koRef);
               SeriesViewerFactory plugin =
@@ -251,7 +253,7 @@ public class SRView extends JScrollPane implements SeriesViewerListener {
           } else {
             // TODO try to download if IHE IID has been configured
             JOptionPane.showMessageDialog(
-                this,
+                WinUtil.getValidComponent(this),
                 Messages.getString("SRView.msg"),
                 Messages.getString("SRView.open"),
                 JOptionPane.WARNING_MESSAGE);
@@ -361,7 +363,7 @@ public class SRView extends JScrollPane implements SeriesViewerListener {
 
         LoadDicomObjects loadDicomObjects =
             new LoadDicomObjects(model, OpeningViewer.NONE, attributes);
-        GuiExecutor.instance().invokeAndWait(loadDicomObjects);
+        GuiExecutor.invokeAndWait(loadDicomObjects);
 
         for (KOSpecialElement koElement : DicomModel.getKoSpecialElements(s)) {
           if (koElement.getMediaReader().getDicomObject().equals(attributes)) {

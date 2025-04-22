@@ -216,12 +216,6 @@
                 </artifactItem>
                 <artifactItem>
                   <groupId>org.apache.felix</groupId>
-                  <artifactId>org.apache.felix.metatype</artifactId>
-                  <version>${felix.metatype.version}</version>
-                  <outputDirectory>${tmp.bundle.dir}</outputDirectory>
-                </artifactItem>
-                <artifactItem>
-                  <groupId>org.apache.felix</groupId>
                   <artifactId>org.apache.felix.prefs</artifactId>
                   <version>${felix.prefs.version}</version>
                   <outputDirectory>${tmp.bundle.dir}</outputDirectory>
@@ -248,18 +242,6 @@
                 <!-- ===================================== -->
                 <!-- Other required bundles -->
                 <!-- ===================================== -->
-                <artifactItem>
-                  <groupId>org.slf4j</groupId>
-                  <artifactId>slf4j-api</artifactId>
-                  <version>${slf4j.version}</version>
-                  <outputDirectory>${tmp.bundle.dir}</outputDirectory>
-                </artifactItem>
-                <artifactItem>
-                  <groupId>org.apache.sling</groupId>
-                  <artifactId>org.apache.sling.commons.log</artifactId>
-                  <version>${sling.commons.log.version}</version>
-                  <outputDirectory>${tmp.bundle.dir}</outputDirectory>
-                </artifactItem>
                 <artifactItem>
                   <groupId>org.weasis.thirdparty</groupId>
                   <artifactId>jaxb-osgi</artifactId>
@@ -564,22 +546,6 @@
               <outputDirectory>${project.build.directory}</outputDirectory>
             </configuration>
           </execution>
-          <execution>
-            <id>web</id>
-            <phase>package</phase>
-            <goals>
-              <goal>single</goal>
-            </goals>
-            <configuration>
-              <attach>true</attach>
-              <finalName>weasis</finalName>
-              <appendAssemblyId>false</appendAssemblyId>
-              <outputDirectory>${project.build.directory}/web-dist</outputDirectory>
-              <descriptors>
-                <descriptor>src/assembly/web-dist.xml</descriptor>
-              </descriptors>
-            </configuration>
-          </execution>
         </executions>
       </plugin>
     </plugins>
@@ -686,7 +652,6 @@
           <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-jarsigner-plugin</artifactId>
-            <version>3.0.0</version>
             <!-- Uncomment and provide proxy server setting when it is necessary to reach time stamping server from corporate network -->
             <!--<configuration> -->
             <!--<arguments> -->

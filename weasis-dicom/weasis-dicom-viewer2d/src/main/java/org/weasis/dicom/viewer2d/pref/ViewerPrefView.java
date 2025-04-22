@@ -94,7 +94,7 @@ public class ViewerPrefView extends AbstractItemDialogPage {
             }
           }
         });
-    slider.setValue(map.get(actions.get(0)));
+    slider.setValue(map.get(actions.getFirst()));
     slider.addChangeListener(
         e -> {
           Object item = comboBox.getSelectedItem();
@@ -158,15 +158,20 @@ public class ViewerPrefView extends AbstractItemDialogPage {
 
     final JPanel otherPanel = GuiUtils.getVerticalBoxLayoutPanel();
     otherPanel.setBorder(GuiUtils.getTitledBorder(Messages.getString("ViewerPrefView.other")));
-    otherPanel.add(GuiUtils.getFlowLayoutPanel(checkBoxWLcolor));
-    otherPanel.add(GuiUtils.getFlowLayoutPanel(checkBoxLevelInverse));
-    otherPanel.add(GuiUtils.getFlowLayoutPanel(checkBoxApplyPR));
+    otherPanel.add(
+        GuiUtils.getFlowLayoutPanel(ITEM_SEPARATOR_SMALL, ITEM_SEPARATOR, checkBoxWLcolor));
+    otherPanel.add(
+        GuiUtils.getFlowLayoutPanel(ITEM_SEPARATOR_SMALL, ITEM_SEPARATOR, checkBoxLevelInverse));
+    otherPanel.add(
+        GuiUtils.getFlowLayoutPanel(ITEM_SEPARATOR_SMALL, ITEM_SEPARATOR, checkBoxApplyPR));
     otherPanel.add(
         GuiUtils.getFlowLayoutPanel(new JLabel(Messages.getString("overlay.color")), overlayColor));
     add(otherPanel);
 
     add(GuiUtils.boxYLastElement(LAST_FILLER_HEIGHT));
     getProperties().setProperty(PreferenceDialog.KEY_SHOW_RESTORE, Boolean.TRUE.toString());
+    getProperties()
+        .setProperty(PreferenceDialog.KEY_HELP, "dicom-2d-viewer/#preferences"); // NON-NLS
   }
 
   private Color getOverlayColor() {

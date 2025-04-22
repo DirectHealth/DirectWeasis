@@ -9,13 +9,14 @@
  */
 package org.weasis.acquire.explorer;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.*;
 
-import org.assertj.core.data.Percentage;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.Mockito;
+import org.mockito.MockitoAnnotations;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.weasis.acquire.explorer.gui.dialog.AcquirePublishDialog.Resolution;
 import org.weasis.core.api.media.data.ImageElement;
@@ -26,30 +27,47 @@ class PublishDicomTaskTest {
   @Mock AcquireImageInfo imgInfo;
   @Mock ImageElement imgElt;
 
+  @BeforeEach
+  void setUp() {
+    try (AutoCloseable closeable = MockitoAnnotations.openMocks(this)) {
+      // Initialize mocks before each test
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
   @Test
   void testCalculateRatio() {
     Mockito.when(imgInfo.getImage()).thenReturn(imgElt);
 
-    assertThat(PublishDicomTask.calculateRatio(null, null)).isNull();
-    assertThat(PublishDicomTask.calculateRatio(imgInfo, null)).isNull();
-    assertThat(PublishDicomTask.calculateRatio(imgInfo, Resolution.ORIGINAL)).isNull();
+    // Assertions for null values
+    assertNull(PublishDicomTask.calculateRatio(null, null));
+    assertNull(PublishDicomTask.calculateRatio(imgInfo, null));
+    assertNull(PublishDicomTask.calculateRatio(imgInfo, Resolution.ORIGINAL));
 
+    Mockito.reset(imgElt);
+
+    // Scenario 1
     Mockito.when(imgElt.getTagValue(TagW.ImageWidth)).thenReturn(4000);
     Mockito.when(imgElt.getTagValue(TagW.ImageHeight)).thenReturn(2000);
-    assertThat(PublishDicomTask.calculateRatio(imgInfo, Resolution.ULTRA_HD))
-        .isCloseTo(0.96, Percentage.withPercentage(1));
-    assertThat(PublishDicomTask.calculateRatio(imgInfo, Resolution.FULL_HD))
-        .isCloseTo(0.48, Percentage.withPercentage(1));
-    assertThat(PublishDicomTask.calculateRatio(imgInfo, Resolution.HD_DVD))
-        .isCloseTo(0.32, Percentage.withPercentage(1));
+    assertTrue(
+        isCloseTo(PublishDicomTask.calculateRatio(imgInfo, Resolution.ULTRA_HD), 0.96, 0.05));
+    assertTrue(isCloseTo(PublishDicomTask.calculateRatio(imgInfo, Resolution.FULL_HD), 0.48, 0.05));
+    assertTrue(isCloseTo(PublishDicomTask.calculateRatio(imgInfo, Resolution.HD_DVD), 0.32, 0.05));
 
+    Mockito.reset(imgElt);
+
+    // Scenario 2
     Mockito.when(imgElt.getTagValue(TagW.ImageWidth)).thenReturn(2000);
     Mockito.when(imgElt.getTagValue(TagW.ImageHeight)).thenReturn(4000);
-    assertThat(PublishDicomTask.calculateRatio(imgInfo, Resolution.ULTRA_HD))
-        .isCloseTo(0.96, Percentage.withPercentage(1));
-    assertThat(PublishDicomTask.calculateRatio(imgInfo, Resolution.FULL_HD))
-        .isCloseTo(0.48, Percentage.withPercentage(1));
-    assertThat(PublishDicomTask.calculateRatio(imgInfo, Resolution.HD_DVD))
-        .isCloseTo(0.32, Percentage.withPercentage(1));
+    assertTrue(
+        isCloseTo(PublishDicomTask.calculateRatio(imgInfo, Resolution.ULTRA_HD), 0.96, 0.05));
+    assertTrue(isCloseTo(PublishDicomTask.calculateRatio(imgInfo, Resolution.FULL_HD), 0.48, 0.05));
+    assertTrue(isCloseTo(PublishDicomTask.calculateRatio(imgInfo, Resolution.HD_DVD), 0.32, 0.05));
+  }
+
+  private boolean isCloseTo(Double actual, double expected, double tolerance) {
+    double diff = Math.abs(actual - expected);
+    return diff <= tolerance;
   }
 }

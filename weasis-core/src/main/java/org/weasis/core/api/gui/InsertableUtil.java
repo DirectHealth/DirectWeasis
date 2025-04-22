@@ -38,7 +38,8 @@ public class InsertableUtil {
       String componentName,
       Type type) {
     if (list != null && prefs != null && bundleName != null && componentName != null) {
-      Preferences prefNode = prefs.node(componentName).node(type.name().toLowerCase() + "s");
+      Preferences prefNode =
+          prefs.node(componentName).node(type.name().toLowerCase() + "s"); // NON-NLS
       synchronized (list) { // NOSONAR lock object is the list for iterating its elements safely
         for (Insertable c : list) {
           if (!Type.EMPTY.equals(c.getType())) {
@@ -92,7 +93,7 @@ public class InsertableUtil {
   public static void savePreferences(
       List<? extends Insertable> list, Preferences prefs, Type type) {
     if (list != null && prefs != null) {
-      Preferences prefNode = prefs.node(type.name().toLowerCase() + "s");
+      Preferences prefNode = prefs.node(type.name().toLowerCase() + "s"); // NON-NLS
       synchronized (list) { // NOSONAR lock object is the list for iterating its elements safely
         for (Insertable c : list) {
           if (!Type.EMPTY.equals(c.getType())) {
@@ -117,14 +118,7 @@ public class InsertableUtil {
     if (props != null && bundleName != null && className != null && key != null) {
       for (String bundle : new String[] {bundleName, ALL_BUNDLE}) {
         for (String cl : new String[] {className, ALL}) {
-          StringBuilder buf = new StringBuilder(bundle);
-          buf.append('.');
-          buf.append(cl);
-          buf.append('.');
-          buf.append(componentName);
-          buf.append('.');
-          buf.append(key);
-          final String value = props.getProperty(buf.toString());
+          String value = buildPropertyName(props, componentName, key, bundle, cl);
           if (value != null) {
             if (Boolean.TRUE.toString().equalsIgnoreCase(value)) {
               return true;
@@ -138,6 +132,18 @@ public class InsertableUtil {
     return def;
   }
 
+  private static String buildPropertyName(
+      Properties props, String componentName, String key, String bundle, String cl) {
+    StringBuilder buf = new StringBuilder(bundle);
+    buf.append('.');
+    buf.append(cl);
+    buf.append('.');
+    buf.append(componentName);
+    buf.append('.');
+    buf.append(key);
+    return props.getProperty(buf.toString());
+  }
+
   private static int getIntProperty(
       Properties props,
       String bundleName,
@@ -148,14 +154,7 @@ public class InsertableUtil {
     if (props != null && bundleName != null && className != null && key != null) {
       for (String bundle : new String[] {bundleName, ALL_BUNDLE}) {
         for (String cl : new String[] {className, ALL}) {
-          StringBuilder buf = new StringBuilder(bundle);
-          buf.append('.');
-          buf.append(cl);
-          buf.append('.');
-          buf.append(componentName);
-          buf.append('.');
-          buf.append(key);
-          final String value = props.getProperty(buf.toString());
+          String value = buildPropertyName(props, componentName, key, bundle, cl);
           if (value != null) {
             try {
               return Integer.parseInt(value);

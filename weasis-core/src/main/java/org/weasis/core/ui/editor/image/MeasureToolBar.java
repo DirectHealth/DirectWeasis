@@ -151,6 +151,9 @@ public class MeasureToolBar extends WtoolBar {
       graphic.setLayerType(LayerType.ANNOTATION);
       drawGraphicList.add(graphic);
     }
+
+    selectionGraphic.setFilled(false);
+    selectionGraphic.setLabelVisible(false);
     selectionGraphic.setLayerType(LayerType.TEMP_DRAW);
   }
 
@@ -158,16 +161,12 @@ public class MeasureToolBar extends WtoolBar {
   protected final ImageViewerEventManager<?> eventManager;
 
   public MeasureToolBar(final ImageViewerEventManager<?> eventManager, int index) {
-    super(Messages.getString("MeasureToolBar.title"), index);
+    super(Messages.getString("MeasureToolBar.drawing_tools"), index);
     if (eventManager == null) {
       throw new IllegalArgumentException("EventManager cannot be null");
     }
     this.eventManager = eventManager;
-
-    MeasureToolBar.measureGraphicList.forEach(
-        g -> MeasureToolBar.applyDefaultSetting(MeasureTool.viewSetting, g));
-    MeasureToolBar.drawGraphicList.forEach(
-        g -> MeasureToolBar.applyDefaultSetting(MeasureTool.viewSetting, g));
+    MeasureTool.updateMeasureProperties();
 
     Optional<ComboItemListener<Graphic>> measure = eventManager.getAction(ActionW.DRAW_MEASURE);
     measure.ifPresent(comboItemListener -> add(buildButton(comboItemListener)));
@@ -205,6 +204,8 @@ public class MeasureToolBar extends WtoolBar {
     if (graphic instanceof DragGraphic g) {
       g.setLineThickness((float) setting.getLineWidth());
       g.setPaint(setting.getLineColor());
+      g.setFilled(setting.isFilled());
+      g.setFillOpacity(setting.getFillOpacity());
     }
   }
 

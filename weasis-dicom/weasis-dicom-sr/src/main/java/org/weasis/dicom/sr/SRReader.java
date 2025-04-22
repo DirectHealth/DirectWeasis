@@ -28,10 +28,10 @@ import org.weasis.core.util.EscapeChars;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.DicomSpecialElement;
 import org.weasis.dicom.codec.TagD;
-import org.weasis.dicom.codec.macro.Code;
-import org.weasis.dicom.codec.macro.SOPInstanceReference;
-import org.weasis.dicom.codec.macro.SeriesAndInstanceReference;
 import org.weasis.dicom.explorer.pr.PrGraphicUtil;
+import org.weasis.dicom.macro.Code;
+import org.weasis.dicom.macro.SOPInstanceReference;
+import org.weasis.dicom.macro.SeriesAndInstanceReference;
 
 public class SRReader {
   private static final Logger LOGGER = LoggerFactory.getLogger(SRReader.class);
@@ -183,7 +183,7 @@ public class SRReader {
         html.append(continuous || noCodeName ? " " : " = ");
         Attributes val = c.getMeasuredValue();
         if (val != null) {
-          html.append(val.getFloat(Tag.NumericValue, 0.0f));
+          html.append(val.getDouble(Tag.NumericValue, 0.0));
           Attributes item = val.getNestedDataset(Tag.MeasurementUnitsCodeSequence);
           if (item != null) {
             Code unit = new Code(item);
@@ -201,7 +201,7 @@ public class SRReader {
         if (imgRef != null) {
           html.append("<a href=\"http://"); // NON-NLS
           html.append(level);
-          html.append("\" style=\"color:#FF9900\">"); // NON-NLS
+          html.append("\">");
           html.append(Messages.getString("SRReader.show_img")); // NON-NLS
           html.append("</a>"); // NON-NLS
         }
@@ -265,7 +265,7 @@ public class SRReader {
 
               html.append("<a href=\"http://"); // NON-NLS
               html.append(id);
-              html.append("\" style=\"color:#FF9900\">"); // NON-NLS
+              html.append("\">");
               html.append(graphicsItems.getString(Tag.GraphicType));
               html.append("</a>"); // NON-NLS
             }
@@ -389,7 +389,8 @@ public class SRReader {
       html.append(tag.getDisplayedName());
       html.append("</B>");
       html.append(StringUtil.COLON_AND_SPACE);
-      html.append(tag.getFormattedTagValue(tag.getValue(dcmItems), null));
+      String format = tag.addGMTOffset(null, dicomSR);
+      html.append(tag.getFormattedTagValue(tag.getValue(dcmItems), format));
     }
   }
 

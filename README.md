@@ -1,25 +1,37 @@
-[![License](https://img.shields.io/badge/License-EPL%202.0-blue.svg)](https://opensource.org/licenses/EPL-2.0) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)   ![Maven Build](https://github.com/nroduit/weasis/workflows/Build/badge.svg)  
-[![Sonar](https://sonarcloud.io/api/project_badges/measure?project=weasis&metric=ncloc)](https://sonarcloud.io/component_measures?id=weasis) [![Sonar](https://sonarcloud.io/api/project_badges/measure?project=weasis&metric=reliability_rating)](https://sonarcloud.io/component_measures?id=weasis) [![Sonar](https://sonarcloud.io/api/project_badges/measure?project=weasis&metric=sqale_rating)](https://sonarcloud.io/component_measures?id=weasis) [![Sonar](https://sonarcloud.io/api/project_badges/measure?project=weasis&metric=security_rating)](https://sonarcloud.io/component_measures?id=weasis) [![Sonar](https://sonarcloud.io/api/project_badges/measure?project=weasis&metric=alert_status)](https://sonarcloud.io/dashboard?id=weasis)   
+[![License](https://img.shields.io/badge/License-EPL%202.0-blue.svg)](https://opensource.org/licenses/EPL-2.0) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) ![Maven Build](https://github.com/nroduit/weasis/workflows/Build/badge.svg) ![Github](https://img.shields.io/github/downloads/nroduit/weasis/total?classes=inline "Github release downloads")
 
-![Weasis](weasis-distributions/resources/svg/logo/WeasisAbout.svg)
+[![Sonar](https://sonarcloud.io/api/project_badges/measure?project=org.weasis%3Aweasis-framework&metric=ncloc)](https://sonarcloud.io/component_measures?id=org.weasis%3Aweasis-framework) [![Sonar](https://sonarcloud.io/api/project_badges/measure?project=org.weasis%3Aweasis-framework&metric=reliability_rating)](https://sonarcloud.io/component_measures?id=org.weasis%3Aweasis-framework) [![Sonar](https://sonarcloud.io/api/project_badges/measure?project=org.weasis%3Aweasis-framework&metric=sqale_rating)](https://sonarcloud.io/component_measures?id=org.weasis%3Aweasis-framework) [![Sonar](https://sonarcloud.io/api/project_badges/measure?project=org.weasis%3Aweasis-framework&metric=security_rating)](https://sonarcloud.io/component_measures?id=org.weasis%3Aweasis-framework) [![Sonar](https://sonarcloud.io/api/project_badges/measure?project=org.weasis%3Aweasis-framework&metric=alert_status)](https://sonarcloud.io/dashboard?id=org.weasis%3Aweasis-framework)
 
-Weasis is a standalone and web-based software for visualizing images obtained from medical imaging devices. This free DICOM viewer is used in healthcare by hospitals, health networks, multicenter research trials, and patients.
+## Table of Contents
+- [About Weasis](#about-weasis)
+- [Getting Started](#getting-started)
+- [Release History](#release-history)
+- [Build Weasis](#build-weasis)
+- [General Features](#general-features)
+- [Viewer Features](#viewer-features-see-also-tutorials)
+- [Community and Support](#community-and-support)
+- [License](#license)
+
+## About Weasis
+
+**Weasis** is a powerful, multifunctional, and open-source DICOM viewer designed for both standalone and web-based use. It excels in medical image visualization and is widely used by healthcare professionals and research institutions. Engineered for seamless integration with PACS and DICOM workflows, Weasis offers a reliable solution for modern medical imaging needs.
+
+## Getting Started
 
 * [General information](https://nroduit.github.io)
+* [Getting Started](https://nroduit.github.io/en/getting-started)
 * [Download binary releases](https://nroduit.github.io/en/getting-started/download-dicom-viewer)
 * [Live Demo with different datasets](https://nroduit.github.io/en/demo)
-* [Issues](https://github.com/nroduit/Weasis/issues) ([Old Issue Tracker](https://dcm4che.atlassian.net/projects/WEA))
-* Forum: [Google group](https://groups.google.com/forum/#!forum/dcm4che) or [GitHub Discussions](https://github.com/nroduit/Weasis/discussions)
 
-# Release History
+## Release History
 See [CHANGELOG](CHANGELOG.md)
 
-# Build Weasis
+## Build Weasis
 See [How to build Weasis](https://nroduit.github.io/en/getting-started/building-weasis)
 
-# General Features
+## General Features
 * Open source DICOM viewer under EPL 2 or Apache 2 license
-* Flexible integration with PACS, VNA, RIS, HIS or PHR  (see [integration documentation](https://nroduit.github.io/en/basics/customize/integration/))
+* Flexible integration with PACS, VNA, RIS, HIS, or EHR  (see [integration documentation](https://nroduit.github.io/en/basics/customize/integration/))
 * [Desktop distributions](https://nroduit.github.io/en/getting-started/download-dicom-viewer/) (Windows, macOS, and Linux)
 * Web access through [weasis protocol](https://nroduit.github.io/en/getting-started/weasis-protocol)
 * [Responsive user interface](https://nroduit.github.io/en/tutorials/theme/index.html#how-to-scale-the-user-interface) working well on high DPI screens
@@ -31,12 +43,12 @@ See [How to build Weasis](https://nroduit.github.io/en/getting-started/building-
 * Dicomizer module to convert standard images into DICOM files
 * [Embedded DICOM viewer in CD/DVD](https://nroduit.github.io/en/tutorials/dicom-export/index.html#cddvd-image) or other portable media
 
-# Viewer Features (see also [Tutorials](https://nroduit.github.io/en/tutorials/))
+## Viewer Features (see also [Tutorials](https://nroduit.github.io/en/tutorials/))
 
 * Data type support
-  * Display most of DICOM files including multi-frame, enhanced, MPEG-2, MPEG-4, MIME Encapsulation, DOC, SR, PR, KOS, SEG, AU, RT and ECG
+  * Display most DICOM files including multi-frame, enhanced, MPEG-2, MPEG-4, MIME Encapsulation, DOC, SR, PR, KOS, SEG, AU, RT, and ECG
   * Display DICOM image containing float or double data (Parametric Map)
-  * Import and export DICOM CD/DVD with DICOMDIR 
+  * Import and export DICOM CD/DVD with DICOMDIR
   * Import and export DICOM ZIP files
   * Viewer for common image formats (TIFF, BMP, GIF, JPEG, PNG, RAS, HDR, and PNM)
 
@@ -55,12 +67,13 @@ See [How to build Weasis](https://nroduit.github.io/en/getting-started/building-
   * Layouts for comparing series or studies
   * Advanced series synchronization options
   * Display cross-lines
-  * Orthogonal Multi-planar Reconstruction (MPR) and 3D cursor
+  * 3D cursor
+  * Oblique Multi-planar Reconstruction (MPR)
   * Maximum Intensity Projection
   * Persistent magnifier glass
 
 * Measurement and annotation tools
-  * Length, area and angle measurement
+  * Length, area, and angle measurement
   * Region statistics of pixels (Min, Max, Mean, StDev, Skewness, Kurtosis, Entropy)
   * Histogram of modality values
   * SUV measurement
@@ -74,6 +87,15 @@ See [How to build Weasis](https://nroduit.github.io/en/getting-started/building-
   * Printing views to DICOM and system printers
   * Apply and Create DICOM Key Object Selection by selecting images with the star button
   * Display and search into all DICOM attributes
-  * DICOM RT tools for radiotherapy: display RT structure set, dose and DVH chart
+  * DICOM RT tools for radiotherapy: display RT structure set, dose, and DVH chart
 
 <img src='./weasis.jpg'>
+
+## Community and Support
+Weasis encourages community participation. Whether you’re reporting bugs, suggesting features, or seeking help, you can connect with others here:
+* [GitHub Issues](https://github.com/nroduit/Weasis/issues)
+* Forum: [Google group](https://groups.google.com/forum/#!forum/dcm4che) or [GitHub Discussions](https://github.com/nroduit/Weasis/discussions)
+* [Frequently Asked Questions](https://nroduit.github.io/en/faq/)
+
+## License
+Weasis is dual-licensed under the [EPL 2.0](https://opensource.org/licenses/EPL-2.0) and [Apache 2.0](https://opensource.org/licenses/Apache-2.0).

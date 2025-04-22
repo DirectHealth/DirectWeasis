@@ -9,9 +9,9 @@
  */
 package org.weasis.acquire.explorer.gui.dialog;
 
-import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.FlowLayout;
+import static org.weasis.core.api.gui.Insertable.ITEM_SEPARATOR_LARGE;
+import static org.weasis.core.api.gui.Insertable.ITEM_SEPARATOR_SMALL;
+
 import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -21,8 +21,6 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
-import javax.swing.BorderFactory;
-import javax.swing.ComboBoxModel;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
@@ -35,7 +33,7 @@ import javax.swing.SwingWorker.StateValue;
 import javax.swing.WindowConstants;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.TreePath;
-import org.osgi.framework.FrameworkUtil;
+import net.miginfocom.swing.MigLayout;
 import org.osgi.service.prefs.Preferences;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,6 +48,7 @@ import org.weasis.acquire.explorer.gui.central.meta.model.imp.AcquireImageMeta;
 import org.weasis.acquire.explorer.gui.central.meta.model.imp.AcquireSeriesMeta;
 import org.weasis.acquire.explorer.gui.control.AcquirePublishPanel;
 import org.weasis.acquire.explorer.gui.model.publish.PublishTree;
+import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.gui.util.WinUtil;
 import org.weasis.core.api.image.ImageOpNode;
@@ -69,6 +68,8 @@ public class AcquirePublishDialog extends JDialog {
   private static final String LAST_SEL_NODE = "lastSelectedNode";
   public static final String P_LAST_RESOLUTION = "last.resolution";
   public static final String PREFERENCE_NODE = "publish"; // NON-NLS
+  private static final String LAST_CALLING_NODE = "lastCallingNode";
+  private final JComboBox<AbstractDicomNode> comboCallingNode = new JComboBox<>();
 
   public enum Resolution {
     ORIGINAL(Messages.getString("AcquirePublishDialog.original"), Integer.MAX_VALUE),
@@ -112,7 +113,6 @@ public class AcquirePublishDialog extends JDialog {
   private final AcquirePublishPanel publishPanel;
 
   private PublishTree publishTree;
-  private JPanel resolutionPane;
   private JComboBox<Resolution> resolutionCombo;
   private JButton publishButton;
   private JButton cancelButton;
@@ -147,63 +147,53 @@ public class AcquirePublishDialog extends JDialog {
   }
 
   private JPanel initContent() {
-    JPanel contentPane = new JPanel();
-
-    contentPane.setBorder(GuiUtils.getEmptyBorder(10, 10, 10, 10));
-    contentPane.setLayout(new BorderLayout());
+    JPanel contentPane =
+        new JPanel(new MigLayout("fill, insets 10", "[grow]", "[][][grow][]")); // NON-NLS
 
     JLabel questionLabel = new JLabel(Messages.getString("AcquirePublishDialog.select_pub"));
     questionLabel.setFont(FontItem.DEFAULT_SEMIBOLD.getFont());
 
-    contentPane.add(questionLabel, BorderLayout.NORTH);
-
-    JPanel imageTreePane = new JPanel(new BorderLayout());
-    imageTreePane.setBorder(GuiUtils.getEmptyBorder(10, 10, 10, 10));
-
+    contentPane.add(questionLabel, "wrap"); // NON-NLS
     publishTree = new PublishTree();
     publishTree.addTreeCheckingListener(
         evt -> {
-          resolutionPane.setVisible(!getOversizedSelected(publishTree).isEmpty());
-          resolutionPane.repaint();
+          resolutionCombo.setEnabled(!getOversizedSelected(publishTree).isEmpty());
         });
-    publishTree.setMinimumSize(publishTree.getPreferredSize());
-    imageTreePane.add(publishTree);
+    contentPane.add(publishTree, "grow, wrap"); // NON-NLS
 
-    contentPane.add(imageTreePane, BorderLayout.CENTER);
-
-    JPanel actionPane = new JPanel(new BorderLayout());
-    actionPane.setBorder(GuiUtils.getEmptyBorder(10, 10, 10, 10));
-
-    resolutionPane = new JPanel();
-    resolutionPane.setBorder(BorderFactory.createLineBorder(Color.BLACK));
-
-    JLabel resolutionLabel =
+    contentPane.add(
         new JLabel(
-            Messages.getString("AcquirePublishDialog.resolution") + StringUtil.COLON_AND_SPACE);
-    resolutionPane.add(resolutionLabel);
-
+            Messages.getString("AcquirePublishDialog.resolution") + StringUtil.COLON_AND_SPACE),
+        "split 2, span"); // NON-NLS
     resolutionCombo = new JComboBox<>(Resolution.values());
     Preferences prefs =
-        BundlePreferences.getDefaultPreferences(
-            FrameworkUtil.getBundle(this.getClass()).getBundleContext());
+        BundlePreferences.getDefaultPreferences(AppProperties.getBundleContext(this.getClass()));
     if (prefs != null) {
       Preferences p = prefs.node(PREFERENCE_NODE);
       resolutionCombo.setSelectedItem(
           Resolution.getInstance(p.get(P_LAST_RESOLUTION, Resolution.ORIGINAL.name())));
     }
-    resolutionPane.add(resolutionCombo);
-    resolutionPane.setVisible(Boolean.FALSE);
+    resolutionCombo.setEnabled(false);
+    contentPane.add(resolutionCombo, "wrap"); // NON-NLS
 
-    actionPane.add(resolutionPane, BorderLayout.NORTH);
+    JLabel lblDestination =
+        new JLabel(
+            Messages.getString("AcquirePublishDialog.lblDestination.text") + StringUtil.COLON);
+    GuiUtils.setPreferredWidth(comboNode, 210, 185);
+    AbstractDicomNode.addTooltipToComboList(comboNode);
+    loadDicomNodes();
 
-    progressBar = new JProgressBar();
-    progressBar.setStringPainted(true);
-    progressBar.setVisible(false);
+    JPanel panel = GuiUtils.getFlowLayoutPanel(ITEM_SEPARATOR_SMALL, 0, lblDestination, comboNode);
+    if (comboCallingNode.getItemCount() > 0) {
+      AbstractDicomNode.addTooltipToComboList(comboCallingNode);
+      JLabel lblCalling = new JLabel(Messages.getString("calling.node") + StringUtil.COLON);
+      GuiUtils.setPreferredWidth(comboCallingNode, 160, 120);
 
-    actionPane.add(progressBar, BorderLayout.CENTER);
-
-    JPanel bottomPane = new JPanel(new BorderLayout());
-    JPanel buttonPane = GuiUtils.getFlowLayoutPanel(FlowLayout.CENTER, 20, 10);
+      panel.add(GuiUtils.boxHorizontalStrut(ITEM_SEPARATOR_LARGE));
+      panel.add(lblCalling);
+      panel.add(comboCallingNode);
+    }
+    contentPane.add(panel, "split 5, span, wrap"); // NON-NLS
 
     publishButton = new JButton(Messages.getString("AcquirePublishDialog.publish"));
     publishButton.addActionListener(e -> publishAction());
@@ -212,25 +202,22 @@ public class AcquirePublishDialog extends JDialog {
     clearAndHideActionListener = e -> clearAndHide();
     cancelButton.addActionListener(clearAndHideActionListener);
 
-    JLabel lblDestination =
-        new JLabel(
-            Messages.getString("AcquirePublishDialog.lblDestination.text") + StringUtil.COLON);
-    AbstractDicomNode.addTooltipToComboList(comboNode);
+    progressBar = new JProgressBar();
+    progressBar.setStringPainted(true);
+    progressBar.setVisible(false);
+    contentPane.add(progressBar, "split 3, span, growx, gaptop 20"); // NON-NLS
+    contentPane.add(publishButton);
+    contentPane.add(cancelButton, "wrap"); // NON-NLS
+    return contentPane;
+  }
 
+  private void loadDicomNodes() {
     if (!StringUtil.hasText(
         GuiUtils.getUICore().getSystemPreferences().getProperty("weasis.acquire.dest.host"))) {
       AbstractDicomNode.loadDicomNodes(comboNode, AbstractDicomNode.Type.DICOM, UsageType.STORAGE);
       AbstractDicomNode.loadDicomNodes(comboNode, AbstractDicomNode.Type.WEB, UsageType.STORAGE);
       String desc = MediaImporterFactory.EXPORT_PERSISTENCE.getProperty(LAST_SEL_NODE);
-      if (StringUtil.hasText(desc)) {
-        ComboBoxModel<AbstractDicomNode> model = comboNode.getModel();
-        for (int i = 0; i < model.getSize(); i++) {
-          if (desc.equals(model.getElementAt(i).getDescription())) {
-            model.setSelectedItem(model.getElementAt(i));
-            break;
-          }
-        }
-      }
+      AbstractDicomNode.selectDicomNode(comboNode.getModel(), desc);
 
       if (comboNode.getItemCount() == 0) {
         comboNode.addItem(getDestinationConfiguration());
@@ -239,16 +226,14 @@ public class AcquirePublishDialog extends JDialog {
       comboNode.addItem(getDestinationConfiguration());
     }
 
-    JPanel destPane = GuiUtils.getFlowLayoutPanel(2, 10, lblDestination, comboNode);
-    bottomPane.add(destPane, BorderLayout.WEST);
-
-    buttonPane.add(publishButton);
-    buttonPane.add(cancelButton);
-
-    bottomPane.add(buttonPane, BorderLayout.EAST);
-    actionPane.add(bottomPane, BorderLayout.SOUTH);
-    contentPane.add(actionPane, BorderLayout.SOUTH);
-    return contentPane;
+    String weasisAet =
+        GuiUtils.getUICore().getSystemPreferences().getProperty("weasis.aet"); // NON-NLS
+    if (!StringUtil.hasText(weasisAet)) {
+      AbstractDicomNode.loadDicomNodes(
+          comboCallingNode, AbstractDicomNode.Type.DICOM_CALLING, UsageType.STORAGE);
+      String calling = MediaImporterFactory.EXPORT_PERSISTENCE.getProperty(LAST_CALLING_NODE);
+      AbstractDicomNode.selectDicomNode(comboCallingNode.getModel(), calling);
+    }
   }
 
   private static AbstractDicomNode getDestinationConfiguration() {
@@ -269,7 +254,7 @@ public class AcquirePublishDialog extends JDialog {
 
     if (toPublish.isEmpty()) {
       JOptionPane.showMessageDialog(
-          this,
+          WinUtil.getValidComponent(this),
           Messages.getString("AcquirePublishDialog.select_one_msg"),
           this.getTitle(),
           JOptionPane.ERROR_MESSAGE);
@@ -291,7 +276,7 @@ public class AcquirePublishDialog extends JDialog {
     }
     if (!publishable) {
       JOptionPane.showMessageDialog(
-          this,
+          WinUtil.getValidComponent(this),
           Messages.getString("AcquirePublishDialog.pub_warn_msg"),
           this.getTitle(),
           JOptionPane.ERROR_MESSAGE);
@@ -312,6 +297,14 @@ public class AcquirePublishDialog extends JDialog {
       }
     }
 
+    SwingWorker<File, AcquireImageInfo> dicomizeTask =
+        getFileAcquireImageInfoSwingWorker(toPublish);
+
+    ThreadUtil.buildNewSingleThreadExecutor("Dicomize").execute(dicomizeTask); // NON-NLS
+  }
+
+  private SwingWorker<File, AcquireImageInfo> getFileAcquireImageInfoSwingWorker(
+      List<AcquireImageInfo> toPublish) {
     SwingWorker<File, AcquireImageInfo> dicomizeTask = new DicomizeTask(toPublish);
     ActionListener taskCancelActionListener = e -> dicomizeTask.cancel(true);
 
@@ -324,7 +317,7 @@ public class AcquirePublishDialog extends JDialog {
           } else if ("state".equals(evt.getPropertyName())) {
 
             if (StateValue.STARTED == evt.getNewValue()) {
-              resolutionPane.setVisible(false);
+              resolutionCombo.setEnabled(false);
               progressBar.setVisible(true);
               publishButton.setEnabled(false);
               cancelButton.removeActionListener(clearAndHideActionListener);
@@ -345,11 +338,21 @@ public class AcquirePublishDialog extends JDialog {
 
                 if (exportDirDicom != null) {
                   AbstractDicomNode node = (AbstractDicomNode) comboNode.getSelectedItem();
-                  publishPanel.publishDirDicom(exportDirDicom, node, toPublish);
+                  String weasisAet =
+                      GuiUtils.getUICore()
+                          .getSystemPreferences()
+                          .getProperty("weasis.aet"); // NON-NLS
+                  if (!StringUtil.hasText(weasisAet)) {
+                    weasisAet =
+                        comboCallingNode.getSelectedItem() == null
+                            ? "WEASIS_AE" // NON-NLS
+                            : ((DefaultDicomNode) comboCallingNode.getSelectedItem()).getAeTitle();
+                  }
+                  publishPanel.publishDirDicom(exportDirDicom, node, weasisAet, toPublish);
                   clearAndHide();
                 } else {
                   JOptionPane.showMessageDialog(
-                      this,
+                      WinUtil.getValidComponent(this),
                       Messages.getString("AcquirePublishDialog.dicomize_error_msg"),
                       Messages.getString("AcquirePublishDialog.dicomize_error_title"),
                       JOptionPane.ERROR_MESSAGE);
@@ -357,7 +360,7 @@ public class AcquirePublishDialog extends JDialog {
               }
 
               if (exportDirDicom == null) {
-                resolutionPane.setVisible(!getOversizedSelected(publishTree).isEmpty());
+                resolutionCombo.setEnabled(!getOversizedSelected(publishTree).isEmpty());
                 progressBar.setValue(0);
                 progressBar.setVisible(false);
                 publishButton.setEnabled(true);
@@ -367,8 +370,7 @@ public class AcquirePublishDialog extends JDialog {
             }
           }
         });
-
-    ThreadUtil.buildNewSingleThreadExecutor("Dicomize").execute(dicomizeTask); // NON-NLS
+    return dicomizeTask;
   }
 
   private static void setZoomRatio(AcquireImageInfo imgInfo, Double ratio) {
@@ -406,9 +408,13 @@ public class AcquirePublishDialog extends JDialog {
     if (node != null) {
       MediaImporterFactory.EXPORT_PERSISTENCE.setProperty(LAST_SEL_NODE, node.getDescription());
     }
+    final AbstractDicomNode callingNode = (AbstractDicomNode) comboCallingNode.getSelectedItem();
+    if (callingNode != null) {
+      MediaImporterFactory.EXPORT_PERSISTENCE.setProperty(
+          LAST_CALLING_NODE, callingNode.getDescription());
+    }
     Preferences prefs =
-        BundlePreferences.getDefaultPreferences(
-            FrameworkUtil.getBundle(this.getClass()).getBundleContext());
+        BundlePreferences.getDefaultPreferences(AppProperties.getBundleContext(this.getClass()));
     if (prefs != null) {
       Preferences p = prefs.node(PREFERENCE_NODE);
       Resolution resolution = (Resolution) resolutionCombo.getSelectedItem();

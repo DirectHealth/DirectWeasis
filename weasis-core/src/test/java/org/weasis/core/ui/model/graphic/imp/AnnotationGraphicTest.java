@@ -9,7 +9,7 @@
  */
 package org.weasis.core.ui.model.graphic.imp;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.awt.Color;
 import java.awt.geom.Point2D;
@@ -25,7 +25,7 @@ public class AnnotationGraphicTest extends GraphicTester<AnnotationGraphic> {
   private static final String XML_1 = "/graphic/annotation/annotation.graphic.1.xml"; // NON-NLS
 
   static final String BASIC_TPL =
-      "<annotation fill=\"%s\" showLabel=\"%s\" thickness=\"%s\" insideOpacity=\"%s\" uuid=\"%s\">" // NON-NLS
+      "<annotation fillOpacity=\"%s\" fill=\"%s\" showLabel=\"%s\" thickness=\"%s\" uuid=\"%s\">" // NON-NLS
           + "<paint rgb=\"%s\"/>" // NON-NLS
           + "<pts/>" // NON-NLS
           + "</annotation>"; // NON-NLS
@@ -55,10 +55,10 @@ public class AnnotationGraphicTest extends GraphicTester<AnnotationGraphic> {
   @Override
   public Object[] getParameters() {
     return new Object[] {
+      Graphic.DEFAULT_FILL_OPACITY,
       Graphic.DEFAULT_FILLED,
       Graphic.DEFAULT_LABEL_VISIBLE,
       Graphic.DEFAULT_LINE_THICKNESS,
-      Graphic.DEFAULT_INTERIOR_OPACITY,
       getGraphicUuid(),
       WProperties.color2Hexadecimal(Graphic.DEFAULT_COLOR, true)
     };
@@ -66,10 +66,10 @@ public class AnnotationGraphicTest extends GraphicTester<AnnotationGraphic> {
 
   public static void checkForDeserializeBasicGraphic(
       AnnotationGraphic result, AnnotationGraphic expected) {
-    assertThat(result.getLabels()).isNullOrEmpty();
-    assertThat(result.getLabelBounds()).isNull();
-    assertThat(result.getLabelWidth()).isNull();
-    assertThat(result.getLabelHeight()).isNull();
+    assertTrue(result.getLabels() == null || result.getLabels().length == 0);
+    assertNull(result.getLabelBounds());
+    assertNull(result.getLabelWidth());
+    assertNull(result.getLabelHeight());
   }
 
   @Override

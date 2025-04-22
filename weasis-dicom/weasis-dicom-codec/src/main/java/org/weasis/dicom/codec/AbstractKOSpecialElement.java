@@ -25,11 +25,13 @@ import java.util.stream.Collectors;
 import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.Tag;
 import org.weasis.core.api.gui.util.Filter;
+import org.weasis.core.api.util.ResourceUtil.OtherIcon;
+import org.weasis.core.api.util.ResourceUtil.ResourceIconPath;
 import org.weasis.core.util.StringUtil;
-import org.weasis.dicom.codec.macro.HierarchicalSOPInstanceReference;
-import org.weasis.dicom.codec.macro.KODocumentModule;
-import org.weasis.dicom.codec.macro.SOPInstanceReferenceAndMAC;
-import org.weasis.dicom.codec.macro.SeriesAndInstanceReference;
+import org.weasis.dicom.macro.HierarchicalSOPInstanceReference;
+import org.weasis.dicom.macro.KODocumentModule;
+import org.weasis.dicom.macro.SOPInstanceReferenceAndMAC;
+import org.weasis.dicom.macro.SeriesAndInstanceReference;
 
 public class AbstractKOSpecialElement extends HiddenSpecialElement {
 
@@ -39,12 +41,14 @@ public class AbstractKOSpecialElement extends HiddenSpecialElement {
     private final String sopInstanceUID;
     private final String sopClassUID;
     private final List<Integer> frameList;
+    private final Integer instanceNumber;
 
     public Reference(DicomImageElement dicomImage) {
       studyInstanceUID = TagD.getTagValue(dicomImage, Tag.StudyInstanceUID, String.class);
       seriesInstanceUID = TagD.getTagValue(dicomImage, Tag.SeriesInstanceUID, String.class);
       sopInstanceUID = TagD.getTagValue(dicomImage, Tag.SOPInstanceUID, String.class);
       sopClassUID = TagD.getTagValue(dicomImage, Tag.SOPClassUID, String.class);
+      instanceNumber = TagD.getTagValue(dicomImage, Tag.InstanceNumber, Integer.class);
 
       if (dicomImage.getMediaReader().getMediaElementNumber() > 1) {
         Integer frame = TagD.getTagValue(dicomImage, Tag.InstanceNumber, Integer.class);
@@ -60,11 +64,13 @@ public class AbstractKOSpecialElement extends HiddenSpecialElement {
         String seriesInstanceUID,
         String sopInstanceUID,
         String sopClassUID,
+        Integer instanceNumber,
         int[] frames) {
       this.studyInstanceUID = studyInstanceUID;
       this.seriesInstanceUID = seriesInstanceUID;
       this.sopInstanceUID = sopInstanceUID;
       this.sopClassUID = sopClassUID;
+      this.instanceNumber = instanceNumber;
       this.frameList =
           frames == null
               ? Collections.emptyList()
@@ -85,6 +91,10 @@ public class AbstractKOSpecialElement extends HiddenSpecialElement {
 
     public String getSopClassUID() {
       return sopClassUID;
+    }
+
+    public Integer getInstanceNumber() {
+      return instanceNumber;
     }
 
     public List<Integer> getFrameList() {
@@ -116,6 +126,11 @@ public class AbstractKOSpecialElement extends HiddenSpecialElement {
       buf.append(name);
     }
     label = buf.toString();
+  }
+
+  @Override
+  public ResourceIconPath getIconPath() {
+    return OtherIcon.KEY;
   }
 
   protected String getLabelWithoutPrefix() {
@@ -206,6 +221,24 @@ public class AbstractKOSpecialElement extends HiddenSpecialElement {
       updateHierarchicalSOPInstanceReference();
     }
     return sopInstanceReferenceMapBySeriesUID.get(seriesUID);
+  }
+
+  public int getNumberSelectedImages() {
+    return sopInstanceReferenceMapBySeriesUID.values().stream()
+        .mapToInt(
+            m ->
+                m.values().stream()
+                    .mapToInt(
+                        v -> {
+                          int[] frames = v.getReferencedFrameNumber();
+                          if (frames == null || frames.length == 0) {
+                            return 1;
+                          } else {
+                            return frames.length;
+                          }
+                        })
+                    .sum())
+        .sum();
   }
 
   public boolean containsSopInstanceUIDReference(
@@ -333,6 +366,7 @@ public class AbstractKOSpecialElement extends HiddenSpecialElement {
     SOPInstanceReferenceAndMAC referencedSOP = new SOPInstanceReferenceAndMAC();
     referencedSOP.setReferencedSOPInstanceUID(ref.sopInstanceUID);
     referencedSOP.setReferencedSOPClassUID(ref.sopClassUID);
+    referencedSOP.setInstanceNumber(ref.getInstanceNumber());
     referencedSOP.setReferencedFrameNumber(ref.frameList.stream().mapToInt(i -> i).toArray());
     sopInstanceReferenceBySOPInstanceUID.put(ref.sopInstanceUID, referencedSOP);
 

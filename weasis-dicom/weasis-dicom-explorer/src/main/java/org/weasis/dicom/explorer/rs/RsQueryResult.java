@@ -22,6 +22,8 @@ import java.util.List;
 import java.util.Set;
 import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.Tag;
+import org.dcm4che3.img.util.DateTimeUtils;
+import org.dcm4che3.img.util.DicomUtils;
 import org.dcm4che3.json.JSONReader;
 import org.dcm4che3.json.JSONReader.Callback;
 import org.slf4j.Logger;
@@ -40,7 +42,6 @@ import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.DicomSeries;
 import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.TagD.Level;
-import org.weasis.dicom.codec.utils.DicomMediaUtils;
 import org.weasis.dicom.codec.utils.PatientComparator;
 import org.weasis.dicom.codec.utils.SeriesInstanceList;
 import org.weasis.dicom.explorer.DicomModel;
@@ -50,7 +51,6 @@ import org.weasis.dicom.explorer.wado.LoadSeries;
 import org.weasis.dicom.mf.AbstractQueryResult;
 import org.weasis.dicom.mf.SopInstance;
 import org.weasis.dicom.mf.WadoParameters;
-import org.weasis.dicom.util.DateUtil;
 import org.weasis.dicom.web.Multipart;
 
 public class RsQueryResult extends AbstractQueryResult {
@@ -112,7 +112,7 @@ public class RsQueryResult extends AbstractQueryResult {
       buf.append("/studies?00100020="); // NON-NLS
       String patientVal = beginIndex <= 0 ? patientID : patientID.substring(0, beginIndex);
       try {
-        buf.append(URLEncoder.encode(patientVal, StandardCharsets.UTF_8.toString()));
+        buf.append(URLEncoder.encode(patientVal, StandardCharsets.UTF_8));
         if (beginIndex > 0) {
           buf.append("&00100021=");
           buf.append(patientID.substring(beginIndex + 3));
@@ -161,7 +161,7 @@ public class RsQueryResult extends AbstractQueryResult {
     if (StringUtil.hasText(rsQueryParams.getLowerDateTime())) {
       Date lowerDateTime = null;
       try {
-        lowerDateTime = DateUtil.parseXmlDateTime(rsQueryParams.getLowerDateTime()).getTime();
+        lowerDateTime = DateTimeUtils.parseXmlDateTime(rsQueryParams.getLowerDateTime()).getTime();
       } catch (Exception e) {
         LOGGER.error("Cannot parse date: {}", rsQueryParams.getLowerDateTime(), e);
       }
@@ -182,7 +182,7 @@ public class RsQueryResult extends AbstractQueryResult {
     if (StringUtil.hasText(rsQueryParams.getUpperDateTime())) {
       Date upperDateTime = null;
       try {
-        upperDateTime = DateUtil.parseXmlDateTime(rsQueryParams.getUpperDateTime()).getTime();
+        upperDateTime = DateTimeUtils.parseXmlDateTime(rsQueryParams.getUpperDateTime()).getTime();
       } catch (Exception e) {
         LOGGER.error("Cannot parse date: {}", rsQueryParams.getUpperDateTime(), e);
       }
@@ -484,7 +484,7 @@ public class RsQueryResult extends AbstractQueryResult {
       Attributes instanceDataSet, SeriesInstanceList seriesInstanceList, String seriesRetrieveURL) {
     String sopUID = instanceDataSet.getString(Tag.SOPInstanceUID);
     Integer frame =
-        DicomMediaUtils.getIntegerFromDicomElement(instanceDataSet, Tag.InstanceNumber, null);
+        DicomUtils.getIntegerFromDicomElement(instanceDataSet, Tag.InstanceNumber, null);
 
     SopInstance sop = seriesInstanceList.getSopInstance(sopUID, frame);
     if (sop == null) {
@@ -555,14 +555,14 @@ public class RsQueryResult extends AbstractQueryResult {
     return study;
   }
 
-  private Series getSeries(
+  private DicomSeries getSeries(
       MediaSeriesGroup study, final Attributes seriesDataset, boolean startDownloading) {
     if (seriesDataset == null) {
       throw new IllegalArgumentException("seriesDataset cannot be null");
     }
     String seriesUID = seriesDataset.getString(Tag.SeriesInstanceUID);
     DicomModel model = rsQueryParams.getDicomModel();
-    Series dicomSeries = (Series) model.getHierarchyNode(study, seriesUID);
+    DicomSeries dicomSeries = (DicomSeries) model.getHierarchyNode(study, seriesUID);
     if (dicomSeries == null) {
       dicomSeries = new DicomSeries(seriesUID);
       dicomSeries.setTag(TagD.get(Tag.SeriesInstanceUID), seriesUID);

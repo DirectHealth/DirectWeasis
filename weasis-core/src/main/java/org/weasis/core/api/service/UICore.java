@@ -18,12 +18,14 @@ import bibliothek.gui.dock.common.CWorkingArea;
 import bibliothek.gui.dock.common.event.CVetoFocusListener;
 import bibliothek.gui.dock.common.intern.CDockable;
 import bibliothek.gui.dock.event.KeyboardListener;
+import java.awt.GraphicsEnvironment;
 import java.awt.Window;
 import java.awt.event.KeyEvent;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.lang.management.ManagementFactory;
 import java.net.HttpURLConnection;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -35,8 +37,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Locale.Category;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Properties;
+import javax.management.InstanceNotFoundException;
+import javax.management.JMException;
+import javax.management.MBeanServer;
+import javax.management.ObjectName;
 import org.osgi.framework.BundleContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,20 +50,22 @@ import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.WinUtil;
 import org.weasis.core.api.media.data.Codec;
+import org.weasis.core.api.media.data.MediaElement;
 import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.util.ClosableURLConnection;
 import org.weasis.core.api.util.LocalUtil;
 import org.weasis.core.api.util.NetworkUtil;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.URLParameters;
-import org.weasis.core.ui.docking.DockableTool;
 import org.weasis.core.ui.editor.SeriesViewer;
 import org.weasis.core.ui.editor.SeriesViewerFactory;
 import org.weasis.core.ui.editor.image.ViewerPlugin;
+import org.weasis.core.ui.launcher.Launcher;
 import org.weasis.core.ui.util.ToolBarContainer;
 import org.weasis.core.ui.util.Toolbar;
 import org.weasis.core.util.FileUtil;
 import org.weasis.core.util.StringUtil;
+import org.weasis.pref.ConfigData;
 
 public final class UICore {
   public static final String P_FORMAT_CODE = "locale.format.code";
@@ -66,8 +73,9 @@ public final class UICore {
   public static final String CONFIRM_CLOSE = "weasis.confirm.closing";
   public static final String LINUX_WINDOWS_DECORATION = "weasis.linux.windows.decoration";
   private static final Logger LOGGER = LoggerFactory.getLogger(UICore.class);
-  private static final UICore INSTANCE = new UICore();
   private final ToolBarContainer toolbarContainer;
+  private final List<Launcher> dicomLaunchers;
+  private final List<Launcher> otherLaunchers;
   public final List<ViewerPlugin<?>> viewerPlugins;
   private final List<DataExplorerView> explorerPlugins;
   private final List<Toolbar> explorerPluginToolbars;
@@ -77,19 +85,30 @@ public final class UICore {
   private final CContentArea baseArea;
   private final CWorkingArea mainArea;
 
-  private final List<Codec> codecPlugins;
+  private final List<Codec<MediaElement>> codecPlugins;
   private final WProperties systemPreferences;
   private final WProperties localPersistence;
   private final WProperties initialSystemPreferences;
+  private final ConfigData configData;
   private final HashMap<String, WProperties> pluginPersistenceMap;
   private final File propsFile;
+
+  private static final class Holder {
+    private static final UICore INSTANCE = new UICore();
+  }
 
   /** Do not instantiate UICore, get OSGI singleton service from GuiUtils.getUICore() */
   private UICore() {
     this.dockingControl = new CControl();
-    this.baseArea = dockingControl.getContentArea();
+    if (GraphicsEnvironment.isHeadless()) {
+      this.baseArea = null; // For test where no GUI is available
+    } else {
+      this.baseArea = dockingControl.getContentArea();
+    }
     this.mainArea = dockingControl.createWorkingArea("mainArea");
     this.toolbarContainer = new ToolBarContainer();
+
+    this.configData = retrieveconfigData();
     this.initialSystemPreferences = new WProperties();
     this.systemPreferences = new WProperties();
     this.pluginPersistenceMap = new HashMap<>();
@@ -135,10 +154,33 @@ public final class UICore {
 
     File dataFolder = AppProperties.getBundleDataFolder(context);
     FileUtil.readProperties(new File(dataFolder, "persistence.properties"), localPersistence);
+
+    this.dicomLaunchers = Launcher.loadLaunchers(Launcher.Type.DICOM);
+    this.otherLaunchers = Launcher.loadLaunchers(Launcher.Type.OTHER);
   }
 
+  private static ConfigData retrieveconfigData() {
+    MBeanServer server = ManagementFactory.getPlatformMBeanServer();
+    try {
+      ObjectName objectName = ObjectName.getInstance("weasis:name=MainWindow"); // NON-NLS
+      Object preferences = server.getAttribute(objectName, "ConfigData");
+      if (preferences instanceof ConfigData configData) {
+        return configData;
+      }
+    } catch (InstanceNotFoundException ignored) {
+    } catch (JMException e) {
+      LOGGER.debug("Error while receiving main window", e);
+    }
+    throw new IllegalStateException("Cannot retrieve ConfigData");
+  }
+
+  /**
+   * Thread safe singleton instance.
+   *
+   * @return a thread safe singleton instance with a lazy initialization.
+   */
   public static UICore getInstance() {
-    return INSTANCE;
+    return Holder.INSTANCE;
   }
 
   private void readSystemPreferences(BundleContext context) {
@@ -259,21 +301,19 @@ public final class UICore {
   }
 
   public String getConfigServiceUrl() {
-    return INSTANCE.getSystemPreferences().getProperty("weasis.config.url");
+    return systemPreferences.getProperty("weasis.config.url");
   }
 
   public String getStatisticServiceUrl() {
-    return INSTANCE.getSystemPreferences().getProperty("weasis.stat.url");
+    return systemPreferences.getProperty("weasis.stat.url");
   }
 
   public boolean isLocalSession() {
-    return INSTANCE.getSystemPreferences().getBooleanProperty("weasis.pref.local.session", false);
+    return systemPreferences.getBooleanProperty("weasis.pref.local.session", false);
   }
 
   public boolean isStoreLocalSession() {
-    return INSTANCE
-        .getSystemPreferences()
-        .getBooleanProperty("weasis.pref.store.local.session", false);
+    return systemPreferences.getBooleanProperty("weasis.pref.store.local.session", false);
   }
 
   public synchronized void saveSystemPreferences() {
@@ -301,6 +341,14 @@ public final class UICore {
 
   public CControl getDockingControl() {
     return dockingControl;
+  }
+
+  public List<Launcher> getDicomLaunchers() {
+    return dicomLaunchers;
+  }
+
+  public List<Launcher> getOtherLaunchers() {
+    return otherLaunchers;
   }
 
   public CWorkingArea getMainArea() {
@@ -339,8 +387,12 @@ public final class UICore {
     return dockingVetoFocus;
   }
 
-  public List<Codec> getCodecPlugins() {
+  public List<Codec<MediaElement>> getCodecPlugins() {
     return codecPlugins;
+  }
+
+  public ConfigData getConfigData() {
+    return configData;
   }
 
   /**
@@ -515,41 +567,13 @@ public final class UICore {
 
   public void closeSeriesViewer(final List<? extends ViewerPlugin<?>> pluginsToRemove) {
     if (pluginsToRemove != null) {
-      GuiExecutor.instance()
-          .execute(
-              () -> {
-                for (final ViewerPlugin<?> viewerPlugin : pluginsToRemove) {
-                  viewerPlugin.close();
-                  viewerPlugin.handleFocusAfterClosing();
-                }
-              });
-    }
-  }
-
-  public void updateTools(SeriesViewer<?> oldPlugin, SeriesViewer<?> plugin, boolean force) {
-    List<DockableTool> oldTool = oldPlugin == null ? null : oldPlugin.getToolPanel();
-    List<DockableTool> tool = plugin == null ? null : plugin.getToolPanel();
-    if (force || !Objects.equals(tool, oldTool)) {
-      if (oldTool != null) {
-        for (DockableTool p : oldTool) {
-          p.closeDockable();
-        }
-      }
-      if (tool != null) {
-        for (DockableTool p : tool) {
-          if (p.isComponentEnabled()) {
-            p.showDockable();
-          }
-        }
-      }
-    }
-  }
-
-  public void updateToolbars(SeriesViewer<?> oldPlugin, SeriesViewer<?> plugin, boolean force) {
-    List<Toolbar> oldToolBars = oldPlugin == null ? null : oldPlugin.getToolBars();
-    List<Toolbar> toolBars = plugin == null ? null : plugin.getToolBars();
-    if (force || toolBars != oldToolBars) {
-      toolbarContainer.registerToolBar(toolBars);
+      GuiExecutor.execute(
+          () -> {
+            for (final ViewerPlugin<?> viewerPlugin : pluginsToRemove) {
+              viewerPlugin.close();
+              viewerPlugin.handleFocusAfterClosing();
+            }
+          });
     }
   }
 }

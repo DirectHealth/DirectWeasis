@@ -11,7 +11,7 @@ PACKAGE=YES
 # jdk.unsupported => sun.misc.Signal
 # jdk.localedata => other locale (en_us) data are included in the jdk.localedata
 # jdk.jdwp.agent => package for debugging agent
-JDK_MODULES="java.base,java.compiler,java.datatransfer,java.net.http,java.desktop,java.logging,java.management,java.prefs,java.xml,jdk.localedata,jdk.charsets,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.unsupported,jdk.jdwp.agent"
+JDK_MODULES="java.base,java.compiler,java.datatransfer,java.net.http,java.desktop,java.logging,java.management,java.prefs,java.xml,jdk.localedata,jdk.charsets,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.unsupported,jdk.jdwp.agent,java.sql"
 NAME="Weasis"
 IDENTIFIER="org.weasis.launcher"
 
@@ -183,7 +183,7 @@ else
   INPUT_DIR="$INPUT_PATH_UNIX/weasis"
 fi
 
-WEASIS_CLEAN_VERSION=$(echo "$WEASIS_VERSION" | sed -e 's/"//g' -e 's/-.*//')
+WEASIS_CLEAN_VERSION=$(echo "$WEASIS_VERSION" | sed -e 's/"//g' -e 's/-.*//' -e 's/\(\([0-9]\+\.\)\{2\}[0-9]\+\)\.[0-9]\+/\1/')
 
 
 # Remove pack jar for launcher
@@ -196,6 +196,16 @@ find "$INPUT_DIR"/bundle/jogamp-* -type f ! -name '*-'"${ARC_OS}"'-*' ! -name 'j
 # Special case with 32-bit x86 architecture, remove 64-bit lib
 if [ "$arc" = "x86" ] ; then
   find "$INPUT_DIR"/bundle/*-x86* -type f -name "*-${machine}-x86-64-*"  -exec rm -f {} \;
+fi
+
+if [ "$machine" = "macosx" ] ; then
+    mkdir jar_contents
+    unzip "$INPUT_DIR"/weasis-launcher.jar -d jar_contents
+    codesign --force --deep --timestamp --sign "$CERTIFICATE" -vvv jar_contents/com/formdev/flatlaf/natives/libflatlaf-macos-arm64.dylib
+    codesign --force --deep --timestamp --sign "$CERTIFICATE" -vvv jar_contents/com/formdev/flatlaf/natives/libflatlaf-macos-x86_64.dylib
+    jar cfv weasis-launcher.jar -C jar_contents .
+    mv -f weasis-launcher.jar "$INPUT_DIR"/weasis-launcher.jar
+    rm -rf jar_contents
 fi
 
 # Remove previous package
@@ -232,7 +242,7 @@ else
 fi
 declare -a commonOptions=("--java-options" "-Dgosh.port=17179" \
 "--java-options" "-Djavax.accessibility.assistive_technologies=org.weasis.launcher.EmptyAccessibilityProvider" \
-"--java-options" "-Djavax.accessibility.screen_magnifier_present=false" "--java-options" "--enable-preview" \
+"--java-options" "-Djavax.accessibility.screen_magnifier_present=false" \
 "--java-options" "--add-exports=java.base/sun.net.www.protocol.http=ALL-UNNAMED" "--java-options" "--add-exports=java.base/sun.net.www.protocol.file=ALL-UNNAMED" \
 "--java-options" "--add-exports=java.base/sun.net.www.protocol.https=ALL-UNNAMED" "--java-options" "--add-exports=java.base/sun.net.www.protocol.ftp=ALL-UNNAMED" \
 "--java-options" "--add-exports=java.base/sun.net.www.protocol.jar=ALL-UNNAMED" "--java-options" "--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED" \
@@ -246,9 +256,13 @@ $JPKGCMD --type app-image --input "$INPUT_DIR" --dest "$OUTPUT_PATH" --name "$NA
 --add-launcher "${DICOMIZER_CONFIG}" --resource-dir "$RES"  --app-version "$WEASIS_CLEAN_VERSION" \
 "${tmpArgs[@]}" --verbose "${signArgs[@]}" "${customOptions[@]}" "${commonOptions[@]}"
 
+if [ "$machine" = "macosx" ] ; then
+    codesign --timestamp --entitlements "$RES/uri-launcher.entitlements" --options runtime --force -vvv --sign "$CERTIFICATE" "$RES/$NAME.app"
+fi
+
 if [ "$PACKAGE" = "YES" ] ; then
   VENDOR="Weasis Team"
-  COPYRIGHT="© 2009-2023 Weasis Team"
+  COPYRIGHT="© 2009-2024 Weasis Team"
   if [ "$machine" = "windows" ] ; then
     [ "$arc" = "x86" ]  && UPGRADE_UID="3aedc24e-48a8-4623-ab39-0c3c01c7383b" || UPGRADE_UID="3aedc24e-48a8-4623-ab39-0c3c01c7383a"
     $JPKGCMD --type "msi" --app-image "$IMAGE_PATH" --dest "$OUTPUT_PATH" --name "$NAME" --resource-dir "$RES/msi/${arc}" \

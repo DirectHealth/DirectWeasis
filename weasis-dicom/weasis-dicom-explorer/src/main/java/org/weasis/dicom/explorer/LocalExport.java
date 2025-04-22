@@ -271,7 +271,8 @@ public class LocalExport extends AbstractItemDialogPage implements ExportDicom {
 
       int response =
           JOptionPane.showOptionDialog(
-              WinUtil.getParentWindow(this), // Use parent because this has large size
+              WinUtil.getValidComponent(
+                  WinUtil.getParentWindow(this)), // Use parent because this has large size
               options.toArray(),
               Messages.getString("LocalExport.export_message"),
               JOptionPane.OK_CANCEL_OPTION,
@@ -332,7 +333,8 @@ public class LocalExport extends AbstractItemDialogPage implements ExportDicom {
 
       int response =
           JOptionPane.showOptionDialog(
-              WinUtil.getParentWindow(this), // Use parent because this has large size
+              WinUtil.getValidComponent(
+                  WinUtil.getParentWindow(this)), // Use parent because this has large size
               options.toArray(),
               Messages.getString("LocalExport.export_message"),
               JOptionPane.OK_CANCEL_OPTION,
@@ -694,6 +696,9 @@ public class LocalExport extends AbstractItemDialogPage implements ExportDicom {
                     tsuid, onlyRaw, dicomEditors, jpegQuality, compressionRatio);
             Attributes attributes = img.saveToFile(destinationFile, dicomExportParameters);
             if (attributes != null) {
+              if (attributes.isEmpty()) {
+                attributes = img.getMediaReader().getDicomObject();
+              }
               writeInDicomDir(writer, attributes, node, iuid, destinationFile);
             }
           } else if (node.getUserObject() instanceof DicomElement dcm) {
@@ -713,6 +718,9 @@ public class LocalExport extends AbstractItemDialogPage implements ExportDicom {
                     null, onlyRaw, getAttributeEditors(editor), jpegQuality, compressionRatio);
             Attributes attributes = dcm.saveToFile(destinationFile, dicomExportParameters);
             if (attributes != null) {
+              if (attributes.isEmpty()) {
+                attributes = dcm.getMediaReader().getDicomObject();
+              }
               writeInDicomDir(writer, attributes, node, iuid, destinationFile);
             }
           } else if (node.getUserObject() instanceof Series) {

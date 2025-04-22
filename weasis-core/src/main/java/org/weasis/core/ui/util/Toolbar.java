@@ -13,8 +13,5 @@ import org.weasis.core.api.gui.Insertable;
 
 public interface Toolbar extends Insertable {
 
-  @Override
-  Type getType();
-
   WtoolBar getComponent();
 }

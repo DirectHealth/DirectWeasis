@@ -12,36 +12,31 @@ package org.weasis.launcher;
 import com.formdev.flatlaf.util.SystemInfo;
 import java.awt.Desktop;
 import java.io.IOException;
-import java.lang.System.Logger;
-import java.lang.System.Logger.Level;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
 import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import javax.crypto.Cipher;
-import javax.crypto.spec.SecretKeySpec;
+import org.slf4j.LoggerFactory;
 
 public class Utils {
-  private static final Logger LOGGER = System.getLogger(Utils.class.getName());
+  private static final org.slf4j.Logger LOGGER = LoggerFactory.getLogger(Utils.class);
 
   private Utils() {}
 
-  public static boolean getEmptytoFalse(String val) {
+  public static boolean getEmptyToFalse(String val) {
     if (hasText(val)) {
       return getBoolean(val);
     }
     return false;
   }
 
-  public static boolean geEmptytoTrue(String val) {
+  public static boolean geEmptyToTrue(String val) {
     if (hasText(val)) {
       return getBoolean(val);
     }
@@ -53,11 +48,7 @@ public class Utils {
   }
 
   public static boolean hasLength(CharSequence str) {
-    return str != null && str.length() > 0;
-  }
-
-  public static boolean hasLength(String str) {
-    return hasLength((CharSequence) str);
+    return str != null && !str.isEmpty();
   }
 
   public static boolean hasText(CharSequence str) {
@@ -73,12 +64,12 @@ public class Utils {
     return false;
   }
 
-  public static boolean hasText(String str) {
-    return hasText((CharSequence) str);
+  public static Pattern getWeasisProtocolPattern() {
+    return Pattern.compile("^weasis(-.*)?://.*?");
   }
 
   public static String getWeasisProtocol(String... params) {
-    Pattern pattern = Pattern.compile("^weasis(-.*)?://.*?");
+    Pattern pattern = getWeasisProtocolPattern();
     for (String p : params) {
       if (pattern.matcher(p).matches()) {
         return p;
@@ -88,7 +79,7 @@ public class Utils {
   }
 
   public static int getWeasisProtocolIndex(String... params) {
-    Pattern pattern = Pattern.compile("^weasis(-.*)?://.*?");
+    Pattern pattern = getWeasisProtocolPattern();
     for (int i = 0; i < params.length; i++) {
       if (pattern.matcher(params[i]).matches()) {
         return i;
@@ -142,20 +133,11 @@ public class Utils {
               FileUtil.gzipUncompressToByte(
                   Base64.getDecoder().decode(value.getBytes(StandardCharsets.UTF_8)));
         } catch (IOException e) {
-          System.getLogger(Utils.class.getName()).log(Level.ERROR, "Get byte property", e);
+          LOGGER.error("Get byte property", e);
         }
       }
     }
     return result;
-  }
-
-  public static byte[] decrypt(byte[] input, String strKey) throws GeneralSecurityException {
-    SecretKeySpec skeyspec =
-        new SecretKeySpec(
-            Objects.requireNonNull(strKey).getBytes(StandardCharsets.UTF_8), "Blowfish"); // NON-NLS
-    Cipher cipher = Cipher.getInstance("Blowfish"); // NON-NLS
-    cipher.init(Cipher.DECRYPT_MODE, skeyspec);
-    return cipher.doFinal(input);
   }
 
   public static void openInDefaultBrowser(URL url) {
@@ -165,7 +147,7 @@ public class Utils {
           String[] cmd = new String[] {"xdg-open", url.toString()}; // NON-NLS
           Runtime.getRuntime().exec(cmd);
         } catch (IOException e) {
-          LOGGER.log(Level.ERROR, "Cannot open URL to the system browser", e);
+          LOGGER.error("Cannot open URL to the system browser", e);
         }
       } else if (Desktop.isDesktopSupported()) {
         final Desktop desktop = Desktop.getDesktop();
@@ -173,11 +155,11 @@ public class Utils {
           try {
             desktop.browse(url.toURI());
           } catch (IOException | URISyntaxException e) {
-            LOGGER.log(Level.ERROR, "Cannot open URL to the desktop browser", e);
+            LOGGER.error("Cannot open URL to the desktop browser", e);
           }
         }
       } else {
-        LOGGER.log(Level.WARNING, "Cannot open URL to the system browser");
+        LOGGER.warn("Cannot open URL to the system browser");
       }
     }
   }

@@ -1,5 +1,139 @@
 # Changelog
 
+## [v4.6.0](https://github.com/nroduit/Weasis/tree/v4.6.0) (2025-04-17)
+
+[Full Changelog](https://github.com/nroduit/Weasis/compare/v4.5.1...v4.6.0)
+
+**Implemented enhancements:**
+
+- Add charset selection for C-FInd request [\#648](https://github.com/nroduit/Weasis/issues/648)
+- Add a Minimize Option to weasis:ui Command [\#644](https://github.com/nroduit/Weasis/issues/644)
+- Do open DICOM SR by default [\#638](https://github.com/nroduit/Weasis/issues/638)
+- Display time zone for Time attributes and adapt to local time for DateTime attributes [\#636](https://github.com/nroduit/Weasis/issues/636)
+- Update dcm4che to 5.33.1 [\#626](https://github.com/nroduit/Weasis/issues/626)
+- Update Flatlaf to 3.5.4 [\#625](https://github.com/nroduit/Weasis/issues/625)
+- Measurements in ADC series \(MRI\) [\#614](https://github.com/nroduit/Weasis/issues/614)
+- 3D View - Oblique MPR - Part 2 [\#390](https://github.com/nroduit/Weasis/issues/390)
+
+**Fixed bugs:**
+
+- Crash at startup with specific configuration of remote preferences [\#651](https://github.com/nroduit/Weasis/issues/651)
+- When importing DICOM Zip, the password window closes unexpectedly when clicking outside [\#650](https://github.com/nroduit/Weasis/issues/650)
+- SUV is not calculated when TimezoneOffsetFromUTC is negative [\#635](https://github.com/nroduit/Weasis/issues/635)
+- When a series is replaced in a view, the Presentation State applies even without a reference [\#631](https://github.com/nroduit/Weasis/issues/631)
+- Sometimes the download process remains even after cancellation [\#630](https://github.com/nroduit/Weasis/issues/630)
+- Patient navigation using shortcuts does not work correctly [\#629](https://github.com/nroduit/Weasis/issues/629)
+- The main window is not visible when a screen changes its origin \(x,y\) [\#628](https://github.com/nroduit/Weasis/issues/628)
+- Greek Characters not displayed properly [\#627](https://github.com/nroduit/Weasis/issues/627)
+- PT/CT fusion images display HU as the pixel unit [\#624](https://github.com/nroduit/Weasis/issues/624)
+- JPEG-LS: Samples per Pixel = 3 and interleave mode 'none' [\#623](https://github.com/nroduit/Weasis/issues/623)
+- GSPS with double inversions \(MONOCHROME1 & INVERSE\) gets inverted once [\#620](https://github.com/nroduit/Weasis/issues/620)
+- Potential Thread Synchronization Issue in LoadSeries.java [\#618](https://github.com/nroduit/Weasis/issues/618)
+- KO toggle button state runs incorrectly in tile mode [\#615](https://github.com/nroduit/Weasis/issues/615)
+- IVUS is not properly displayed [\#612](https://github.com/nroduit/Weasis/issues/612)
+- Empty modal window when importing or creating new series in Dicomizer [\#599](https://github.com/nroduit/Weasis/issues/599)
+- Not installing on MacOS [\#587](https://github.com/nroduit/Weasis/issues/587)
+- Cross position of MPR is not as expected when return from fullscreen. [\#572](https://github.com/nroduit/Weasis/issues/572)
+
+**Security fixes:**
+
+- Fixes CWE-522 [\#608](https://github.com/nroduit/Weasis/issues/608)
+- Weasis security issue [\#607](https://github.com/nroduit/Weasis/issues/607)
+
+**Closed issues:**
+
+- Hidden thumbnails of a study [\#584](https://github.com/nroduit/Weasis/issues/584)
+
+**Merged pull requests:**
+
+- Bump the maven group in /weasis-parent with 2 updates [\#619](https://github.com/nroduit/Weasis/pull/619) ([dependabot[bot]](https://github.com/apps/dependabot))
+- fixed \#615 KO toggle button state runs incorrectly in tile mode [\#617](https://github.com/nroduit/Weasis/pull/617) ([a347807131](https://github.com/a347807131))
+
+## [v4.5.1](https://github.com/nroduit/Weasis/tree/v4.5.1) (2024-09-18)
+
+[Full Changelog](https://github.com/nroduit/Weasis/compare/v4.5.0...v4.5.1)
+
+**Implemented enhancements:**
+
+- URl handler issue on Mac for all users [\#583](https://github.com/nroduit/Weasis/issues/583)
+- Add Dicom Calling Node to Dicom Export -\> Dicom Send. [\#575](https://github.com/nroduit/Weasis/issues/575)
+
+**Fixed bugs:**
+
+- MPR preferences are not persistent [\#589](https://github.com/nroduit/Weasis/issues/589)
+- Separate dock icon on Ubuntu [\#588](https://github.com/nroduit/Weasis/issues/588)
+- DICOMDIR cannot be written if it contains special DICOM elements [\#586](https://github.com/nroduit/Weasis/issues/586)
+- Missing the boot.log file [\#579](https://github.com/nroduit/Weasis/issues/579)
+- Failed to send to DICOM archive [\#577](https://github.com/nroduit/Weasis/issues/577)
+
+**Closed issues:**
+
+- oblique MPR feature. [\#578](https://github.com/nroduit/Weasis/issues/578)
+
+## [v4.5.0](https://github.com/nroduit/Weasis/tree/v4.5.0) (2024-08-15)
+
+[Full Changelog](https://github.com/nroduit/Weasis/compare/v4.4.0...v4.5.0)
+
+**Implemented enhancements:**
+
+- Launch third party applications in Weasis UI [\#570](https://github.com/nroduit/Weasis/issues/570)
+- Command: add close a specific patient from its patient ID [\#562](https://github.com/nroduit/Weasis/issues/562)
+- Improve reading DICOM SEG [\#560](https://github.com/nroduit/Weasis/issues/560)
+- Measurements for US studies [\#32](https://github.com/nroduit/Weasis/issues/32)
+
+**Fixed bugs:**
+
+- In Query/Retrieve view, the selected DICOM node is not preserved when using More Options [\#571](https://github.com/nroduit/Weasis/issues/571)
+- Dicomizer: Limit the number of characters in metadata table according to the DICOM attributes [\#564](https://github.com/nroduit/Weasis/issues/564)
+- Preserve measurement tool unit selection within a series [\#551](https://github.com/nroduit/Weasis/issues/551)
+
+## [v4.4.0](https://github.com/nroduit/Weasis/tree/v4.4.0) (2024-05-06)
+
+[Full Changelog](https://github.com/nroduit/Weasis/compare/v4.3.0...v4.4.0)
+
+**Implemented enhancements:**
+
+- Update weasis-dicom-tools and dcm4che to 5.32.0 [\#547](https://github.com/nroduit/Weasis/issues/547)
+- Replace OSGI Sling logger by Logback 1.5.2 and update to slf4j 2.0.12 [\#540](https://github.com/nroduit/Weasis/issues/540)
+- Update to weasis-core-img 4.9.0.1 [\#539](https://github.com/nroduit/Weasis/issues/539)
+- Update to FlatLaf 3.4.1 [\#538](https://github.com/nroduit/Weasis/issues/538)
+
+**Fixed bugs:**
+
+-  Image editor tools are not visible with Dicomizer [\#546](https://github.com/nroduit/Weasis/issues/546)
+- Issue of removing series from the UI [\#544](https://github.com/nroduit/Weasis/issues/544)
+- Segmentation panel is sometimes not visible when loading DICOM SEG [\#541](https://github.com/nroduit/Weasis/issues/541)
+- MIP rebuild resets the image preset [\#528](https://github.com/nroduit/Weasis/issues/528)
+- Can't open DX studies [\#525](https://github.com/nroduit/Weasis/issues/525)
+
+**Merged pull requests:**
+
+- Changing maven compiler plugin config. Updating UICore singleton. [\#517](https://github.com/nroduit/Weasis/pull/517) ([mriss](https://github.com/mriss))
+
+## [v4.3.0](https://github.com/nroduit/Weasis/tree/v4.3.0) (2024-02-16)
+
+[Full Changelog](https://github.com/nroduit/Weasis/compare/v4.2.1...v4.3.0)
+
+**Implemented enhancements:**
+
+- Fill opacity as a graphic property [\#505](https://github.com/nroduit/Weasis/issues/505)
+- Cine for multiframe: variable speed and sweeping [\#497](https://github.com/nroduit/Weasis/issues/497)
+- Improve tag viewer [\#494](https://github.com/nroduit/Weasis/issues/494)
+- Merging several multiframe files with an identical concatenation UID [\#493](https://github.com/nroduit/Weasis/issues/493)
+- Display an error message when a file is identified as DICOM but cannot be read [\#479](https://github.com/nroduit/Weasis/issues/479)
+- Multiframe image fixed/varibale framerate \(Frame Time Vector support 0018,1065\) [\#424](https://github.com/nroduit/Weasis/issues/424)
+- Color and transparency display options for overlay data  [\#184](https://github.com/nroduit/Weasis/issues/184)
+
+**Fixed bugs:**
+
+- 3D Buttons are not active [\#504](https://github.com/nroduit/Weasis/issues/504)
+- The latest measurement values are not visible in the table [\#502](https://github.com/nroduit/Weasis/issues/502)
+- font size setting of Labels on image does not affect actually. [\#498](https://github.com/nroduit/Weasis/issues/498)
+
+**Closed issues:**
+
+- Weasis does not even reach the splash screen - possible wayland and flatpak interaction?   [\#449](https://github.com/nroduit/Weasis/issues/449)
+
 ## [v4.2.1](https://github.com/nroduit/Weasis/tree/v4.2.1) (2023-11-11)
 
 [Full Changelog](https://github.com/nroduit/Weasis/compare/v4.2.0...v4.2.1)

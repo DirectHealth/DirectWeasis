@@ -116,7 +116,7 @@ public class ThemeSetting extends AbstractItemDialogPage {
                   LOGGER.error("Can't change look and feel", e1);
                 }
               };
-          GuiExecutor.instance().execute(runnable);
+          GuiExecutor.execute(runnable);
         });
 
     if (SystemInfo.isLinux) {
@@ -193,8 +193,8 @@ public class ThemeSetting extends AbstractItemDialogPage {
     if (s == null) return -1;
 
     float units = 1;
-    if (s.endsWith("x")) s = s.substring(0, s.length() - 1);
-    else if (s.endsWith("dpi")) {
+    if (s.endsWith("x")) s = s.substring(0, s.length() - 1); // NON-NLS
+    else if (s.endsWith("dpi")) { // NON-NLS
       units = 96;
       s = s.substring(0, s.length() - 3);
     } else if (s.endsWith("%")) {
@@ -233,7 +233,7 @@ public class ThemeSetting extends AbstractItemDialogPage {
               LOGGER.error("Can't change look and feel", e);
             }
           };
-      GuiExecutor.instance().execute(runnable);
+      GuiExecutor.execute(runnable);
     }
 
     String scale = "-1";
