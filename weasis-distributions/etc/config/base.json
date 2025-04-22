@@ -290,14 +290,14 @@
     },
     {
       "code": "weasis.main.ui",
-      "value": "weasis-base-ui",
+      "value": "direct-base-ui",
       "description": "Application main user interface bundle. Mandatory with the default launcher.",
       "type": "A",
       "category": "LAUNCH"
     },
     {
       "code": "weasis.name",
-      "value": "Weasis",
+      "value": "DirectViewer",
       "description": "Change the name of the application everywhere in UI",
       "type": "AP",
       "category": "LAUNCH"
@@ -377,7 +377,7 @@
     },
     {
       "code": "weasis.copyrights",
-      "value": "© 2009-${build.year} Weasis Team",
+      "value": "© 2024 DirectRad",
       "description": "Copyrights",
       "type": "A",
       "category": "DOC"
@@ -413,7 +413,7 @@
     },
     {
       "code": "locale.lang.code",
-      "value": "en",
+      "value": "pt-BR",
       "description": "Language code (see Java Locale: https://www.oracle.com/java/technologies/javase/jdk20-suported-locales.html). Default value is \"en\".",
       "type": "F",
       "category": "GENERAL"
@@ -427,7 +427,7 @@
     },
     {
       "code": "weasis.aet",
-      "value": "WEASIS_AE",
+      "value": "DIRECT_AE",
       "description": "Calling AETitle for DICOM send and DICOM print",
       "type": "A",
       "category": "DICOM"
