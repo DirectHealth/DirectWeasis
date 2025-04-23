@@ -13,12 +13,15 @@ import bibliothek.gui.DockStation;
 import bibliothek.gui.Dockable;
 import bibliothek.gui.dock.action.view.ActionViewConverter;
 import bibliothek.gui.dock.action.view.ViewTarget;
+import bibliothek.gui.dock.common.CControl;
 import bibliothek.gui.dock.common.CLocation;
+import bibliothek.gui.dock.common.CWorkingArea;
 import bibliothek.gui.dock.common.DefaultSingleCDockable;
 import bibliothek.gui.dock.common.action.CAction;
 import bibliothek.gui.dock.common.action.CButton;
 import bibliothek.gui.dock.common.action.core.CommonSimpleButtonAction;
 import bibliothek.gui.dock.common.action.predefined.CCloseAction;
+import bibliothek.gui.dock.common.event.CVetoFocusListener;
 import bibliothek.gui.dock.common.intern.AbstractCDockable;
 import bibliothek.gui.dock.common.intern.CDockable;
 import bibliothek.gui.dock.common.intern.CommonDockable;
@@ -35,11 +38,12 @@ import javax.swing.JPanel;
 import org.weasis.core.Messages;
 import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.gui.util.GuiExecutor;
+import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.media.data.MediaElement;
 import org.weasis.core.api.media.data.MediaSeriesGroup;
 import org.weasis.core.ui.docking.DockableTool;
-import org.weasis.core.ui.docking.UIManager;
 import org.weasis.core.ui.editor.SeriesViewer;
+import org.weasis.core.ui.editor.SeriesViewerUI;
 import org.weasis.core.ui.editor.ViewerPluginBuilder;
 import org.weasis.core.ui.util.Toolbar;
 
@@ -74,23 +78,23 @@ public abstract class ViewerPlugin<E extends MediaElement> extends JPanel
     this.dockable.setSingleTabShown(true);
     this.dockable.putAction(
         CDockable.ACTION_KEY_CLOSE,
-        new CCloseAction(UIManager.DOCKING_CONTROL) {
+        new CCloseAction(GuiUtils.getUICore().getDockingControl()) {
           @Override
           public void close(CDockable dockable) {
-            UIManager.DOCKING_CONTROL.addVetoFocusListener(UIManager.DOCKING_VETO_FOCUS);
+            CControl control = GuiUtils.getUICore().getDockingControl();
+            CVetoFocusListener vetoFocus = GuiUtils.getUICore().getDockingVetoFocus();
+            control.addVetoFocusListener(vetoFocus);
             super.close(dockable);
-            UIManager.DOCKING_CONTROL.removeVetoFocusListener(UIManager.DOCKING_VETO_FOCUS);
+            control.removeVetoFocusListener(vetoFocus);
             if (dockable.getFocusComponent() instanceof SeriesViewer<?> seriesViewer) {
-              List<DockableTool> oldTool = seriesViewer.getToolPanel();
-              if (oldTool != null) {
-                for (DockableTool p : oldTool) {
-                  p.closeDockable();
-                }
+              List<DockableTool> oldTool = seriesViewer.getSeriesViewerUI().tools;
+              for (DockableTool p : oldTool) {
+                p.closeDockable();
               }
               seriesViewer.close();
             }
             Dockable prevDockable =
-                UIManager.DOCKING_CONTROL
+                control
                     .getController()
                     .getFocusHistory()
                     .getNewestOn(dockable.getWorkingArea().getStation());
@@ -101,7 +105,7 @@ public abstract class ViewerPlugin<E extends MediaElement> extends JPanel
                   && defaultCommonDockable.getDockable()
                       instanceof AbstractCDockable abstractCDockable) {
                 if (abstractCDockable.getFocusComponent() instanceof SeriesViewer<?> plugin) {
-                  UIManager.updateTools(null, plugin, true);
+                  SeriesViewerUI.updateTools(null, plugin, true);
                 }
                 abstractCDockable.toFront();
               }
@@ -148,33 +152,37 @@ public abstract class ViewerPlugin<E extends MediaElement> extends JPanel
   }
 
   public void setSelectedAndGetFocus() {
-    UIManager.DOCKING_CONTROL
+    GuiUtils.getUICore()
+        .getDockingControl()
         .getController()
         .setFocusedDockable(new DefaultFocusRequest(dockable.intern(), this, false, true, false));
   }
 
   public void handleFocusAfterClosing() {
-    int size = UIManager.VIEWER_PLUGINS.size();
+    List<ViewerPlugin<?>> viewerPlugins = GuiUtils.getUICore().getViewerPlugins();
+    int size = viewerPlugins.size();
     if (size > 0) {
-      ViewerPlugin<?> lp = UIManager.VIEWER_PLUGINS.get(size - 1);
+      ViewerPlugin<?> lp = viewerPlugins.get(size - 1);
       if (lp != null) {
         lp.dockable.toFront();
       }
     } else {
       ViewerPluginBuilder.DefaultDataModel.firePropertyChange(
           new ObservableEvent(
-              ObservableEvent.BasicAction.NULL_SELECTION, ViewerPlugin.this, null, null));
+              ObservableEvent.BasicAction.NULL_SELECTION,
+              ViewerPlugin.this.getSeriesViewerUI(),
+              null,
+              null));
     }
   }
 
   @Override
   public void close() {
-    GuiExecutor.instance()
-        .execute(
-            () -> {
-              UIManager.VIEWER_PLUGINS.remove(ViewerPlugin.this);
-              UIManager.DOCKING_CONTROL.removeDockable(dockable);
-            });
+    GuiExecutor.execute(
+        () -> {
+          GuiUtils.getUICore().getViewerPlugins().remove(ViewerPlugin.this);
+          GuiUtils.getUICore().getDockingControl().removeDockable(dockable);
+        });
   }
 
   public Component getComponent() {
@@ -186,34 +194,35 @@ public abstract class ViewerPlugin<E extends MediaElement> extends JPanel
   }
 
   public void showDockable() {
-    GuiExecutor.instance()
-        .execute(
-            () -> {
-              if (!dockable.isVisible()) {
-                if (!UIManager.VIEWER_PLUGINS.contains(ViewerPlugin.this)) {
-                  UIManager.VIEWER_PLUGINS.add(ViewerPlugin.this);
-                }
-                dockable.add(getComponent());
-                dockable.setFocusComponent(ViewerPlugin.this);
-                UIManager.MAIN_AREA.add(getDockable());
-                dockable.setDefaultLocation(
-                    ExtendedMode.NORMALIZED, CLocation.working(UIManager.MAIN_AREA).stack());
-                UIManager.DOCKING_CONTROL.addVetoFocusListener(UIManager.DOCKING_VETO_FOCUS);
-                dockable.setVisible(true);
-                UIManager.DOCKING_CONTROL.removeVetoFocusListener(UIManager.DOCKING_VETO_FOCUS);
-                setSelectedAndGetFocus();
-              }
-            });
+    GuiExecutor.execute(
+        () -> {
+          if (!dockable.isVisible()) {
+            List<ViewerPlugin<?>> viewerPlugins = GuiUtils.getUICore().getViewerPlugins();
+            if (!viewerPlugins.contains(ViewerPlugin.this)) {
+              viewerPlugins.add(ViewerPlugin.this);
+            }
+            dockable.add(getComponent());
+            dockable.setFocusComponent(ViewerPlugin.this);
+            CWorkingArea mainArea = GuiUtils.getUICore().getMainArea();
+            mainArea.add(getDockable());
+            dockable.setDefaultLocation(
+                ExtendedMode.NORMALIZED, CLocation.working(mainArea).stack());
+            CControl control = GuiUtils.getUICore().getDockingControl();
+            CVetoFocusListener vetoFocus = GuiUtils.getUICore().getDockingVetoFocus();
+            control.addVetoFocusListener(vetoFocus);
+            dockable.setVisible(true);
+            control.removeVetoFocusListener(vetoFocus);
+            setSelectedAndGetFocus();
+          }
+        });
   }
 
   public ViewerToolBar getViewerToolBar() {
-    List<Toolbar> bars = getToolBar();
-    if (bars != null) {
-      synchronized (bars) {
-        for (Toolbar t : bars) {
-          if (t instanceof ViewerToolBar viewerToolBar) {
-            return viewerToolBar;
-          }
+    List<Toolbar> bars = getSeriesViewerUI().toolBars;
+    synchronized (bars) {
+      for (Toolbar t : bars) {
+        if (t instanceof ViewerToolBar viewerToolBar) {
+          return viewerToolBar;
         }
       }
     }
@@ -241,7 +250,7 @@ public abstract class ViewerPlugin<E extends MediaElement> extends JPanel
     protected void action() {
       super.action();
       if (dockable.getFocusComponent() instanceof SeriesViewer<?> plugin) {
-        UIManager.updateTools(plugin, closeAll ? null : plugin, true);
+        SeriesViewerUI.updateTools(plugin, closeAll ? null : plugin, true);
       }
       // We need to access the Core API to find out which other Dockables exist.
       DockStation parent = dockable.intern().getDockParent();

@@ -133,10 +133,10 @@ public class Thumbnail extends JLabel implements Thumbnailable {
         } else if (mime.equals("sr/dicom")) { // NON-NLS
           type = Messages.getString("Thumbnail.dicom_sr");
           fileIcon = FileIcon.TEXT;
-        } else if (mime.startsWith("txt")) {
+        } else if (mime.startsWith("txt")) { // NON-NLS
           type = Messages.getString("Thumbnail.text");
           fileIcon = FileIcon.TEXT;
-        } else if (mime.endsWith("html")) {
+        } else if (mime.endsWith("html")) { // NON-NLS
           type = Messages.getString("Thumbnail.html");
           fileIcon = FileIcon.XML;
         } else if (mime.equals("application/pdf")) {
@@ -191,9 +191,11 @@ public class Thumbnail extends JLabel implements Thumbnailable {
               icon.paintIcon(c, g2d, x + (thumbnailSize - icon.getIconWidth()) / 2, fy);
 
               if (displayText) {
+                Object[] oldRenderingHints = GuiUtils.setRenderingHints(g2d, true, false, true);
                 int startX = x + (thumbnailSize - textLength) / 2;
                 int startY = fm.getAscent() - fm.getDescent() - fm.getLeading();
                 g2d.drawString(description, startX, fy + icon.getIconHeight() + startY + insetY);
+                GuiUtils.resetRenderingHints(g2d, oldRenderingHints);
               }
             } else {
               width = thumbnail.width();
@@ -291,7 +293,7 @@ public class Thumbnail extends JLabel implements Thumbnailable {
               }
             }
             try {
-              if (thumb != null && file != null) {
+              if (thumb != null && file != null && thumb.width() > 0) {
                 MatOfInt map = new MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 80);
                 if (ImageProcessor.writeImage(thumb.toMat(), file, map)) {
                   /*

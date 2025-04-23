@@ -26,8 +26,10 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.beans.PropertyChangeListener;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +42,7 @@ import javax.swing.JDialog;
 import javax.swing.JPanel;
 import javax.swing.plaf.PanelUI;
 import org.weasis.core.Messages;
+import org.weasis.core.api.explorer.model.DataExplorerModel;
 import org.weasis.core.api.gui.util.ActionState;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.ComboItemListener;
@@ -55,6 +58,7 @@ import org.weasis.core.ui.editor.SeriesViewer;
 import org.weasis.core.ui.editor.SeriesViewerEvent;
 import org.weasis.core.ui.editor.SeriesViewerEvent.EVENT;
 import org.weasis.core.ui.editor.SeriesViewerListener;
+import org.weasis.core.ui.editor.ViewerPluginBuilder;
 import org.weasis.core.ui.model.graphic.DragGraphic;
 import org.weasis.core.ui.model.graphic.Graphic;
 import org.weasis.core.ui.model.graphic.GraphicSelectionListener;
@@ -134,6 +138,8 @@ public abstract class ImageViewerPlugin<E extends ImageElement> extends ViewerPl
           4,
           view2dClass.getName());
 
+  public record LayoutModel(String uid, GridBagLayoutModel model) {}
+
   /** The current focused <code>ImagePane</code>. The default is 0. */
   protected ViewCanvas<E> selectedImagePane = null;
 
@@ -192,23 +198,34 @@ public abstract class ImageViewerPlugin<E extends ImageElement> extends ViewerPl
 
   public abstract Component createComponent(String clazz);
 
+  public abstract Class<?> getSeriesViewerClass();
+
+  public abstract GridBagLayoutModel getDefaultLayoutModel();
+
   public ViewCanvas<E> getSelectedImagePane() {
     return selectedImagePane;
+  }
+
+  public List<ViewCanvas<E>> getView2ds() {
+    return view2ds;
+  }
+
+  public ImageViewerEventManager<E> getEventManager() {
+    return eventManager;
   }
 
   @Override
   public void close() {
     super.close();
 
-    GuiExecutor.instance()
-        .execute(
-            () -> {
-              removeComponents();
-              for (ViewCanvas v : view2ds) {
-                resetMaximizedSelectedImagePane(v);
-                v.disposeView();
-              }
-            });
+    GuiExecutor.execute(
+        () -> {
+          removeComponents();
+          for (ViewCanvas v : view2ds) {
+            resetMaximizedSelectedImagePane(v);
+            v.disposeView();
+          }
+        });
   }
 
   /**
@@ -243,6 +260,43 @@ public abstract class ImageViewerPlugin<E extends ImageElement> extends ViewerPl
     buf.append(cols);
     return new GridBagLayoutModel(
         buf.toString(), String.format(ImageViewerPlugin.F_VIEWS, buf), rows, cols, type);
+  }
+
+  public static void registerInDataExplorerModel(
+      Map<String, Object> properties, PropertyChangeListener instance) {
+    if (properties != null && instance != null) {
+      Object obj = properties.get(DataExplorerModel.class.getName());
+      if (obj instanceof DataExplorerModel m) {
+        // Register the PropertyChangeListener
+        m.addPropertyChangeListener(instance);
+      }
+    }
+  }
+
+  public static LayoutModel getLayoutModel(
+      Map<String, Object> properties,
+      GridBagLayoutModel defaultModel,
+      ComboItemListener<GridBagLayoutModel> layoutAction) {
+    GridBagLayoutModel model = defaultModel;
+    String uid = null;
+    if (properties != null) {
+      Object obj = properties.get(GridBagLayoutModel.class.getName());
+      if (obj instanceof GridBagLayoutModel gridBagLayoutModel) {
+        model = gridBagLayoutModel;
+      } else {
+        obj = properties.get(ViewCanvas.class.getName());
+        if (obj instanceof Integer intVal && layoutAction != null) {
+          model = ImageViewerPlugin.getBestDefaultViewLayout(layoutAction, intVal, defaultModel);
+        }
+      }
+
+      // Set UID
+      Object val = properties.get(ViewerPluginBuilder.UID);
+      if (val instanceof String s) {
+        uid = s;
+      }
+    }
+    return new LayoutModel(uid, model);
   }
 
   @Override
@@ -365,18 +419,22 @@ public abstract class ImageViewerPlugin<E extends ImageElement> extends ViewerPl
     for (LayoutConstraints e : elements.keySet()) {
       boolean typeView2d = isViewType(view2dClass, e.getType());
       if (typeView2d) {
-        ViewCanvas<E> oldView;
+        ViewCanvas<E> viewCanvas;
         if (oldViews.isEmpty()) {
-          oldView = createDefaultView(e.getType());
-          oldView.registerDefaultListeners();
+          viewCanvas = createDefaultView(e.getType());
+          if (viewCanvas != null) {
+            viewCanvas.registerDefaultListeners();
+          }
         } else {
-          oldView = oldViews.remove(0);
+          viewCanvas = oldViews.remove(0);
         }
-        view2ds.add(oldView);
-        elements.put(e, oldView.getJComponent());
-        grid.add(oldView.getJComponent(), e);
-        if (oldView.getSeries() != null) {
-          oldView.getSeries().setOpen(true);
+        if (viewCanvas != null) {
+          view2ds.add(viewCanvas);
+          elements.put(e, viewCanvas.getJComponent());
+          grid.add(viewCanvas.getJComponent(), e);
+          if (viewCanvas.getSeries() != null) {
+            viewCanvas.getSeries().setOpen(true);
+          }
         }
       } else {
         Component component = createComponent(e.getType());
@@ -450,7 +508,7 @@ public abstract class ImageViewerPlugin<E extends ImageElement> extends ViewerPl
 
       if (!view2ds.isEmpty()) {
         if (selectedImagePane == null) {
-          selectedImagePane = view2ds.get(0);
+          selectedImagePane = view2ds.getFirst();
         }
         MouseActions mouseActions = eventManager.getMouseActions();
         boolean tiledMode = SynchData.Mode.TILE.equals(synchView.getSynchData().getMode());
@@ -603,9 +661,9 @@ public abstract class ImageViewerPlugin<E extends ImageElement> extends ViewerPl
       fullscreenDialog.removeAll();
       fullscreenDialog.dispose();
       add(grid, BorderLayout.CENTER);
-    }
 
-    defaultView2d.getJComponent().requestFocusInWindow();
+      defaultView2d.getJComponent().requestFocusInWindow();
+    }
   }
 
   /** Return the image in the image display panel. */
@@ -719,17 +777,17 @@ public abstract class ImageViewerPlugin<E extends ImageElement> extends ViewerPl
 
   public GridBagLayoutModel getBestDefaultViewLayout(int size) {
     if (size <= 1) {
-      return VIEWS_1x1;
+      return getDefaultLayoutModel();
     }
     Optional<ComboItemListener<GridBagLayoutModel>> layout = eventManager.getAction(ActionW.LAYOUT);
     if (layout.isPresent()) {
       Object[] list = layout.get().getAllItem();
-      GridBagLayoutModel bestModel = VIEWS_2x2;
+      GridBagLayoutModel bestModel = getDefaultLayoutModel();
       int diff = Integer.MAX_VALUE;
       int diffLayout = Integer.MAX_VALUE;
       for (Object m : list) {
         if (m instanceof GridBagLayoutModel model) {
-          int layoutSize = getViewTypeNumber(model, view2dClass);
+          int layoutSize = getViewTypeNumber(model, getSeriesViewerClass());
           int layoutDiff = Math.abs(layoutSize - size);
           if (layoutSize >= size && layoutDiff <= diff) {
             if (layoutDiff == diff) {
@@ -748,16 +806,78 @@ public abstract class ImageViewerPlugin<E extends ImageElement> extends ViewerPl
       return bestModel;
     }
 
-    return VIEWS_2x2;
+    return getDefaultLayoutModel();
   }
 
-  public static GridBagLayoutModel getBestDefaultViewLayout(ActionState layout, int size) {
+  protected static ArrayList<GridBagLayoutModel> getLayoutList(
+      ImageViewerPlugin<?> viewerPlugin, List<GridBagLayoutModel> bagLayoutModels) {
+    int rx = 1;
+    int ry = 1;
+    int width = viewerPlugin.getWidth();
+    int height = viewerPlugin.getHeight();
+    double ratio = width / (double) height;
+    if (ratio >= 1.0) {
+      rx = (int) Math.round(ratio * 1.5);
+    } else {
+      ry = (int) Math.round((1.0 / ratio) * 1.5);
+    }
+
+    ArrayList<GridBagLayoutModel> list = new ArrayList<>(bagLayoutModels);
+    int rxMin = rx;
+    int ryMin = ry;
+    for (GridBagLayoutModel model : bagLayoutModels) {
+      Dimension dim = model.getGridSize();
+      if (dim.width > rxMin) {
+        rxMin = dim.width;
+      }
+      if (dim.height > ryMin) {
+        ryMin = dim.height;
+      }
+    }
+
+    // Exclude 1x1
+    if (rx != ry && rx != 0 && ry != 0) {
+      int factorLimit = (int) (rx == 1 ? Math.round(width / 512.0) : Math.round(height / 512.0));
+      if (factorLimit < 1) {
+        factorLimit = 1;
+      }
+      if (rx > ry) {
+        int step = 1 + (rx / 20);
+        for (int i = rx / 2; i < rx; i = i + step) {
+          addLayout(list, factorLimit, i, ry, rxMin, ryMin);
+        }
+      } else {
+        int step = 1 + (ry / 20);
+        for (int i = ry / 2; i < ry; i = i + step) {
+          addLayout(list, factorLimit, rx, i, rxMin, ryMin);
+        }
+      }
+      addLayout(list, factorLimit, rx, ry, rxMin, ryMin);
+    }
+    list.sort(Comparator.comparingInt(o -> o.getConstraints().size()));
+    return list;
+  }
+
+  private static void addLayout(
+      List<GridBagLayoutModel> list, int factorLimit, int rx, int ry, int rxMin, int ryMin) {
+    for (int i = 1; i <= factorLimit; i++) {
+      if (i > 2 || i * ry > ryMin || i * rx > rxMin) {
+        if (i * ry < 50 && i * rx < 50) {
+          list.add(
+              ImageViewerPlugin.buildGridBagLayoutModel(i * ry, i * rx, view2dClass.getName()));
+        }
+      }
+    }
+  }
+
+  public static GridBagLayoutModel getBestDefaultViewLayout(
+      ActionState layout, int size, GridBagLayoutModel defaultModel) {
     if (size <= 1) {
-      return VIEWS_1x1;
+      return defaultModel;
     }
     if (layout instanceof ComboItemListener<?> comboItemListener) {
       Object[] list = comboItemListener.getAllItem();
-      GridBagLayoutModel bestModel = VIEWS_2x2;
+      GridBagLayoutModel bestModel = defaultModel;
       int diffNumber = Integer.MAX_VALUE;
       int diffLayout = Integer.MAX_VALUE;
       for (Object m : list) {
@@ -783,7 +903,7 @@ public abstract class ImageViewerPlugin<E extends ImageElement> extends ViewerPl
       }
       return bestModel;
     }
-    return VIEWS_2x2;
+    return defaultModel;
   }
 
   public static int getViewTypeNumber(GridBagLayoutModel layout) {
@@ -817,7 +937,7 @@ public abstract class ImageViewerPlugin<E extends ImageElement> extends ViewerPl
   public void addSeriesList(List<MediaSeries<E>> seriesList, boolean bestDefaultLayout) {
     if (seriesList != null && !seriesList.isEmpty()) {
       if (SynchData.Mode.TILE.equals(synchView.getSynchData().getMode())) {
-        addSeries(seriesList.get(0));
+        addSeries(seriesList.getFirst());
         return;
       }
       setSelectedAndGetFocus();
@@ -836,7 +956,7 @@ public abstract class ImageViewerPlugin<E extends ImageElement> extends ViewerPl
           }
         }
         if (!view2ds.isEmpty()) {
-          setSelectedImagePane(view2ds.get(0));
+          setSelectedImagePane(view2ds.getFirst());
         }
         for (MediaSeries mediaSeries : seriesList) {
           addSeries(mediaSeries);

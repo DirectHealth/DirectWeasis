@@ -99,7 +99,7 @@ public abstract class Feature<T> implements KeyActionValue {
   private final int modifier;
   private final Cursor cursor;
 
-  public Feature(String title, String command, int keyEvent, int modifier, Cursor cursor) {
+  protected Feature(String title, String command, int keyEvent, int modifier, Cursor cursor) {
     this.title = title;
     this.command = command;
     this.keyCode = keyEvent;
@@ -108,6 +108,7 @@ public abstract class Feature<T> implements KeyActionValue {
     this.icon = ResourceUtil.getIcon("svg/action/" + command + ".svg"); // NON-NLS
   }
 
+  @SuppressWarnings("unchecked")
   public T getValue(Map<String, Object> map) {
     if (map != null) {
       try {

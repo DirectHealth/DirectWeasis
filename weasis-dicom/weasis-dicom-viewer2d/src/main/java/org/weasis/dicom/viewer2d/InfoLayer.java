@@ -48,6 +48,7 @@ import org.weasis.core.ui.model.layer.AbstractInfoLayer;
 import org.weasis.core.ui.model.layer.LayerAnnotation;
 import org.weasis.core.ui.model.layer.LayerItem;
 import org.weasis.core.util.LangUtil;
+import org.weasis.core.util.MathUtil;
 import org.weasis.core.util.StringUtil;
 import org.weasis.core.util.StringUtil.Suffix;
 import org.weasis.dicom.codec.DicomImageElement;
@@ -64,6 +65,7 @@ import org.weasis.dicom.codec.geometry.ImageOrientation.Plan;
 import org.weasis.dicom.codec.geometry.PatientOrientation.Biped;
 import org.weasis.dicom.codec.geometry.VectorUtils;
 import org.weasis.dicom.explorer.DicomModel;
+import org.weasis.dicom.viewer2d.mpr.MprController;
 import org.weasis.dicom.viewer2d.mpr.MprView;
 import org.weasis.opencv.data.PlanarImage;
 import org.weasis.opencv.op.lut.DefaultWlPresentation;
@@ -98,7 +100,7 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
   @Override
   public LayerAnnotation getLayerCopy(ViewCanvas view2DPane, boolean useGlobalPreferences) {
     InfoLayer layer = new InfoLayer(view2DPane, useGlobalPreferences);
-    HashMap<LayerItem, Boolean> prefMap = layer.displayPreferences;
+    Map<LayerItem, Boolean> prefMap = layer.displayPreferences;
     setLayerValue(prefMap, LayerItem.ANNOTATIONS);
     setLayerValue(prefMap, LayerItem.ANONYM_ANNOTATIONS);
     setLayerValue(prefMap, LayerItem.IMAGE_ORIENTATION);
@@ -170,6 +172,13 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
 
     drawY -= fontHeight;
     drawY = checkAndPaintLossyImage(g2, image, drawY, fontHeight, border);
+    if (view2DPane instanceof MprView mprView) {
+      MprController controller = mprView.getMprController();
+      if (controller != null && controller.getVolume() != null) {
+        Double tilt = controller.getVolume().getOriginalGantryTilt();
+        drawY = drawGantryTiltMessage(g2, tilt, drawY, fontHeight, border);
+      }
+    }
 
     Integer frame = TagD.getTagValue(image, Tag.InstanceNumber, Integer.class);
     RejectedKOSpecialElement koElement =
@@ -291,9 +300,8 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
         g2.fillOval(border, (int) drawY, inset, inset);
       }
     }
-    Point2D.Float[] positions = new Point2D.Float[4];
-    positions[3] = new Point2D.Float(border, drawY - GuiUtils.getScaleLength(5));
 
+    setPosition(Position.BottomLeft, border, drawY - GuiUtils.getScaleLength(5));
     if (getDisplayPreferences(LayerItem.ANNOTATIONS)) {
       Series series = (Series) view2DPane.getSeries();
       MediaSeriesGroup study = getParent(series, DicomModel.study);
@@ -308,7 +316,8 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
             if (!anonymize || tag.getAnonymizationType() != 1) {
               Object value = getTagValue(tag, patient, study, series, image);
               if (value != null) {
-                String str = tag.getFormattedTagValue(value, tagView.getFormat());
+                String format = tag.addGMTOffset(tagView.getFormat(), series);
+                String str = tag.getFormattedTagValue(value, format);
                 if (StringUtil.hasText(str)) {
                   FontTools.paintFontOutline(g2, str, border, drawY);
                   drawY += fontHeight;
@@ -319,8 +328,7 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
           }
         }
       }
-      positions[0] = new Point2D.Float(border, drawY - fontHeight + GuiUtils.getScaleLength(5));
-
+      setPosition(Position.TopLeft, border, drawY - fontHeight + GuiUtils.getScaleLength(5));
       corner = modality.getCornerInfo(CornerDisplay.TOP_RIGHT);
       drawY = fontHeight;
       infos = corner.getInfos();
@@ -332,7 +340,8 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
               if (!anonymize || tag.getAnonymizationType() != 1) {
                 value = getTagValue(tag, patient, study, series, image);
                 if (value != null) {
-                  String str = tag.getFormattedTagValue(value, info.getFormat());
+                  String format = tag.addGMTOffset(info.getFormat(), series);
+                  String str = tag.getFormattedTagValue(value, format);
                   if (StringUtil.hasText(str)) {
                     FontTools.paintFontOutline(
                         g2,
@@ -348,10 +357,10 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
           }
         }
       }
-      positions[1] =
-          new Point2D.Float(
-              (float) bound.width - border, drawY - fontHeight + GuiUtils.getScaleLength(5));
-
+      setPosition(
+          Position.TopRight,
+          (double) bound.width - border,
+          drawY - fontHeight + GuiUtils.getScaleLength(5));
       drawY = bound.height - border - GuiUtils.getScaleLength(1.5f); // -1.5 for outline
       if (hideMin) {
         corner = modality.getCornerInfo(CornerDisplay.BOTTOM_RIGHT);
@@ -363,7 +372,8 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
               if (!anonymize || tag.getAnonymizationType() != 1) {
                 value = getTagValue(tag, patient, study, series, image);
                 if (value != null) {
-                  String str = tag.getFormattedTagValue(value, infos[j].getFormat());
+                  String format = tag.addGMTOffset(infos[j].getFormat(), series);
+                  String str = tag.getFormattedTagValue(value, format);
                   if (StringUtil.hasText(str)) {
                     FontTools.paintFontOutline(
                         g2,
@@ -381,8 +391,8 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
         drawY -= 5;
         drawSeriesInMemoryState(g2, view2DPane.getSeries(), bound.width - border, (int) (drawY));
       }
-      positions[2] =
-          new Point2D.Float((float) bound.width - border, drawY - GuiUtils.getScaleLength(5));
+      setPosition(
+          Position.BottomRight, (double) bound.width - border, drawY - GuiUtils.getScaleLength(5));
 
       // Boolean synchLink = (Boolean) view2DPane.getActionValue(ActionW.SYNCH_LINK);
       // String str = synchLink != null && synchLink ? "linked" : "unlinked"; // NON-NLS
@@ -467,7 +477,7 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
         g2.setFont(bigFont);
         Map<TextAttribute, Object> map = new HashMap<>(1);
         map.put(TextAttribute.SUPERSCRIPT, TextAttribute.SUPERSCRIPT_SUB);
-        String bigLetter = top.length > 0 && top[0].length() > 0 ? top[0] : StringUtil.SPACE;
+        String bigLetter = top.length > 0 && !top[0].isEmpty() ? top[0] : StringUtil.SPACE;
         int shiftX = g2.getFontMetrics().stringWidth(bigLetter);
         int shiftY = fontHeight + GuiUtils.getScaleLength(5);
         FontTools.paintColorFontOutline(g2, bigLetter, midX - shiftX, shiftY, highlight);
@@ -483,7 +493,7 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
           g2.setFont(bigFont);
         }
 
-        bigLetter = left.length > 0 && left[0].length() > 0 ? left[0] : StringUtil.SPACE;
+        bigLetter = left.length > 0 && !left[0].isEmpty() ? left[0] : StringUtil.SPACE;
         FontTools.paintColorFontOutline(
             g2, bigLetter, (float) (border + thickLength), midY + fontHeight / 2.0f, highlight);
 
@@ -522,13 +532,26 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
         }
       }
     } else {
-      positions[0] = new Point2D.Float(border, border);
-      positions[1] = new Point2D.Float((float) bound.width - border, border);
-      positions[2] = new Point2D.Float((float) bound.width - border, (float) bound.height - border);
+      setPosition(Position.TopLeft, border, border);
+      setPosition(Position.TopRight, (double) bound.width - border, border);
+      setPosition(
+          Position.BottomRight, (double) bound.width - border, (double) bound.height - border);
     }
 
-    drawExtendedActions(g2, positions);
+    drawExtendedActions(g2);
     GuiUtils.resetRenderingHints(g2, oldRenderingHints);
+  }
+
+  public static float drawGantryTiltMessage(
+      Graphics2D g2d, Double tilt, float drawY, int fontHeight, int border) {
+    if (tilt != null && MathUtil.isDifferentFromZero(tilt)) {
+      String str = "(" + DecFormatter.oneDecimal(tilt) + "°)";
+      String message = Messages.getString("stretching.artifacts.msg");
+      FontTools.paintColorFontOutline(
+          g2d, message + StringUtil.SPACE + str, border, drawY, IconColor.ACTIONS_RED.getColor());
+      drawY -= fontHeight;
+    }
+    return drawY;
   }
 
   public static MediaSeriesGroup getParent(
@@ -665,7 +688,7 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
     return null;
   }
 
-  protected void drawExtendedActions(Graphics2D g2d, Point2D.Float[] positions) {
+  protected void drawExtendedActions(Graphics2D g2d) {
     if (!view2DPane.getViewButtons().isEmpty()) {
       int space = GuiUtils.getScaleLength(5);
       int height = 0;
@@ -675,10 +698,11 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
         }
       }
 
-      Point2D.Float midy =
-          new Point2D.Float(
-              positions[1].x,
-              (float) (view2DPane.getJComponent().getHeight() * 0.5 - (height - space) * 0.5));
+      Point2D topRight = getPosition(Position.TopRight);
+      Point2D.Double midy =
+          new Point2D.Double(
+              topRight.getX(),
+              view2DPane.getJComponent().getHeight() * 0.5 - (height - space) * 0.5);
       SynchData synchData = (SynchData) view2DPane.getActionValue(ActionW.SYNCH_LINK.cmd());
       boolean tile = synchData != null && SynchData.Mode.TILE.equals(synchData.getMode());
       for (ViewButton b : view2DPane.getViewButtons()) {
@@ -691,21 +715,26 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
             b.y = midy.y;
             midy.y += icon.getIconHeight() + space;
           } else if (p == GridBagConstraints.NORTHEAST) {
-            b.x = positions[1].x - icon.getIconWidth();
-            b.y = positions[1].y;
-            positions[1].x -= icon.getIconWidth() + space;
+            b.x = topRight.getX() - icon.getIconWidth();
+            b.y = topRight.getY();
+            topRight.setLocation(topRight.getX() - icon.getIconWidth() + space, topRight.getY());
           } else if (p == GridBagConstraints.SOUTHEAST) {
-            b.x = positions[2].x - icon.getIconWidth();
-            b.y = positions[2].y - icon.getIconHeight();
-            positions[2].x -= icon.getIconWidth() + space;
+            Point2D bottomRight = getPosition(Position.BottomRight);
+            b.x = bottomRight.getX() - icon.getIconWidth();
+            b.y = bottomRight.getY() - icon.getIconHeight();
+            bottomRight.setLocation(
+                bottomRight.getX() - icon.getIconWidth() + space, bottomRight.getY());
           } else if (p == GridBagConstraints.NORTHWEST) {
-            b.x = positions[0].x;
-            b.y = positions[0].y;
-            positions[0].x += icon.getIconWidth() + space;
+            Point2D topLeft = getPosition(Position.TopLeft);
+            b.x = topLeft.getX();
+            b.y = topLeft.getY();
+            topLeft.setLocation(topLeft.getX() + icon.getIconWidth() + space, topLeft.getY());
           } else if (p == GridBagConstraints.SOUTHWEST) {
-            b.x = positions[3].x;
-            b.y = positions[3].y - icon.getIconHeight();
-            positions[3].x += icon.getIconWidth() + space;
+            Point2D bottomLeft = getPosition(Position.BottomLeft);
+            b.x = bottomLeft.getX();
+            b.y = bottomLeft.getY() - icon.getIconHeight();
+            bottomLeft.setLocation(
+                bottomLeft.getX() + icon.getIconWidth() + space, bottomLeft.getY());
           }
 
           Color oldColor = g2d.getColor();

@@ -23,6 +23,7 @@ import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.Tag;
 import org.dcm4che3.img.data.CIELab;
 import org.dcm4che3.img.util.DicomObjectUtil;
+import org.dcm4che3.img.util.DicomUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.media.data.ImageElement;
@@ -38,7 +39,6 @@ import org.weasis.core.ui.model.utils.exceptions.InvalidShapeException;
 import org.weasis.core.ui.serialize.XmlSerializer;
 import org.weasis.core.util.MathUtil;
 import org.weasis.dicom.codec.PresentationStateReader;
-import org.weasis.dicom.codec.utils.DicomMediaUtils;
 
 public class PrGraphicUtil {
   private static final Logger LOGGER = LoggerFactory.getLogger(PrGraphicUtil.class);
@@ -79,10 +79,10 @@ public class PrGraphicUtil {
     boolean isDisp = !dcmSR && "DISPLAY".equalsIgnoreCase(go.getString(Tag.GraphicAnnotationUnits));
 
     String type = go.getString(Tag.GraphicType);
-    Integer groupID = DicomMediaUtils.getIntegerFromDicomElement(go, Tag.GraphicGroupID, null);
+    Integer groupID = DicomUtils.getIntegerFromDicomElement(go, Tag.GraphicGroupID, null);
     boolean filled = getBooleanValue(go, Tag.GraphicFilled);
     Attributes style = go.getNestedDataset(Tag.LineStyleSequence);
-    Float thickness = DicomMediaUtils.getFloatFromDicomElement(style, Tag.LineThickness, 1.0f);
+    Float thickness = DicomUtils.getFloatFromDicomElement(style, Tag.LineThickness, 1.0f);
     boolean dashed = isDashedLine(style);
     Color color = getPatternColor(style, defaultColor);
 
@@ -90,7 +90,7 @@ public class PrGraphicUtil {
     color = getFillPatternColor(fillStyle, color);
 
     Graphic shape = null;
-    float[] points = DicomMediaUtils.getFloatArrayFromDicomElement(go, Tag.GraphicData, null);
+    float[] points = DicomUtils.getFloatArrayFromDicomElement(go, Tag.GraphicData, null);
     if (isDisp && inverse != null) {
       float[] dstpoints = new float[points.length];
       inverse.transform(points, 0, dstpoints, 0, points.length / 2);
@@ -122,15 +122,7 @@ public class PrGraphicUtil {
               setProperties(shape, thickness, color, labelVisible, Boolean.FALSE, groupID);
             }
           } else {
-            Path2D path = new Path2D.Double(Path2D.WIND_NON_ZERO, size);
-            double x = isDisp ? points[0] * width : points[0];
-            double y = isDisp ? points[1] * height : points[1];
-            path.moveTo(x, y);
-            for (int i = 1; i < size; i++) {
-              x = isDisp ? points[i * 2] * width : points[i * 2];
-              y = isDisp ? points[i * 2 + 1] * height : points[i * 2 + 1];
-              path.lineTo(x, y);
-            }
+            Path2D path = buildPath2D(width, height, isDisp, points, size);
             if (dcmSR) {
               // Always close polyline for DICOM SR
               path.closePath();
@@ -258,6 +250,20 @@ public class PrGraphicUtil {
     return shape;
   }
 
+  private static Path2D buildPath2D(
+      double width, double height, boolean isDisp, float[] points, int size) {
+    Path2D path = new Path2D.Double(Path2D.WIND_NON_ZERO, size);
+    double x = isDisp ? points[0] * width : points[0];
+    double y = isDisp ? points[1] * height : points[1];
+    path.moveTo(x, y);
+    for (int i = 1; i < size; i++) {
+      x = isDisp ? points[i * 2] * width : points[i * 2];
+      y = isDisp ? points[i * 2 + 1] * height : points[i * 2 + 1];
+      path.lineTo(x, y);
+    }
+    return path;
+  }
+
   public static boolean getBooleanValue(Attributes dcmobj, int tag) {
     return "Y".equalsIgnoreCase(dcmobj.getString(tag)); // NON-NLS
   }
@@ -296,8 +302,7 @@ public class PrGraphicUtil {
     if (style != null) {
       int[] rgb = CIELab.dicomLab2rgb(style.getInts(Tag.PatternOnColorCIELabValue));
       color = DicomObjectUtil.getRGBColor(0xFFFF, rgb);
-      Float fillOpacity =
-          DicomMediaUtils.getFloatFromDicomElement(style, Tag.PatternOnOpacity, null);
+      Float fillOpacity = DicomUtils.getFloatFromDicomElement(style, Tag.PatternOnOpacity, null);
       if (fillOpacity != null && fillOpacity < 1.0F) {
         int opacity = (int) (fillOpacity * 255);
         color = new Color((opacity << 24) | (color.getRGB() & 0x00ffffff), true);
@@ -333,10 +338,10 @@ public class PrGraphicUtil {
 
     String type = go.getString(Tag.CompoundGraphicType);
     String id = go.getString(Tag.CompoundGraphicInstanceID);
-    Integer groupID = DicomMediaUtils.getIntegerFromDicomElement(go, Tag.GraphicGroupID, null);
+    Integer groupID = DicomUtils.getIntegerFromDicomElement(go, Tag.GraphicGroupID, null);
     boolean filled = getBooleanValue(go, Tag.GraphicFilled);
     Attributes style = go.getNestedDataset(Tag.LineStyleSequence);
-    Float thickness = DicomMediaUtils.getFloatFromDicomElement(style, Tag.LineThickness, 1.0f);
+    Float thickness = DicomUtils.getFloatFromDicomElement(style, Tag.LineThickness, 1.0f);
     boolean dashed = isDashedLine(style);
     Color color = getPatternColor(style, defaultColor);
 
@@ -344,7 +349,7 @@ public class PrGraphicUtil {
     color = getFillPatternColor(fillStyle, color);
 
     Graphic shape = null;
-    float[] points = DicomMediaUtils.getFloatArrayFromDicomElement(go, Tag.GraphicData, null);
+    float[] points = DicomUtils.getFloatArrayFromDicomElement(go, Tag.GraphicData, null);
     if (isDisp && inverse != null) {
       float[] dstpoints = new float[points.length];
       inverse.transform(points, 0, dstpoints, 0, points.length / 2);
@@ -354,15 +359,7 @@ public class PrGraphicUtil {
       if (points != null) {
         int size = points.length / 2;
         if (size >= 2) {
-          Path2D path = new Path2D.Double(Path2D.WIND_NON_ZERO, size);
-          double x = isDisp ? points[0] * width : points[0];
-          double y = isDisp ? points[1] * height : points[1];
-          path.moveTo(x, y);
-          for (int i = 1; i < size; i++) {
-            x = isDisp ? points[i * 2] * width : points[i * 2];
-            y = isDisp ? points[i * 2 + 1] * height : points[i * 2 + 1];
-            path.lineTo(x, y);
-          }
+          Path2D path = buildPath2D(width, height, isDisp, points, size);
           shape = new NonEditableGraphic(path);
           setProperties(shape, thickness, color, labelVisible, filled, groupID);
         }

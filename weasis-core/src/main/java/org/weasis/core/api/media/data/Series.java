@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 import org.weasis.core.Messages;
 import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.gui.util.Filter;
+import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.util.LangUtil;
 import org.weasis.core.util.StringUtil;
 import org.weasis.opencv.data.PlanarImage;
@@ -190,7 +191,7 @@ public abstract class Series<E extends MediaElement> extends MediaSeriesGroupNod
       return -1;
     }
     Iterable<E> list = getMedias(filter, sort);
-    synchronized (this) {
+    synchronized (medias) {
       int index = 0;
       for (E e : list) {
         if (e == source) {
@@ -241,8 +242,7 @@ public abstract class Series<E extends MediaElement> extends MediaSeriesGroupNod
   }
 
   @Override
-  public void dispose() {
-    // forEach implement synchronized
+  public synchronized void dispose() {
     medias.forEach(
         m -> {
           if (m instanceof ImageElement imageElement) {
@@ -318,10 +318,8 @@ public abstract class Series<E extends MediaElement> extends MediaSeriesGroupNod
   }
 
   @Override
-  public int size(Filter<E> filter) {
-    synchronized (this) {
-      return filter == null ? medias.size() : Filter.size(filter.filter(medias));
-    }
+  public synchronized int size(Filter<E> filter) {
+    return filter == null ? medias.size() : Filter.size(filter.filter(medias));
   }
 
   @Override
@@ -351,20 +349,7 @@ public abstract class Series<E extends MediaElement> extends MediaSeriesGroupNod
     if (tag != null) {
       toolTips.append(tag.getFormattedTagValue(getTagValue(tag), null));
     }
-    toolTips.append("<br>");
-  }
-
-  public void addToolTipsElement(StringBuilder toolTips, String title, TagW tag1, TagW tag2) {
-    toolTips.append(title);
-    toolTips.append(StringUtil.COLON_AND_SPACE);
-    if (tag1 != null) {
-      toolTips.append(tag1.getFormattedTagValue(getTagValue(tag1), null));
-      toolTips.append(" - ");
-    }
-    if (tag2 != null) {
-      toolTips.append(tag2.getFormattedTagValue(getTagValue(tag2), null));
-    }
-    toolTips.append("<br>");
+    toolTips.append(GuiUtils.HTML_BR);
   }
 
   @Override
@@ -415,10 +400,9 @@ public abstract class Series<E extends MediaElement> extends MediaSeriesGroupNod
 
   public boolean hasMediaContains(TagW tag, Object val) {
     if (val != null) {
-      synchronized (this) {
+      synchronized (medias) {
         for (E media : medias) {
-          Object val2 = media.getTagValue(tag);
-          if (val.equals(val2)) {
+          if (val.equals(media.getTagValue(tag))) {
             return true;
           }
         }

@@ -21,6 +21,7 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionListener;
 import java.awt.geom.Line2D;
+import java.awt.geom.Line2D.Float;
 import java.awt.geom.Rectangle2D;
 import java.io.File;
 import java.io.IOException;
@@ -223,29 +224,11 @@ public class HistogramPanel extends JPanel {
       float plow = x + (piLow * (float) binFactor) * spaceFactor;
       float phigh = x + (piHigh * (float) binFactor) * spaceFactor;
       if (low > windLevel.getLevelMin()) {
-        line.setLine(plow, SLIDER_Y, plow, tLut);
-        g2d.draw(line);
-        String label =
-            DecFormatter.allNumber(data.getLayer().pixelToRealValue(piLow * binFactor + min));
-        FontTools.paintFontOutline(
-            g2d,
-            label,
-            plow - g2d.getFontMetrics().stringWidth(label) / 2.f,
-            SLIDER_Y + (float) midFontHeight);
-        drawWl = true;
+        drawWl = winLevelLine(g2d, midFontHeight, tLut, min, piLow, binFactor, line, plow);
       }
       if (high < windLevel.getLevelMax()) {
         g2d.setPaint(yellow);
-        line.setLine(phigh, SLIDER_Y, phigh, tLut);
-        g2d.draw(line);
-        String label =
-            DecFormatter.allNumber(data.getLayer().pixelToRealValue(piHigh * binFactor + min));
-        FontTools.paintFontOutline(
-            g2d,
-            label,
-            phigh - g2d.getFontMetrics().stringWidth(label) / 2.f,
-            SLIDER_Y + (float) midFontHeight);
-        drawWl = true;
+        drawWl = winLevelLine(g2d, midFontHeight, tLut, min, piHigh, binFactor, line, phigh);
       }
 
       if (drawWl) {
@@ -255,6 +238,24 @@ public class HistogramPanel extends JPanel {
       }
     }
     GuiUtils.resetRenderingHints(g2d, oldRenderingHints);
+  }
+
+  private boolean winLevelLine(
+      Graphics2D g2d,
+      float midFontHeight,
+      float tLut,
+      double min,
+      int piLow,
+      double binFactor,
+      Float line,
+      float plow) {
+    line.setLine(plow, SLIDER_Y, plow, tLut);
+    g2d.draw(line);
+    String label =
+        DecFormatter.allNumber(data.getLayer().pixelToRealValue(piLow * binFactor + min));
+    FontTools.paintFontOutline(
+        g2d, label, plow - g2d.getFontMetrics().stringWidth(label) / 2.f, SLIDER_Y + midFontHeight);
+    return true;
   }
 
   public void setHistogram(
@@ -391,7 +392,7 @@ public class HistogramPanel extends JPanel {
         int val2 = (int) Math.floor((i + 1) * (max - min) / histValues.length + min);
 
         StringBuilder buf = new StringBuilder();
-        buf.append("<html>");
+        buf.append(GuiUtils.HTML_START);
         buf.append(Messages.getString("HistogramPanel.intensity"));
         buf.append(StringUtil.COLON_AND_SPACE);
         buf.append(val);
@@ -399,7 +400,7 @@ public class HistogramPanel extends JPanel {
           buf.append("...");
           buf.append(val2);
         }
-        buf.append("<br>");
+        buf.append(GuiUtils.HTML_BR);
         buf.append(Messages.getString("HistogramPanel.pixels"));
         buf.append(StringUtil.COLON_AND_SPACE);
         buf.append((int) histValues[i]);

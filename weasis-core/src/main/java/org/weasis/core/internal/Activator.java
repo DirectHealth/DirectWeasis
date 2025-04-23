@@ -9,10 +9,15 @@
  */
 package org.weasis.core.internal;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.encoder.PatternLayoutEncoder;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.rolling.RollingFileAppender;
 import java.io.File;
-import java.io.IOException;
 import java.util.Dictionary;
 import java.util.Hashtable;
+import java.util.List;
 import org.apache.felix.prefs.BackingStore;
 import org.apache.felix.service.command.CommandProcessor;
 import org.osgi.annotation.bundle.Header;
@@ -23,20 +28,20 @@ import org.osgi.framework.InvalidSyntaxException;
 import org.osgi.framework.ServiceEvent;
 import org.osgi.framework.ServiceListener;
 import org.osgi.framework.ServiceReference;
-import org.osgi.service.cm.Configuration;
-import org.osgi.service.cm.ConfigurationAdmin;
 import org.osgi.service.prefs.Preferences;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.explorer.model.AbstractFileModel;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiExecutor;
+import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.media.data.Codec;
+import org.weasis.core.api.media.data.MediaElement;
 import org.weasis.core.api.service.AuditLog;
 import org.weasis.core.api.service.BundlePreferences;
 import org.weasis.core.api.service.BundleTools;
+import org.weasis.core.api.service.WProperties;
 import org.weasis.core.api.util.ResourceUtil;
-import org.weasis.core.ui.docking.UIManager;
 import org.weasis.core.ui.editor.FileModel;
 import org.weasis.core.ui.editor.SeriesViewerFactory;
 import org.weasis.core.ui.editor.ViewerPluginBuilder;
@@ -50,8 +55,11 @@ public class Activator implements BundleActivator, ServiceListener {
 
   @Override
   public void start(BundleContext bundleContext) throws Exception {
+    WProperties properties = GuiUtils.getUICore().getSystemPreferences();
     bundleContext.registerService(
-        BackingStore.class.getName(), new StreamBackingStoreImpl(bundleContext), null);
+        BackingStore.class.getName(),
+        new StreamBackingStoreImpl(bundleContext, properties.getProperty("weasis.pref.dir")),
+        null);
 
     for (ServiceReference<Codec> service : bundleContext.getServiceReferences(Codec.class, null)) {
       registerCodecPlugins(bundleContext.getService(service));
@@ -59,34 +67,32 @@ public class Activator implements BundleActivator, ServiceListener {
 
     bundleContext.addServiceListener(this, BundleTools.createServiceFilter(Codec.class));
 
-    initLoggerAndAudit(bundleContext);
+    initLoggerAndAudit(properties);
+
+    // FIXME do not use system property
     File file = ResourceUtil.getResource("presets.xml");
     if (file.canRead()) {
       System.setProperty("dicom.presets.path", file.getPath());
     }
 
     registerCommands(bundleContext);
-    File dataFolder = AppProperties.getBundleDataFolder(bundleContext);
-    FileUtil.readProperties(
-        new File(dataFolder, "persistence.properties"), BundleTools.LOCAL_UI_PERSISTENCE);
     Preferences prefs = BundlePreferences.getDefaultPreferences(bundleContext);
     AbstractInfoLayer.applyPreferences(prefs);
     MeasureTool.viewSetting.initMonitors();
     MeasureTool.viewSetting.applyPreferences(prefs);
 
     // Must be instantiated in EDT
-    GuiExecutor.instance()
-        .execute(
-            () -> {
-              try {
-                for (ServiceReference<SeriesViewerFactory> service :
-                    bundleContext.getServiceReferences(SeriesViewerFactory.class, null)) {
-                  registerSeriesViewerFactory(bundleContext.getService(service));
-                }
-              } catch (InvalidSyntaxException e) {
-                LOGGER.error("", e);
-              }
-            });
+    GuiExecutor.execute(
+        () -> {
+          try {
+            for (ServiceReference<SeriesViewerFactory> service :
+                bundleContext.getServiceReferences(SeriesViewerFactory.class, null)) {
+              registerSeriesViewerFactory(bundleContext.getService(service));
+            }
+          } catch (InvalidSyntaxException e) {
+            LOGGER.error("", e);
+          }
+        });
 
     bundleContext.addServiceListener(
         this, BundleTools.createServiceFilter(Codec.class, SeriesViewerFactory.class));
@@ -94,7 +100,7 @@ public class Activator implements BundleActivator, ServiceListener {
 
   @Override
   public void stop(BundleContext bundleContext) throws Exception {
-    BundleTools.saveSystemPreferences();
+    GuiUtils.getUICore().saveSystemPreferences();
 
     // Save preferences
     Preferences prefs = BundlePreferences.getDefaultPreferences(bundleContext);
@@ -106,7 +112,7 @@ public class Activator implements BundleActivator, ServiceListener {
     if (dataFolder != null) {
       File file = new File(dataFolder, "persistence.properties");
       FileUtil.prepareToWriteFile(file);
-      FileUtil.storeProperties(file, BundleTools.LOCAL_UI_PERSISTENCE, null);
+      FileUtil.storeProperties(file, GuiUtils.getUICore().getLocalPersistence(), null);
     }
   }
 
@@ -125,47 +131,50 @@ public class Activator implements BundleActivator, ServiceListener {
       return;
     }
 
-    if (service instanceof Codec codec) {
+    if (service instanceof Codec<?> codec) {
       // TODO manage when several identical MimeType, register the default one
       if (event.getType() == ServiceEvent.REGISTERED) {
         registerCodecPlugins(codec);
       } else if (event.getType() == ServiceEvent.UNREGISTERING) {
-        if (BundleTools.CODEC_PLUGINS.contains(codec)) {
+        List<Codec<MediaElement>> codecs = GuiUtils.getUICore().getCodecPlugins();
+        if (codecs.contains(codec)) {
           LOGGER.info("Unregister Image Codec Plug-in: {}", codec.getCodecName());
-          BundleTools.CODEC_PLUGINS.remove(codec);
+          codecs.remove(codec);
         }
         // Unget service object and null references.
         context.ungetService(sRef);
       }
     } else if (service instanceof SeriesViewerFactory viewerFactory) {
       // Must be instantiated in EDT
-      GuiExecutor.instance()
-          .execute(
-              () -> {
-                if (event.getType() == ServiceEvent.REGISTERED) {
-                  registerSeriesViewerFactory(viewerFactory);
-                } else if (event.getType() == ServiceEvent.UNREGISTERING) {
-                  if (UIManager.SERIES_VIEWER_FACTORIES.contains(viewerFactory)) {
-                    LOGGER.info(
-                        "Unregister series viewer plug-in: {}", viewerFactory.getDescription());
-                    UIManager.SERIES_VIEWER_FACTORIES.remove(viewerFactory);
-                  }
-                  context.ungetService(sRef);
-                }
-              });
+      GuiExecutor.execute(
+          () -> {
+            if (event.getType() == ServiceEvent.REGISTERED) {
+              registerSeriesViewerFactory(viewerFactory);
+            } else if (event.getType() == ServiceEvent.UNREGISTERING) {
+              List<SeriesViewerFactory> viewerFactories =
+                  GuiUtils.getUICore().getSeriesViewerFactories();
+              if (viewerFactories.contains(viewerFactory)) {
+                LOGGER.info("Unregister series viewer plug-in: {}", viewerFactory.getDescription());
+                viewerFactories.remove(viewerFactory);
+              }
+              context.ungetService(sRef);
+            }
+          });
     }
   }
 
-  private static void registerCodecPlugins(Codec codec) {
-    if (codec != null && !BundleTools.CODEC_PLUGINS.contains(codec)) {
-      BundleTools.CODEC_PLUGINS.add(codec);
+  private static void registerCodecPlugins(Codec<?> codec) {
+    List<Codec<MediaElement>> codecs = GuiUtils.getUICore().getCodecPlugins();
+    if (codec != null && !codecs.contains(codec)) {
+      codecs.add((Codec<MediaElement>) codec);
       LOGGER.info("Register Image Codec Plug-in: {}", codec.getCodecName());
     }
   }
 
   private static void registerSeriesViewerFactory(SeriesViewerFactory factory) {
-    if (factory != null && !UIManager.SERIES_VIEWER_FACTORIES.contains(factory)) {
-      UIManager.SERIES_VIEWER_FACTORIES.add(factory);
+    List<SeriesViewerFactory> viewerFactories = GuiUtils.getUICore().getSeriesViewerFactories();
+    if (factory != null && !viewerFactories.contains(factory)) {
+      viewerFactories.add(factory);
       LOGGER.info("Register series viewer plug-in: {}", factory.getDescription());
     }
   }
@@ -177,53 +186,38 @@ public class Activator implements BundleActivator, ServiceListener {
     context.registerService(FileModel.class.getName(), ViewerPluginBuilder.DefaultDataModel, dict);
   }
 
-  private static void initLoggerAndAudit(BundleContext bundleContext) throws IOException {
+  private static void initLoggerAndAudit(WProperties properties) {
+    WProperties prefs = GuiUtils.getUICore().getSystemPreferences();
+
+    LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+    loggerContext.reset();
+
+    AuditLog.applyConfig(prefs, loggerContext);
+
+    ch.qos.logback.classic.Logger logger =
+        (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
+
     // Audit log for giving statistics about usage of Weasis
     String loggerKey = "audit.log";
-    String[] loggerVal = new String[] {"org.weasis.core.api.service.AuditLog"};
-    // Activate audit log by adding an entry "audit.log=true" in Weasis.
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(loggerKey, false)) {
-      AuditLog.createOrUpdateLogger(
-          bundleContext,
-          loggerKey,
-          loggerVal,
-          "DEBUG",
-          AppProperties.WEASIS_PATH
-              + File.separator
-              + "log"
-              + File.separator
-              + "audit-" // NON-NLS
-              + AppProperties.WEASIS_USER
-              + ".log",
-          "{0,date,dd.MM.yyyy HH:mm:ss.SSS} *{4}* {5}", // NON-NLS
-          null,
-          null,
-          "0");
+    if (properties.getBooleanProperty(loggerKey, false)) {
+      String pattern =
+          prefs.getProperty(
+              AuditLog.LOG_PATTERN,
+              "%d{dd.MM.yyyy HH:mm:ss.SSS} *%-5level* %msg" + "%ex{0}%nopex%n");
+
+      PatternLayoutEncoder encoder = AuditLog.getPatternLayoutEncoder(loggerContext, pattern);
+
+      RollingFileAppender<ILoggingEvent> rollingFileAppender =
+          AuditLog.getRollingFilesAppender(logger, AuditLog.NAME_AUDIT);
+      WProperties p = AuditLog.getAuditProperties();
+
+      AuditLog.updateRollingFilesAppender(rollingFileAppender, loggerContext, p, encoder);
       AuditLog.LOGGER.info("Start audit log session");
     } else {
-      ServiceReference<ConfigurationAdmin> configurationAdminReference =
-          bundleContext.getServiceReference(ConfigurationAdmin.class);
-      if (configurationAdminReference != null) {
-        ConfigurationAdmin confAdmin = bundleContext.getService(configurationAdminReference);
-        if (confAdmin != null) {
-          Configuration logConfiguration =
-              AuditLog.getLogConfiguration(confAdmin, loggerKey, loggerVal[0]);
-          if (logConfiguration == null) {
-            logConfiguration =
-                confAdmin.createFactoryConfiguration(
-                    "org.apache.sling.commons.log.LogManager.factory.config", null);
-            Dictionary<String, Object> loggingProperties = new Hashtable<>();
-            loggingProperties.put("org.apache.sling.commons.log.level", "ERROR"); // NON-NLS
-            loggingProperties.put("org.apache.sling.commons.log.names", loggerVal);
-            // add this property to give us something unique to re-find this configuration
-            loggingProperties.put(loggerKey, loggerVal[0]);
-            logConfiguration.update(loggingProperties);
-          } else {
-            Dictionary loggingProperties = logConfiguration.getProperties();
-            loggingProperties.remove(AuditLog.LOG_FILE);
-            logConfiguration.update(loggingProperties);
-          }
-        }
+      logger.detachAppender(AuditLog.NAME_AUDIT);
+      if (AuditLog.LOGGER instanceof ch.qos.logback.classic.Logger auditLogger) {
+        auditLogger.detachAndStopAllAppenders();
+        auditLogger.setLevel(Level.OFF);
       }
     }
   }

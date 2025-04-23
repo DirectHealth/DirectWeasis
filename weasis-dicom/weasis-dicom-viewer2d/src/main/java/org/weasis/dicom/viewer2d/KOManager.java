@@ -22,6 +22,7 @@ import org.weasis.core.api.gui.util.ActionState;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.Filter;
 import org.weasis.core.api.gui.util.GuiExecutor;
+import org.weasis.core.api.gui.util.WinUtil;
 import org.weasis.core.api.media.data.MediaElement;
 import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.media.data.SeriesEvent;
@@ -34,12 +35,12 @@ import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.codec.DicomSeries;
 import org.weasis.dicom.codec.KOSpecialElement;
 import org.weasis.dicom.codec.TagD;
-import org.weasis.dicom.codec.macro.HierarchicalSOPInstanceReference;
-import org.weasis.dicom.codec.macro.KODocumentModule;
 import org.weasis.dicom.codec.utils.DicomMediaUtils;
 import org.weasis.dicom.explorer.DicomModel;
 import org.weasis.dicom.explorer.HangingProtocols.OpeningViewer;
 import org.weasis.dicom.explorer.LoadDicomObjects;
+import org.weasis.dicom.macro.HierarchicalSOPInstanceReference;
+import org.weasis.dicom.macro.KODocumentModule;
 
 public final class KOManager {
 
@@ -87,7 +88,7 @@ public final class KOManager {
 
         int response =
             JOptionPane.showOptionDialog(
-                view2d.getJComponent(),
+                WinUtil.getValidComponent(view2d.getJComponent()),
                 message,
                 Messages.getString("KOManager.ko_title"),
                 JOptionPane.YES_NO_OPTION,
@@ -126,7 +127,7 @@ public final class KOManager {
 
           int response =
               JOptionPane.showOptionDialog(
-                  view2d.getJComponent(),
+                  WinUtil.getValidComponent(view2d.getJComponent()),
                   message,
                   Messages.getString("KOManager.ko_title"),
                   JOptionPane.YES_NO_OPTION,
@@ -153,7 +154,7 @@ public final class KOManager {
 
         int response =
             JOptionPane.showOptionDialog(
-                view2d.getJComponent(),
+                WinUtil.getValidComponent(view2d.getJComponent()),
                 message,
                 Messages.getString("KOManager.ko_title"),
                 JOptionPane.YES_NO_OPTION,
@@ -189,7 +190,7 @@ public final class KOManager {
     DicomModel dicomModel = (DicomModel) dicomSeries.getTagValue(TagW.ExplorerModel);
     LoadDicomObjects loadDicomObjects =
         new LoadDicomObjects(dicomModel, OpeningViewer.NONE, newDicomKO);
-    GuiExecutor.instance().invokeAndWait(loadDicomObjects);
+    GuiExecutor.invokeAndWait(loadDicomObjects);
 
     for (KOSpecialElement koElement : DicomModel.getKoSpecialElements(dicomSeries)) {
       if (koElement.getMediaReader().getDicomObject().equals(newDicomKO)) {
@@ -215,7 +216,7 @@ public final class KOManager {
       String description =
           (String)
               JOptionPane.showInputDialog(
-                  parentComponent,
+                  WinUtil.getValidComponent(parentComponent),
                   message,
                   Messages.getString("KOManager.ko_title"),
                   JOptionPane.INFORMATION_MESSAGE,

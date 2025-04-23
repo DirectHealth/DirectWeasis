@@ -14,13 +14,12 @@ import java.util.Optional;
 import javax.xml.stream.XMLStreamReader;
 import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.Tag;
+import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.media.data.TagReadable;
 import org.weasis.core.api.media.data.TagUtil;
 import org.weasis.core.api.media.data.TagW;
-import org.weasis.core.api.service.BundleTools;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.TagD;
-import org.weasis.dicom.util.DateUtil;
 
 public class PatientComparator {
 
@@ -52,15 +51,16 @@ public class PatientComparator {
     setIssuerOfPatientID(TagD.getTagValue(taggable, Tag.IssuerOfPatientID, String.class));
     setName(TagD.getTagValue(taggable, Tag.PatientName, String.class));
     setSex(TagD.getTagValue(taggable, Tag.PatientSex, String.class));
-    setBirthdate(
-        DateUtil.formatDicomDate(
-            TagD.getTagValue(taggable, Tag.PatientBirthDate, LocalDate.class)));
+    LocalDate date = TagD.getTagValue(taggable, Tag.PatientBirthDate, LocalDate.class);
+    setBirthdate(TagD.formatDicomDate(date));
   }
 
   public String buildPatientPseudoUID() {
 
     String property =
-        BundleTools.SYSTEM_PREFERENCES.getProperty("patientComparator.buildPatientPseudoUID", null);
+        GuiUtils.getUICore()
+            .getSystemPreferences()
+            .getProperty("patientComparator.buildPatientPseudoUID", null);
 
     if (StringUtil.hasText(property)) {
 
@@ -90,12 +90,8 @@ public class PatientComparator {
        * Manager/Archive or by the Portable Media Creator).
        */
       // Build a global identifier for the patient.
-      StringBuilder buffer = new StringBuilder(patientId);
       // patientID + issuerOfPatientID => should be unique globally
-      buffer.append(issuerOfPatientID);
-      buffer.append(name);
-
-      return buffer.toString();
+      return patientId + issuerOfPatientID + name;
     }
   }
 

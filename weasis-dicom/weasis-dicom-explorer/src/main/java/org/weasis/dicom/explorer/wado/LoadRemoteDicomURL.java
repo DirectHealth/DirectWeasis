@@ -16,11 +16,10 @@ import org.dcm4che3.util.UIDUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.explorer.model.DataExplorerModel;
+import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.media.data.MediaSeriesGroup;
 import org.weasis.core.api.media.data.MediaSeriesGroupNode;
-import org.weasis.core.api.media.data.Series;
 import org.weasis.core.api.media.data.TagW;
-import org.weasis.core.api.service.BundleTools;
 import org.weasis.dicom.codec.DicomSeries;
 import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.TagD.Level;
@@ -89,7 +88,7 @@ public class LoadRemoteDicomURL extends ExplorerTask<Boolean, String> {
               TagD.getUID(Level.STUDY), UIDUtils.createUID(), DicomModel.study.tagView());
       dicomModel.addHierarchyNode(patient, study);
 
-      Series dicomSeries = new DicomSeries(seriesUID);
+      DicomSeries dicomSeries = new DicomSeries(seriesUID);
       dicomSeries.setTag(TagW.ExplorerModel, dicomModel);
       dicomSeries.setTag(TagD.get(Tag.SeriesInstanceUID), seriesUID);
       final WadoParameters wadoParameters = new WadoParameters("", false);
@@ -116,8 +115,9 @@ public class LoadRemoteDicomURL extends ExplorerTask<Boolean, String> {
             new LoadSeries(
                 dicomSeries,
                 dicomModel,
-                BundleTools.SYSTEM_PREFERENCES.getIntProperty(
-                    LoadSeries.CONCURRENT_DOWNLOADS_IN_SERIES, 4),
+                GuiUtils.getUICore()
+                    .getSystemPreferences()
+                    .getIntProperty(LoadSeries.CONCURRENT_DOWNLOADS_IN_SERIES, 4),
                 true);
         if (!ps) {
           loadSeries.startDownloadImageReference(wadoParameters);

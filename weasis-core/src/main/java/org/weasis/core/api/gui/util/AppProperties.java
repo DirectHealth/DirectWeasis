@@ -96,7 +96,11 @@ public class AppProperties {
   private AppProperties() {}
 
   public static BundleContext getBundleContext() {
-    Bundle bundle = FrameworkUtil.getBundle(AppProperties.class);
+    return getBundleContext(AppProperties.class);
+  }
+
+  public static BundleContext getBundleContext(Class<?> cl) {
+    Bundle bundle = FrameworkUtil.getBundle(cl);
     return bundle == null ? null : bundle.getBundleContext();
   }
 
@@ -137,7 +141,7 @@ public class AppProperties {
   public static Version getVersion(String version) {
     String v = "";
     if (version != null) {
-      int start = version.startsWith("v") ? 1 : 0;
+      int start = version.startsWith("v") ? 1 : 0; // NON-NLS
       int end = version.indexOf('-');
       if (end < 0) {
         end = version.length();

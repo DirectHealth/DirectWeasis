@@ -12,23 +12,19 @@ package org.weasis.dicom.explorer;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Window;
-import java.net.MalformedURLException;
-import java.net.URL;
 import java.util.ArrayList;
 import javax.swing.JButton;
 import javax.swing.tree.DefaultMutableTreeNode;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.FrameworkUtil;
 import org.osgi.framework.ServiceReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.gui.InsertableUtil;
 import org.weasis.core.api.gui.util.AbstractItemDialogPage;
 import org.weasis.core.api.gui.util.AbstractWizardDialog;
+import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.gui.util.PageItem;
-import org.weasis.core.api.service.BundleTools;
-import org.weasis.dicom.explorer.internal.Activator;
 
 public class DicomImport extends AbstractWizardDialog {
   private static final Logger LOGGER = LoggerFactory.getLogger(DicomImport.class);
@@ -56,20 +52,7 @@ public class DicomImport extends AbstractWizardDialog {
     JButton importButton = new JButton(Messages.getString("DicomImport.imp"));
     importButton.addActionListener(e -> importSelection());
 
-    JButton jButtonHelp = new JButton();
-    jButtonHelp.putClientProperty("JButton.buttonType", "help");
-    jButtonHelp.addActionListener(
-        e -> {
-          try {
-            GuiUtils.openInDefaultBrowser(
-                jButtonHelp,
-                new URL(
-                    BundleTools.SYSTEM_PREFERENCES.getProperty("weasis.help.online")
-                        + "dicom-import"));
-          } catch (MalformedURLException e1) {
-            LOGGER.error("Cannot open online help", e1);
-          }
-        });
+    JButton jButtonHelp = GuiUtils.createHelpButton("dicom-import"); // NON-NLS
 
     jPanelBottom.removeAll();
     jPanelBottom.add(
@@ -84,7 +67,7 @@ public class DicomImport extends AbstractWizardDialog {
 
     initializePages();
     pack();
-    showPage(Activator.IMPORT_EXPORT_PERSISTENCE.getProperty(LAST_PAGE));
+    showPage(LocalPersistence.getProperties().getProperty(LAST_PAGE));
   }
 
   @Override
@@ -94,7 +77,7 @@ public class DicomImport extends AbstractWizardDialog {
     list.add(new DicomZipImport());
     list.add(new DicomDirImport());
 
-    BundleContext context = FrameworkUtil.getBundle(this.getClass()).getBundleContext();
+    BundleContext context = AppProperties.getBundleContext(this.getClass());
     try {
       for (ServiceReference<DicomImportFactory> service :
           context.getServiceReferences(DicomImportFactory.class, null)) {
@@ -122,6 +105,7 @@ public class DicomImport extends AbstractWizardDialog {
     try {
       object = jScrollPanePage.getViewport().getComponent(0);
     } catch (Exception ex) {
+      // Do nothing
     }
     if (object instanceof ImportDicom selectedPage) {
       selectedPage.importDICOM(dicomModel, null);
@@ -145,7 +129,7 @@ public class DicomImport extends AbstractWizardDialog {
   public void dispose() {
     PageItem page = getSelectedPage();
     if (page != null) {
-      Activator.IMPORT_EXPORT_PERSISTENCE.setProperty(LAST_PAGE, page.getTitle());
+      LocalPersistence.getProperties().setProperty(LAST_PAGE, page.getTitle());
     }
     closeAllPages();
     super.dispose();

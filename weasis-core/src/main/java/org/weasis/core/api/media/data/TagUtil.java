@@ -16,16 +16,17 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
 import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Date;
+import java.util.TimeZone;
 import java.util.regex.Pattern;
 import javax.xml.stream.XMLStreamReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.media.data.TagW.TagType;
-import org.weasis.core.api.util.LocalUtil;
 
 public final class TagUtil {
   private static final Logger LOGGER = LoggerFactory.getLogger(TagUtil.class);
@@ -97,35 +98,27 @@ public final class TagUtil {
     return null;
   }
 
-  public static Date dateTime(Date date, Date time) {
-    if (time == null) {
-      return date;
-    } else if (date == null) {
-      return time;
+  public static ZonedDateTime getZonedDateTime(LocalDateTime dateTime, TimeZone timeZone) {
+    if (dateTime != null) {
+      ZoneId zoneId = timeZone == null ? ZoneId.systemDefault() : timeZone.toZoneId();
+      return dateTime.atZone(zoneId);
     }
-    Calendar calendarA = Calendar.getInstance();
-    calendarA.setTime(date);
-
-    Calendar calendarB = Calendar.getInstance();
-    calendarB.setTime(time);
-
-    calendarA.set(Calendar.HOUR_OF_DAY, calendarB.get(Calendar.HOUR_OF_DAY));
-    calendarA.set(Calendar.MINUTE, calendarB.get(Calendar.MINUTE));
-    calendarA.set(Calendar.SECOND, calendarB.get(Calendar.SECOND));
-    calendarA.set(Calendar.MILLISECOND, calendarB.get(Calendar.MILLISECOND));
-
-    return calendarA.getTime();
+    return null;
   }
 
   public static String formatDateTime(TemporalAccessor date) {
     if (date instanceof LocalDate) {
-      return LocalUtil.getDateFormatter().format(date);
+      return DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).format(date);
     } else if (date instanceof LocalTime) {
-      return LocalUtil.getTimeFormatter().format(date);
-    } else if (date instanceof LocalDateTime || date instanceof ZonedDateTime) {
-      return LocalUtil.getDateTimeFormatter().format(date);
+      return DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM).format(date);
+    } else if (date instanceof LocalDateTime) {
+      return DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM).format(date);
+    } else if (date instanceof ZonedDateTime zonedDateTime) {
+      return DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM)
+          .format(zonedDateTime.withZoneSameInstant(ZoneId.systemDefault()));
     } else if (date instanceof Instant instant) {
-      return LocalUtil.getDateTimeFormatter().format(instant.atZone(ZoneId.systemDefault()));
+      return DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM)
+          .format(instant.atZone(ZoneId.systemDefault()));
     }
     return "";
   }

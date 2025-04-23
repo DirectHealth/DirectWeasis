@@ -9,6 +9,8 @@
  */
 package org.weasis.core.ui.editor.image;
 
+import bibliothek.gui.dock.control.focus.DefaultFocusRequest;
+import bibliothek.gui.dock.control.focus.FocusController;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Component;
@@ -18,6 +20,7 @@ import java.awt.Point;
 import java.awt.event.ActionListener;
 import java.awt.event.FocusListener;
 import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
@@ -31,15 +34,20 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.Timer;
+import java.util.TimerTask;
 import javax.swing.Action;
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
 import javax.swing.JComponent;
 import javax.swing.JPopupMenu;
+import javax.swing.JProgressBar;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JSeparator;
 import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 import javax.swing.border.Border;
+import org.opencv.core.Point3;
 import org.weasis.core.Messages;
 import org.weasis.core.api.gui.Image2DViewer;
 import org.weasis.core.api.gui.util.ActionState;
@@ -54,6 +62,9 @@ import org.weasis.core.api.image.WindowOp;
 import org.weasis.core.api.image.ZoomOp.Interpolation;
 import org.weasis.core.api.media.data.ImageElement;
 import org.weasis.core.api.media.data.MediaSeries;
+import org.weasis.core.api.service.UICore;
+import org.weasis.core.ui.editor.SeriesViewerEvent;
+import org.weasis.core.ui.editor.SeriesViewerEvent.EVENT;
 import org.weasis.core.ui.editor.image.dockable.MeasureTool;
 import org.weasis.core.ui.model.graphic.Graphic;
 import org.weasis.core.ui.model.layer.LayerAnnotation;
@@ -61,6 +72,7 @@ import org.weasis.core.ui.model.utils.ImageLayerChangeListener;
 import org.weasis.core.ui.model.utils.bean.PanPoint;
 import org.weasis.core.ui.model.utils.bean.PanPoint.State;
 import org.weasis.core.ui.util.TitleMenuItem;
+import org.weasis.core.util.LangUtil;
 import org.weasis.core.util.StringUtil;
 
 public interface ViewCanvas<E extends ImageElement>
@@ -235,22 +247,46 @@ public interface ViewCanvas<E extends ImageElement>
   void setSeries(MediaSeries<E> newSeries, E selectedMedia);
 
   default void setFocused(Boolean focused) {
+    boolean isFocused = LangUtil.getNULLtoFalse(focused);
     MediaSeries<E> series = getSeries();
     if (series != null) {
-      series.setFocused(focused);
+      series.setFocused(isFocused);
     }
-    if (focused && getBorder() == viewBorder) {
+    if (isFocused && getBorder() == viewBorder) {
       setBorder(focusBorder);
-    } else if (!focused && getBorder() == focusBorder) {
+    } else if (!isFocused && getBorder() == focusBorder) {
       setBorder(viewBorder);
     }
+
+    if (isFocused) {
+      if (WinUtil.getParentOfClass(getJComponent(), ViewerPlugin.class)
+          instanceof ViewerPlugin<?> viewerPlugin) {
+        FocusController focusController =
+            UICore.getInstance().getDockingControl().getController().getFocusController();
+        focusController.focus(
+            new DefaultFocusRequest(viewerPlugin.getDockable().intern(), getJComponent(), true));
+      } else {
+        // Delay the request focus
+        Timer timer = new Timer();
+        timer.schedule(
+            new TimerTask() {
+              @Override
+              public void run() {
+                SwingUtilities.invokeLater(() -> getJComponent().requestFocus());
+              }
+            },
+            500);
+      }
+    }
+  }
+
+  default Point3 getVolumeCoordinatesFromMouse(int x, int y) {
+    return null;
   }
 
   void setBorder(Border focusBorder);
 
   Border getBorder();
-
-  double getRealWorldViewScale();
 
   LayerAnnotation getInfoLayer();
 
@@ -338,6 +374,18 @@ public interface ViewCanvas<E extends ImageElement>
     GuiUtils.resetRenderingHints(g, oldRenderingHints);
   }
 
+  default void drawProgressBar(Graphics2D g2d, JProgressBar bar) {
+    if (bar != null && bar.isVisible()) {
+      int centerX = getJComponent().getWidth() / 2;
+      int centerY = getJComponent().getHeight() / 2;
+      int shiftX = centerX - bar.getWidth() / 2;
+      int shiftY = centerY - bar.getHeight() / 2;
+      g2d.translate(shiftX, shiftY);
+      bar.paint(g2d);
+      g2d.translate(-shiftX, -shiftY);
+    }
+  }
+
   List<Action> getExportActions();
 
   void resetZoom();
@@ -417,4 +465,64 @@ public interface ViewCanvas<E extends ImageElement>
   }
 
   boolean hasValidContent();
+
+  default void drawPointer(Graphics2D g, int pointerType) {
+    if (pointerType < 1) {
+      return;
+    }
+    if ((pointerType & CENTER_POINTER) == CENTER_POINTER) {
+      drawPointer(
+          g,
+          (getJComponent().getWidth() - 1) * 0.5,
+          (getJComponent().getHeight() - 1) * 0.5,
+          false);
+    }
+    if ((pointerType & HIGHLIGHTED_POINTER) == HIGHLIGHTED_POINTER
+        && highlightedPosition.isHighlightedPosition()) {
+      // Display the position in the center of the pixel (constant position even with a high zoom
+      // factor)
+      double offsetX =
+          modelToViewLength(highlightedPosition.getX() + 0.5 - getViewModel().getModelOffsetX());
+      double offsetY =
+          modelToViewLength(highlightedPosition.getY() + 0.5 - getViewModel().getModelOffsetY());
+      drawPointer(g, offsetX, offsetY, true);
+    }
+  }
+
+  default void defaultKeyPressed(ImageViewerEventManager<?> eventManager, KeyEvent e) {
+    if (e.isControlDown() && e.getKeyCode() == KeyEvent.VK_SPACE) {
+      eventManager.nextLeftMouseAction();
+    } else if (e.getModifiers() == 0
+        && (e.getKeyCode() == KeyEvent.VK_SPACE || e.getKeyCode() == KeyEvent.VK_I)) {
+      eventManager.fireSeriesViewerListeners(
+          new SeriesViewerEvent(
+              eventManager.getSelectedView2dContainer(), null, null, EVENT.TOGGLE_INFO));
+    } else if (e.getKeyCode() == KeyEvent.VK_F11) {
+      ImageViewerPlugin<E> c = (ImageViewerPlugin<E>) eventManager.getSelectedView2dContainer();
+      if (c != null) {
+        c.maximizedSelectedImagePane(c.getSelectedImagePane(), null);
+      }
+    } else if (e.isAltDown() && e.getKeyCode() == KeyEvent.VK_L) {
+      // Counterclockwise
+      eventManager
+          .getAction(ActionW.ROTATION)
+          .ifPresent(a -> a.setSliderValue((a.getSliderValue() + 270) % 360));
+    } else if (e.isAltDown() && e.getKeyCode() == KeyEvent.VK_R) {
+      // Clockwise
+      eventManager
+          .getAction(ActionW.ROTATION)
+          .ifPresent(a -> a.setSliderValue((a.getSliderValue() + 90) % 360));
+    } else if (e.isAltDown() && e.getKeyCode() == KeyEvent.VK_F) {
+      // Flip horizontal
+      eventManager.getAction(ActionW.FLIP).ifPresent(f -> f.setSelected(!f.isSelected()));
+    } else {
+      Optional<Feature<? extends ActionState>> feature =
+          eventManager.getLeftMouseActionFromKeyEvent(e.getKeyCode(), e.getModifiers());
+      if (feature.isPresent()) {
+        eventManager.changeLeftMouseAction(feature.get().cmd());
+      } else {
+        eventManager.keyPressed(e);
+      }
+    }
+  }
 }

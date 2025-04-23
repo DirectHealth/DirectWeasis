@@ -21,7 +21,6 @@ import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.explorer.model.AbstractFileModel;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiExecutor;
-import org.weasis.core.api.service.BundleTools;
 import org.weasis.core.api.util.ClosableURLConnection;
 import org.weasis.core.api.util.NetworkUtil;
 import org.weasis.core.api.util.URLParameters;
@@ -39,8 +38,7 @@ public class FileModel extends AbstractFileModel {
 
   private File getFile(String url) {
     File outFile;
-    try (ClosableURLConnection http =
-            NetworkUtil.getUrlConnection(url, new URLParameters(BundleTools.SESSION_TAGS_FILE));
+    try (ClosableURLConnection http = NetworkUtil.getUrlConnection(url, new URLParameters());
         InputStream in = http.getInputStream()) {
       outFile = File.createTempFile("img_", FileUtil.getExtension(url), IMAGE_CACHE_DIR);
       LOGGER.debug("Start to download image {} to {}.", url, outFile.getName());
@@ -63,31 +61,29 @@ public class FileModel extends AbstractFileModel {
     };
 
     final Option opt = Options.compile(usage).parse(argv);
-    final List<String> fargs = opt.getList("file");
+    final List<String> fargs = opt.getList("file"); // NON-NLS
     final List<String> uargs = opt.getList("url"); // NON-NLS
 
-    if (opt.isSet("help") || (fargs.isEmpty() && uargs.isEmpty())) {
+    if (opt.isSet("help") || (fargs.isEmpty() && uargs.isEmpty())) { // NON-NLS
       opt.usage();
       return;
     }
-    GuiExecutor.instance()
-        .execute(
-            () -> {
-              AbstractFileModel dataModel = ViewerPluginBuilder.DefaultDataModel;
-              dataModel.firePropertyChange(
-                  new ObservableEvent(
-                      ObservableEvent.BasicAction.SELECT, dataModel, null, dataModel));
-              if (opt.isSet("file")) {
-                fargs.stream()
-                    .map(File::new)
-                    .filter(File::isFile)
-                    .forEach(f -> ViewerPluginBuilder.openSequenceInDefaultPlugin(f, true, true));
-              }
-              if (opt.isSet("url")) { // NON-NLS
-                uargs.stream()
-                    .map(this::getFile)
-                    .forEach(f -> ViewerPluginBuilder.openSequenceInDefaultPlugin(f, true, true));
-              }
-            });
+    GuiExecutor.execute(
+        () -> {
+          AbstractFileModel dataModel = ViewerPluginBuilder.DefaultDataModel;
+          dataModel.firePropertyChange(
+              new ObservableEvent(ObservableEvent.BasicAction.SELECT, dataModel, null, dataModel));
+          if (opt.isSet("file")) { // NON-NLS
+            fargs.stream()
+                .map(File::new)
+                .filter(File::isFile)
+                .forEach(f -> ViewerPluginBuilder.openSequenceInDefaultPlugin(f, true, true));
+          }
+          if (opt.isSet("url")) { // NON-NLS
+            uargs.stream()
+                .map(this::getFile)
+                .forEach(f -> ViewerPluginBuilder.openSequenceInDefaultPlugin(f, true, true));
+          }
+        });
   }
 }

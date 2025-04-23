@@ -12,11 +12,9 @@ package org.weasis.dicom.viewer2d.mpr;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.GridBagConstraints;
-import java.awt.geom.Point2D;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -30,7 +28,6 @@ import javax.swing.JSeparator;
 import javax.swing.SwingUtilities;
 import org.dcm4che3.data.Tag;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.FrameworkUtil;
 import org.osgi.service.prefs.Preferences;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +35,7 @@ import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.gui.Insertable.Type;
 import org.weasis.core.api.gui.InsertableUtil;
 import org.weasis.core.api.gui.util.ActionW;
+import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.image.GridBagLayoutModel;
@@ -49,17 +47,15 @@ import org.weasis.core.api.service.BundlePreferences;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.ActionIcon;
 import org.weasis.core.api.util.ResourceUtil.OtherIcon;
-import org.weasis.core.ui.docking.DockableTool;
+import org.weasis.core.ui.editor.SeriesViewerUI;
 import org.weasis.core.ui.editor.image.DefaultView2d;
 import org.weasis.core.ui.editor.image.MeasureToolBar;
-import org.weasis.core.ui.editor.image.MouseActions;
 import org.weasis.core.ui.editor.image.RotationToolBar;
 import org.weasis.core.ui.editor.image.SynchData;
 import org.weasis.core.ui.editor.image.SynchView;
 import org.weasis.core.ui.editor.image.ViewCanvas;
 import org.weasis.core.ui.editor.image.ViewerToolBar;
 import org.weasis.core.ui.editor.image.ZoomToolBar;
-import org.weasis.core.ui.model.utils.bean.PanPoint;
 import org.weasis.core.ui.util.ColorLayerUI;
 import org.weasis.core.ui.util.DefaultAction;
 import org.weasis.core.ui.util.PrintDialog;
@@ -83,7 +79,7 @@ import org.weasis.dicom.viewer2d.Messages;
 import org.weasis.dicom.viewer2d.ResetTools;
 import org.weasis.dicom.viewer2d.View2dContainer;
 import org.weasis.dicom.viewer2d.View2dFactory;
-import org.weasis.dicom.viewer2d.mpr.MprView.SliceOrientation;
+import org.weasis.dicom.viewer2d.mpr.MprView.Plane;
 
 public class MprContainer extends DicomViewerPlugin implements PropertyChangeListener {
   private static final Logger LOGGER = LoggerFactory.getLogger(MprContainer.class);
@@ -114,11 +110,12 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
   public static final List<SynchView> SYNCH_LIST = List.of(SynchView.NONE, defaultMpr);
 
   public static final GridBagLayoutModel view1 =
-      new GridBagLayoutModel(new LinkedHashMap<>(3), "mpr", "MPR (col 1,2)"); // NON-NLS
+      new GridBagLayoutModel(LinkedHashMap.newLinkedHashMap(3), "mpr", "MPR (col 1,2)"); // NON-NLS
   protected static final GridBagLayoutModel view2 = VIEWS_2x2_f2.copy();
   protected static final GridBagLayoutModel view3 = VIEWS_2_f1x2.copy();
   public static final GridBagLayoutModel view4 =
-      new GridBagLayoutModel(new LinkedHashMap<>(3), "layout_r2x1", "MPR (row 2,1)"); // NON-NLS
+      new GridBagLayoutModel(
+          LinkedHashMap.newLinkedHashMap(3), "layout_r2x1", "MPR (row 2,1)"); // NON-NLS
   protected static final GridBagLayoutModel view5 = VIEWS_1x3.copy();
 
   static {
@@ -212,17 +209,11 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
   public static final List<GridBagLayoutModel> LAYOUT_LIST =
       List.of(view1, view2, view3, view4, view5);
 
-  // Static tools shared by all the View2dContainer instances, tools are registered when a container
-  // is selected
-  // Do not initialize tools in a static block (order initialization issue with eventManager), use
-  // instead a lazy
-  // initialization with a method.
-  public static final List<Toolbar> TOOLBARS = Collections.synchronizedList(new ArrayList<>());
-  public static final List<DockableTool> TOOLS = View2dContainer.TOOLS;
-  private static volatile boolean initComponents = false;
+  public static final SeriesViewerUI UI =
+      new SeriesViewerUI(MprContainer.class, null, View2dContainer.UI.tools, null);
+  private MprController mprController;
 
   private Thread process;
-  private String lastCommand;
 
   public MprContainer() {
     this(VIEWS_1x1, null);
@@ -237,34 +228,35 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
         ResourceUtil.getIcon(OtherIcon.VIEW_3D),
         null);
     setSynchView(SynchView.NONE);
-    if (!initComponents) {
-      initComponents = true;
+    if (!UI.init.getAndSet(true)) {
+      List<Toolbar> toolBars = UI.toolBars;
+
       // Add standard toolbars
-      // WProperties props = (WProperties) BundleTools.SYSTEM_PREFERENCES.clone();
+      // WProperties props = (WProperties) GuiUtils.getUICore().getSystemPreferences().clone();
       // props.putBooleanProperty("weasis.toolbar.synch.button", false);
 
       EventManager evtMg = EventManager.getInstance();
       Optional<Toolbar> importBar =
-          View2dContainer.TOOLBARS.stream().filter(ImportToolBar.class::isInstance).findFirst();
-      importBar.ifPresent(TOOLBARS::add);
+          View2dContainer.UI.toolBars.stream().filter(ImportToolBar.class::isInstance).findFirst();
+      importBar.ifPresent(toolBars::add);
       Optional<Toolbar> exportBar =
-          View2dContainer.TOOLBARS.stream().filter(ExportToolBar.class::isInstance).findFirst();
-      exportBar.ifPresent(TOOLBARS::add);
+          View2dContainer.UI.toolBars.stream().filter(ExportToolBar.class::isInstance).findFirst();
+      exportBar.ifPresent(toolBars::add);
       Optional<Toolbar> viewBar =
-          View2dContainer.TOOLBARS.stream().filter(ViewerToolBar.class::isInstance).findFirst();
-      viewBar.ifPresent(TOOLBARS::add);
-      TOOLBARS.add(new MeasureToolBar(evtMg, 11));
-      TOOLBARS.add(new ZoomToolBar(evtMg, 20, true));
-      TOOLBARS.add(new RotationToolBar(evtMg, 30));
-      TOOLBARS.add(new DcmHeaderToolBar(evtMg, 35));
-      TOOLBARS.add(new LutToolBar(evtMg, 40));
+          View2dContainer.UI.toolBars.stream().filter(ViewerToolBar.class::isInstance).findFirst();
+      viewBar.ifPresent(toolBars::add);
+      toolBars.add(new MeasureToolBar(evtMg, 11));
+      toolBars.add(new ZoomToolBar(evtMg, 20, true));
+      toolBars.add(new RotationToolBar(evtMg, 30));
+      toolBars.add(new DcmHeaderToolBar(evtMg, 35));
+      toolBars.add(new LutToolBar(evtMg, 40));
 
-      final BundleContext context = FrameworkUtil.getBundle(this.getClass()).getBundleContext();
+      final BundleContext context = AppProperties.getBundleContext(this.getClass());
       Preferences prefs = BundlePreferences.getDefaultPreferences(context);
       if (prefs != null) {
         String className = this.getClass().getSimpleName().toLowerCase();
         InsertableUtil.applyPreferences(
-            TOOLBARS, prefs, context.getBundle().getSymbolicName(), className, Type.TOOLBAR);
+            toolBars, prefs, context.getBundle().getSymbolicName(), className, Type.TOOLBAR);
       }
     }
   }
@@ -310,37 +302,8 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
   }
 
   @Override
-  public List<DockableTool> getToolPanel() {
-    return TOOLS;
-  }
-
-  @Override
-  public void setSelected(boolean selected) {
-    final ViewerToolBar toolBar = getViewerToolBar();
-    if (selected) {
-      if (toolBar != null) {
-        String command = ActionW.CROSSHAIR.cmd();
-        MouseActions mouseActions = eventManager.getMouseActions();
-        String lastAction = mouseActions.getAction(MouseActions.T_LEFT);
-        if (!command.equals(lastAction)) {
-          lastCommand = lastAction;
-          mouseActions.setAction(MouseActions.T_LEFT, command);
-          setMouseActions(mouseActions);
-          toolBar.changeButtonState(MouseActions.T_LEFT, command);
-        }
-      }
-    } else {
-      if (lastCommand != null && toolBar != null) {
-        MouseActions mouseActions = eventManager.getMouseActions();
-        if (ActionW.CROSSHAIR.cmd().equals(mouseActions.getAction(MouseActions.T_LEFT))) {
-          mouseActions.setAction(MouseActions.T_LEFT, lastCommand);
-          setMouseActions(mouseActions);
-          toolBar.changeButtonState(MouseActions.T_LEFT, lastCommand);
-          lastCommand = null;
-        }
-      }
-    }
-    super.setSelected(true);
+  public SeriesViewerUI getSeriesViewerUI() {
+    return View2dContainer.UI;
   }
 
   @Override
@@ -363,6 +326,9 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
   @Override
   public void close() {
     stopCurrentProcess();
+    if (mprController != null) {
+      mprController.dispose();
+    }
     MprFactory.closeSeriesViewer(this);
     super.close();
   }
@@ -439,9 +405,16 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
     return false;
   }
 
+  public MprController getMprController() {
+    if (mprController == null) {
+      mprController = new MprController();
+    }
+    return mprController;
+  }
+
   @Override
   public DefaultView2d<DicomImageElement> createDefaultView(String classType) {
-    return new MprView(eventManager);
+    return new MprView(eventManager, getMprController());
   }
 
   @Override
@@ -461,8 +434,13 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
   }
 
   @Override
-  public synchronized List<Toolbar> getToolBar() {
-    return TOOLBARS;
+  public Class<?> getSeriesViewerClass() {
+    return view2dClass;
+  }
+
+  @Override
+  public GridBagLayoutModel getDefaultLayoutModel() {
+    return view1;
   }
 
   @Override
@@ -505,11 +483,9 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
     return actions;
   }
 
-  public MprView getMprView(SliceOrientation sliceOrientation) {
+  public MprView getMprView(Plane plane) {
     for (ViewCanvas<?> v : view2ds) {
-      if (v instanceof MprView mprView
-          && sliceOrientation != null
-          && sliceOrientation.equals(mprView.getSliceOrientation())) {
+      if (v instanceof MprView mprView && plane != null && plane.equals(mprView.getPlane())) {
         return mprView;
       }
     }
@@ -519,17 +495,22 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
   @Override
   public void addSeries(MediaSeries<DicomImageElement> sequence) {
     stopCurrentProcess();
+    AxesControl control = mprController.getAxesControl();
+    control.resetListeners();
+    control.reset();
+
     // TODO Should be init elsewhere
     for (int i = 0; i < view2ds.size(); i++) {
       ViewCanvas<DicomImageElement> val = view2ds.get(i);
       if (val instanceof MprView mprView) {
-        SliceOrientation sliceOrientation =
+        Plane plane =
             switch (i) {
-              case 1 -> SliceOrientation.CORONAL;
-              case 2 -> SliceOrientation.SAGITTAL;
-              default -> SliceOrientation.AXIAL;
+              case 1 -> Plane.CORONAL;
+              case 2 -> Plane.SAGITTAL;
+              default -> Plane.AXIAL;
             };
-        mprView.setType(sliceOrientation);
+        mprView.setType(plane);
+        control.addPropertyChangeListener(mprView);
       }
     }
 
@@ -548,49 +529,28 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
             @Override
             public void run() {
               try {
-                SeriesBuilder.createMissingSeries(this, MprContainer.this, view);
+                MPRGenerator.createMissingSeries(this, MprContainer.this, view);
 
                 // Following actions need to be executed in EDT thread
-                GuiExecutor.instance()
-                    .execute(
-                        () -> {
-                          eventManager
-                              .getAction(ActionW.SYNCH)
-                              .ifPresent(c -> c.setSelectedItem(MprContainer.defaultMpr));
+                GuiExecutor.execute(
+                    () -> {
+                      eventManager
+                          .getAction(ActionW.SYNCH)
+                          .ifPresent(c -> c.setSelectedItem(MprContainer.defaultMpr));
 
-                          // Set the middle image ( the best choice to propagate the default preset
-                          // of non CT modalities)
-                          eventManager
-                              .getAction(ActionW.SCROLL_SERIES)
-                              .ifPresent(s -> s.setSliderValue(s.getSliderMax() / 2));
-
-                          eventManager
-                              .getAction(ActionW.CROSSHAIR)
-                              .ifPresent(
-                                  i -> {
-                                    Point2D pt =
-                                        view.getImageCoordinatesFromMouse(
-                                            view.getWidth() / 2, view.getHeight() / 2);
-                                    PanPoint panPoint =
-                                        new PanPoint(PanPoint.State.CENTER, pt.getX(), pt.getY());
-                                    i.setPoint(panPoint);
-                                  });
-
-                          // Force to propagate the default preset
-                          eventManager
-                              .getAction(ActionW.PRESET)
-                              .ifPresent(
-                                  c -> {
-                                    c.setSelectedItemWithoutTriggerAction(null);
-                                    c.setSelectedItem(c.getFirstItem());
-                                  });
-                        });
-
+                      // Force to propagate the default preset
+                      eventManager
+                          .getAction(ActionW.PRESET)
+                          .ifPresent(
+                              c -> {
+                                c.setSelectedItemWithoutTriggerAction(null);
+                                c.setSelectedItem(c.getFirstItem());
+                              });
+                    });
               } catch (final Exception e) {
                 LOGGER.error("Build MPR", e);
                 // Following actions need to be executed in EDT thread
-                GuiExecutor.instance()
-                    .execute(() -> showErrorMessage(view2ds, view, e.getMessage()));
+                GuiExecutor.execute(() -> showErrorMessage(view2ds, view, e.getMessage()));
               }
             }
           };
@@ -643,13 +603,13 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
       if (img instanceof DicomImageElement imageElement) {
         Plan orientation = ImageOrientation.getPlan(imageElement);
         if (orientation != null) {
-          SliceOrientation sliceOrientation = SliceOrientation.AXIAL;
+          Plane plane = Plane.AXIAL;
           if (Plan.CORONAL.equals(orientation)) {
-            sliceOrientation = SliceOrientation.CORONAL;
+            plane = Plane.CORONAL;
           } else if (Plan.SAGITTAL.equals(orientation)) {
-            sliceOrientation = SliceOrientation.SAGITTAL;
+            plane = Plane.SAGITTAL;
           }
-          MprView view = getMprView(sliceOrientation);
+          MprView view = getMprView(plane);
           if (view != null) {
             setSelectedImagePane(view);
             return view;

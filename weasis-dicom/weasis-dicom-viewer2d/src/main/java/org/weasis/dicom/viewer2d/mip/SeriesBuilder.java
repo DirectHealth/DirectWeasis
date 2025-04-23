@@ -19,12 +19,15 @@ import java.util.Optional;
 import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.Tag;
 import org.dcm4che3.data.VR;
+import org.dcm4che3.img.lut.PresetWindowLevel;
 import org.dcm4che3.util.UIDUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.AppProperties;
+import org.weasis.core.api.gui.util.ComboItemListener;
 import org.weasis.core.api.gui.util.Filter;
+import org.weasis.core.api.gui.util.SliderChangeListener;
 import org.weasis.core.api.gui.util.SliderCineListener;
 import org.weasis.core.api.image.op.MaxCollectionZprojection;
 import org.weasis.core.api.image.op.MeanCollectionZprojection;
@@ -33,11 +36,14 @@ import org.weasis.core.api.media.data.ImageElement;
 import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.media.data.SeriesComparator;
 import org.weasis.core.api.media.data.TagW;
+import org.weasis.core.ui.editor.image.ImageViewerEventManager;
 import org.weasis.core.util.FileUtil;
 import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.codec.TagD;
+import org.weasis.dicom.codec.utils.DicomMediaUtils;
 import org.weasis.dicom.viewer2d.View2d;
 import org.weasis.dicom.viewer2d.mip.MipView.Type;
+import org.weasis.dicom.viewer2d.mpr.DerivedStack;
 import org.weasis.dicom.viewer2d.mpr.RawImageIO;
 import org.weasis.opencv.data.FileRawImage;
 import org.weasis.opencv.data.PlanarImage;
@@ -60,7 +66,6 @@ public class SeriesBuilder {
 
     PlanarImage curImage;
     if (series != null) {
-
       SeriesComparator sort = (SeriesComparator) view.getActionValue(ActionW.SORT_STACK.cmd());
       Boolean reverse = (Boolean) view.getActionValue(ActionW.INVERSE_STACK.cmd());
       Comparator sortFilter = (reverse != null && reverse) ? sort.getReversOrderComparator() : sort;
@@ -80,61 +85,8 @@ public class SeriesBuilder {
       DicomImageElement img =
           series.getMedia(MediaSeries.MEDIA_POSITION.MIDDLE, filter, sortFilter);
       final Attributes attributes = img.getMediaReader().getDicomObject();
-      final int[] COPIED_ATTRS = {
-        Tag.SpecificCharacterSet,
-        Tag.PatientID,
-        Tag.PatientName,
-        Tag.PatientBirthDate,
-        Tag.PatientBirthTime,
-        Tag.PatientSex,
-        Tag.IssuerOfPatientID,
-        Tag.IssuerOfAccessionNumberSequence,
-        Tag.PatientWeight,
-        Tag.PatientAge,
-        Tag.PatientSize,
-        Tag.PatientState,
-        Tag.PatientComments,
-        Tag.StudyID,
-        Tag.StudyDate,
-        Tag.StudyTime,
-        Tag.StudyDescription,
-        Tag.StudyComments,
-        Tag.AccessionNumber,
-        Tag.ModalitiesInStudy,
-        Tag.Modality,
-        Tag.SeriesDate,
-        Tag.SeriesTime,
-        Tag.RetrieveAETitle,
-        Tag.ReferringPhysicianName,
-        Tag.InstitutionName,
-        Tag.InstitutionalDepartmentName,
-        Tag.StationName,
-        Tag.Manufacturer,
-        Tag.ManufacturerModelName,
-        Tag.AnatomicalOrientationType,
-        Tag.SeriesNumber,
-        Tag.KVP,
-        Tag.Laterality,
-        Tag.BodyPartExamined,
-        Tag.FrameOfReferenceUID,
-        Tag.RescaleSlope,
-        Tag.RescaleIntercept,
-        Tag.RescaleType,
-        Tag.ModalityLUTSequence,
-        Tag.WindowCenter,
-        Tag.WindowWidth,
-        Tag.VOILUTFunction,
-        Tag.WindowCenterWidthExplanation,
-        Tag.VOILUTSequence
-      };
-
-      Arrays.sort(COPIED_ATTRS);
-      final Attributes cpTags = new Attributes(attributes, COPIED_ATTRS);
-      cpTags.setString(
-          Tag.SeriesDescription,
-          VR.LO,
-          attributes.getString(Tag.SeriesDescription, "") + " [MIP]"); // NON-NLS
-      cpTags.setString(Tag.ImageType, VR.CS, "DERIVED", "SECONDARY", "PROJECTION IMAGE"); // NON-NLS
+      final Attributes cpTags = getBaseAttributes(attributes);
+      adaptWindowLevel(view, cpTags);
       String seriesUID = UIDUtils.createUID();
 
       for (int index = minImg; index <= maxImg; index++) {
@@ -179,7 +131,7 @@ public class SeriesBuilder {
             }
           } catch (Exception e) {
             if (raw != null) {
-              FileUtil.delete(raw.getFile());
+              FileUtil.delete(raw.file());
               raw = null;
             }
             LOGGER.error("Writing MIP", e);
@@ -188,7 +140,7 @@ public class SeriesBuilder {
             return;
           }
           RawImageIO rawIO = new RawImageIO(raw, null);
-          rawIO.getFileCache().setOriginalTempFile(raw.getFile());
+          rawIO.getFileCache().setOriginalTempFile(raw.file());
           rawIO.setBaseAttributes(cpTags);
 
           // Tags with same values for all the Series
@@ -198,9 +150,12 @@ public class SeriesBuilder {
           rawIO.setTag(TagD.get(Tag.BitsStored), imgRef.getBitsStored());
 
           int lastIndex = sources.size() - 1;
-          rawIO.setTag(
-              TagD.get(Tag.SliceThickness),
-              getThickness(sources.get(0), sources.get(lastIndex), lastIndex));
+          double thickness =
+              DicomMediaUtils.getThickness(sources.getFirst(), sources.get(lastIndex));
+          if (thickness <= 0.0) {
+            thickness = sources.size();
+          }
+          rawIO.setTag(TagD.get(Tag.SliceThickness), thickness);
           double[] loc = (double[]) imgRef.getTagValue(TagW.SlicePosition);
           if (loc != null) {
             rawIO.setTag(TagW.SlicePosition, loc);
@@ -210,7 +165,7 @@ public class SeriesBuilder {
           rawIO.setTag(TagD.get(Tag.SeriesInstanceUID), seriesUID);
 
           // Mandatory tags
-          org.weasis.dicom.viewer2d.mpr.SeriesBuilder.copyMandatoryTags(img, rawIO);
+          DerivedStack.copyMandatoryTags(img, rawIO);
           TagW[] tagList2;
 
           tagList2 =
@@ -229,31 +184,106 @@ public class SeriesBuilder {
           // Image specific tags
           rawIO.setTag(TagD.get(Tag.SOPInstanceUID), UIDUtils.createUID());
           rawIO.setTag(TagD.get(Tag.InstanceNumber), index + 1);
-          dicoms.add(org.weasis.dicom.viewer2d.mpr.SeriesBuilder.buildDicomImageElement(rawIO));
+          dicoms.add(DerivedStack.buildDicomImageElement(rawIO));
         }
       }
     }
   }
 
-  static double getThickness(ImageElement firstDcm, ImageElement lastDcm, int range) {
-    double[] p1 = (double[]) firstDcm.getTagValue(TagW.SlicePosition);
-    double[] p2 = (double[]) lastDcm.getTagValue(TagW.SlicePosition);
-    if (p1 != null && p2 != null) {
-      double diff = Math.abs((p2[0] + p2[1] + p2[2]) - (p1[0] + p1[1] + p1[2]));
+  private static Attributes getBaseAttributes(Attributes attributes) {
+    final int[] COPIED_ATTRS = {
+      Tag.SpecificCharacterSet,
+      Tag.TimezoneOffsetFromUTC,
+      Tag.PatientID,
+      Tag.PatientName,
+      Tag.PatientBirthDate,
+      Tag.PatientBirthTime,
+      Tag.PatientSex,
+      Tag.IssuerOfPatientID,
+      Tag.IssuerOfAccessionNumberSequence,
+      Tag.PatientWeight,
+      Tag.PatientAge,
+      Tag.PatientSize,
+      Tag.PatientState,
+      Tag.PatientComments,
+      Tag.StudyID,
+      Tag.StudyDate,
+      Tag.StudyTime,
+      Tag.StudyDescription,
+      Tag.StudyComments,
+      Tag.AccessionNumber,
+      Tag.ModalitiesInStudy,
+      Tag.Modality,
+      Tag.SeriesDate,
+      Tag.SeriesTime,
+      Tag.RetrieveAETitle,
+      Tag.ReferringPhysicianName,
+      Tag.InstitutionName,
+      Tag.InstitutionalDepartmentName,
+      Tag.StationName,
+      Tag.Manufacturer,
+      Tag.ManufacturerModelName,
+      Tag.AnatomicalOrientationType,
+      Tag.SeriesNumber,
+      Tag.KVP,
+      Tag.Laterality,
+      Tag.BodyPartExamined,
+      Tag.AnatomicRegionSequence,
+      Tag.FrameOfReferenceUID,
+      Tag.RescaleSlope,
+      Tag.RescaleIntercept,
+      Tag.RescaleType,
+      Tag.ModalityLUTSequence,
+      Tag.WindowCenter,
+      Tag.WindowWidth,
+      Tag.VOILUTFunction,
+      Tag.WindowCenterWidthExplanation,
+      Tag.VOILUTSequence
+    };
 
-      Double t1 = TagD.getTagValue(firstDcm, Tag.SliceThickness, Double.class);
-      if (t1 != null) {
-        diff += t1 / 2;
+    Arrays.sort(COPIED_ATTRS);
+    final Attributes cpTags = new Attributes(attributes, COPIED_ATTRS);
+    cpTags.setString(
+        Tag.SeriesDescription,
+        VR.LO,
+        attributes.getString(Tag.SeriesDescription, "") + " [MIP]"); // NON-NLS
+    cpTags.setString(Tag.ImageType, VR.CS, "DERIVED", "SECONDARY", "PROJECTION IMAGE"); // NON-NLS
+    return cpTags;
+  }
+
+  public static void adaptWindowLevel(View2d view2d, Attributes cpTags) {
+    ImageViewerEventManager<DicomImageElement> manager = view2d.getEventManager();
+    Optional<SliderChangeListener> windowAction = manager.getAction(ActionW.WINDOW);
+    Optional<SliderChangeListener> levelAction = manager.getAction(ActionW.LEVEL);
+    if (windowAction.isPresent() && levelAction.isPresent()) {
+      Optional<? extends ComboItemListener<?>> presetAction = manager.getAction(ActionW.PRESET);
+      PresetWindowLevel oldPreset =
+          presetAction
+              .map(comboItemListener -> (PresetWindowLevel) comboItemListener.getSelectedItem())
+              .orElse(null);
+      if (oldPreset == null) {
+        double[] wc = cpTags.getDoubles(Tag.WindowCenter);
+        double[] ww = cpTags.getDoubles(Tag.WindowWidth);
+        double center = levelAction.get().getRealValue();
+        double width = windowAction.get().getRealValue();
+        if (wc != null && ww != null && wc.length > 0 && ww.length > 0) {
+          wc = insertAtFirst(wc, center);
+          ww = insertAtFirst(ww, width);
+        } else {
+          wc = new double[] {center};
+          ww = new double[] {width};
+        }
+        cpTags.setDouble(Tag.WindowCenter, VR.DS, wc);
+        cpTags.setDouble(Tag.WindowWidth, VR.DS, ww);
       }
-
-      t1 = TagD.getTagValue(lastDcm, Tag.SliceThickness, Double.class);
-      if (t1 != null) {
-        diff += t1 / 2;
-      }
-
-      return diff;
     }
-    return range;
+  }
+
+  public static double[] insertAtFirst(double[] originalArray, double newItem) {
+    double[] newArray = new double[originalArray.length + 1];
+    newArray[0] = newItem;
+    System.arraycopy(originalArray, 0, newArray, 1, originalArray.length);
+    return newArray;
   }
 
   public static PlanarImage addCollectionOperation(Type mipType, List<ImageElement> sources) {

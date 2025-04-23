@@ -9,7 +9,7 @@
  */
 package org.weasis.core.ui.model.graphic.imp;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.awt.Color;
 import java.awt.geom.Point2D;
@@ -25,7 +25,7 @@ public class PixelInfoGraphicTest extends GraphicTester<PixelInfoGraphic> {
   private static final String XML_1 = "/graphic/pixel/pixel.graphic.1.xml"; // NON-NLS
 
   static final String BASIC_TPL =
-      "<pixelInfo fill=\"%s\" showLabel=\"%s\" thickness=\"%s\" uuid=\"%s\">" // NON-NLS
+      "<pixelInfo fillOpacity=\"%s\" fill=\"%s\" showLabel=\"%s\" thickness=\"%s\" uuid=\"%s\">" // NON-NLS
           + "<paint rgb=\"%s\"/>" // NON-NLS
           + "<pts/>" // NON-NLS
           + "</pixelInfo>"; // NON-NLS
@@ -55,6 +55,7 @@ public class PixelInfoGraphicTest extends GraphicTester<PixelInfoGraphic> {
   @Override
   public Object[] getParameters() {
     return new Object[] {
+      Graphic.DEFAULT_FILL_OPACITY,
       Graphic.DEFAULT_FILLED,
       Graphic.DEFAULT_LABEL_VISIBLE,
       Graphic.DEFAULT_LINE_THICKNESS,
@@ -68,7 +69,7 @@ public class PixelInfoGraphicTest extends GraphicTester<PixelInfoGraphic> {
       PixelInfoGraphic result, PixelInfoGraphic expected) {
     AnnotationGraphicTest.checkForDeserializeBasicGraphic(result, expected);
 
-    assertThat(result.getPixelInfo()).isNull();
+    assertNull(result.getPixelInfo());
   }
 
   @Override

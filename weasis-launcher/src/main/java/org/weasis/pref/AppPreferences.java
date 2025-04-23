@@ -15,25 +15,26 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
-import java.lang.System.Logger;
-import java.lang.System.Logger.Level;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import org.slf4j.LoggerFactory;
+import org.weasis.core.util.StringUtil;
 import org.weasis.launcher.FileUtil;
 import org.weasis.launcher.Utils;
 
 public class AppPreferences extends HashMap<String, Preference> {
-  private static final Logger LOGGER = System.getLogger(AppPreferences.class.getName());
+  private static final org.slf4j.Logger LOGGER = LoggerFactory.getLogger(AppPreferences.class);
   private static final String DELIM_START = "${";
   private static final String DELIM_STOP = "}";
   static final String CODE = "code"; // NON-NLS
   static final String VAL = "value"; // NON-NLS
   static final String DESC = "description"; // NON-NLS
   static final String TYPE = "type"; // NON-NLS
-  static final String JAVA_TYPE = "JavaType"; // NON-NLS
+  static final String JAVA_TYPE = "javaType"; // NON-NLS
   static final String DEFAULT = "defaultValue"; // NON-NLS
   static final String CATEGORY = "category"; // NON-NLS
 
@@ -51,10 +52,7 @@ public class AppPreferences extends HashMap<String, Preference> {
         Reader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
       json = (Map<String, Object>) Json.parse(reader);
     } catch (ParseException | IOException ex) {
-      LOGGER.log(
-          Level.ERROR,
-          () -> String.format("Cannot read json file: %s", uri), // NON-NLS
-          ex);
+      LOGGER.error("Cannot read json file: {}", uri, ex);
       return;
     }
 
@@ -74,21 +72,15 @@ public class AppPreferences extends HashMap<String, Preference> {
     }
   }
 
-  public String getProperty(String key) {
-    Preference p = get(key);
-    if (p != null) {
-      return p.getValue();
-    }
-    return null;
+  public String getValue(String key) {
+    return Optional.ofNullable(get(key)).map(Preference::getValue).orElse(null);
   }
 
-  public String getProperty(String key, String defaultVal) {
-    String val = null;
-    Preference p = get(key);
-    if (p != null) {
-      val = p.getValue();
-    }
-    return Utils.hasText(val) ? val : defaultVal;
+  public String getValue(String key, String defaultVal) {
+    return Optional.ofNullable(get(key))
+        .map(Preference::getValue)
+        .filter(Utils::hasText)
+        .orElse(defaultVal);
   }
 
   public String substVars(String val, String currentKey, Map<String, String> cycleMap)
@@ -97,26 +89,21 @@ public class AppPreferences extends HashMap<String, Preference> {
       cycleMap = new HashMap<>();
     }
     cycleMap.put(currentKey, currentKey);
+    if (val == null) {
+      return StringUtil.EMPTY_STRING;
+    }
 
     int stopDelim = -1;
-    int startDelim = -1;
+    int startDelim;
 
     do {
       stopDelim = val.indexOf(DELIM_STOP, stopDelim + 1);
       if (stopDelim < 0) {
         return val;
       }
-      startDelim = val.indexOf(DELIM_START);
+      startDelim = val.lastIndexOf(DELIM_START, stopDelim);
       if (startDelim < 0) {
         return val;
-      }
-      while (true) {
-        int idx = val.indexOf(DELIM_START, startDelim + DELIM_START.length());
-        if ((idx < 0) || (idx > stopDelim)) {
-          break;
-        } else if (idx < stopDelim) {
-          startDelim = idx;
-        }
       }
     } while (startDelim > stopDelim);
 
@@ -126,7 +113,7 @@ public class AppPreferences extends HashMap<String, Preference> {
       throw new IllegalArgumentException("recursive variable reference: " + variable);
     }
 
-    String substValue = getProperty(variable);
+    String substValue = getValue(variable);
     if (substValue == null) {
       // Ignore unknown property values.
       substValue = System.getProperty(variable, "");

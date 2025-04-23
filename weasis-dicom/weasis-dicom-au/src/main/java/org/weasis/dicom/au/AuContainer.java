@@ -12,36 +12,36 @@ package org.weasis.dicom.au;
 import java.awt.event.KeyEvent;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import javax.swing.JComponent;
 import javax.swing.JMenu;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.FrameworkUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.gui.InsertableUtil;
+import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiExecutor;
+import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.image.GridBagLayoutModel;
 import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.media.data.MediaSeriesGroup;
 import org.weasis.core.api.media.data.Series;
-import org.weasis.core.api.service.BundleTools;
+import org.weasis.core.api.service.WProperties;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.OtherIcon;
-import org.weasis.core.ui.docking.DockableTool;
-import org.weasis.core.ui.docking.UIManager;
+import org.weasis.core.ui.editor.SeriesViewerUI;
 import org.weasis.core.ui.editor.image.ImageViewerEventManager;
 import org.weasis.core.ui.editor.image.ImageViewerPlugin;
 import org.weasis.core.ui.editor.image.SynchView;
 import org.weasis.core.ui.editor.image.ViewCanvas;
+import org.weasis.core.ui.pref.LauncherToolBar;
 import org.weasis.core.ui.util.Toolbar;
 import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.TagD.Level;
+import org.weasis.dicom.explorer.DicomExportAction;
 import org.weasis.dicom.explorer.DicomModel;
 import org.weasis.dicom.explorer.DicomViewerPlugin;
 import org.weasis.dicom.explorer.ExportToolBar;
@@ -61,13 +61,7 @@ public class AuContainer extends DicomViewerPlugin implements PropertyChangeList
 
   private static final List<SynchView> SYNCH_LIST = List.of(SynchView.NONE);
 
-  // Static tools shared by all the View2dContainer instances, tools are registered when a container
-  // is selected
-  // Do not initialize tools in a static block (order initialization issue with eventManager), use
-  // instead a lazy
-  // initialization with a method.
-  private static final List<Toolbar> TOOLBARS = Collections.synchronizedList(new ArrayList<>(1));
-  private static volatile boolean initComponents = false;
+  public static final SeriesViewerUI UI = new SeriesViewerUI(AuContainer.class);
 
   static final ImageViewerEventManager<DicomImageElement> AU_EVENT_MANAGER =
       new ImageViewerEventManager<>() {
@@ -103,6 +97,11 @@ public class AuContainer extends DicomViewerPlugin implements PropertyChangeList
         public void keyReleased(KeyEvent e) {
           // Do nothing
         }
+
+        @Override
+        public String resolvePlaceholders(String template) {
+          return DicomExportAction.resolvePlaceholders(template, this);
+        }
       };
   protected AuView auview;
 
@@ -119,49 +118,64 @@ public class AuContainer extends DicomViewerPlugin implements PropertyChangeList
         ResourceUtil.getIcon(OtherIcon.AUDIO),
         null);
     setSynchView(SynchView.NONE);
-    if (!initComponents) {
-      initComponents = true;
+
+    if (!UI.init.getAndSet(true)) {
+      List<Toolbar> toolBars = UI.toolBars;
       // Add standard toolbars
-      final BundleContext context = FrameworkUtil.getBundle(this.getClass()).getBundleContext();
+      final BundleContext context = AppProperties.getBundleContext(this.getClass());
+      if (context == null) {
+        LOGGER.error("Cannot get BundleContext");
+        return;
+      }
       String bundleName = context.getBundle().getSymbolicName();
       String componentName = InsertableUtil.getCName(this.getClass());
       String key = "enable"; // NON-NLS
+      WProperties preferences = GuiUtils.getUICore().getSystemPreferences();
 
       if (InsertableUtil.getBooleanProperty(
-          BundleTools.SYSTEM_PREFERENCES,
+          preferences,
           bundleName,
           componentName,
           InsertableUtil.getCName(ImportToolBar.class),
           key,
           true)) {
         Optional<Toolbar> b =
-            UIManager.EXPLORER_PLUGIN_TOOLBARS.stream()
+            GuiUtils.getUICore().getExplorerPluginToolbars().stream()
                 .filter(ImportToolBar.class::isInstance)
                 .findFirst();
-        b.ifPresent(TOOLBARS::add);
+        b.ifPresent(toolBars::add);
       }
       if (InsertableUtil.getBooleanProperty(
-          BundleTools.SYSTEM_PREFERENCES,
+          preferences,
           bundleName,
           componentName,
           InsertableUtil.getCName(ExportToolBar.class),
           key,
           true)) {
         Optional<Toolbar> b =
-            UIManager.EXPLORER_PLUGIN_TOOLBARS.stream()
+            GuiUtils.getUICore().getExplorerPluginToolbars().stream()
                 .filter(ExportToolBar.class::isInstance)
                 .findFirst();
-        b.ifPresent(TOOLBARS::add);
+        b.ifPresent(toolBars::add);
       }
 
       if (InsertableUtil.getBooleanProperty(
-          BundleTools.SYSTEM_PREFERENCES,
+          preferences,
           bundleName,
           componentName,
           InsertableUtil.getCName(AuToolBar.class),
           key,
           true)) {
-        TOOLBARS.add(new AuToolBar(10));
+        toolBars.add(new AuToolBar(10));
+      }
+      if (InsertableUtil.getBooleanProperty(
+          preferences,
+          bundleName,
+          componentName,
+          InsertableUtil.getCName(LauncherToolBar.class),
+          key,
+          true)) {
+        toolBars.add(new LauncherToolBar(getEventManager(), 130));
       }
     }
   }
@@ -177,8 +191,8 @@ public class AuContainer extends DicomViewerPlugin implements PropertyChangeList
   }
 
   @Override
-  public List<DockableTool> getToolPanel() {
-    return null;
+  public SeriesViewerUI getSeriesViewerUI() {
+    return UI;
   }
 
   @Override
@@ -186,13 +200,12 @@ public class AuContainer extends DicomViewerPlugin implements PropertyChangeList
     AuFactory.closeSeriesViewer(this);
     super.close();
 
-    GuiExecutor.instance()
-        .execute(
-            () -> {
-              if (auview != null) {
-                auview.dispose();
-              }
-            });
+    GuiExecutor.execute(
+        () -> {
+          if (auview != null) {
+            auview.dispose();
+          }
+        });
   }
 
   @Override
@@ -270,8 +283,13 @@ public class AuContainer extends DicomViewerPlugin implements PropertyChangeList
   }
 
   @Override
-  public synchronized List<Toolbar> getToolBar() {
-    return TOOLBARS;
+  public Class<?> getSeriesViewerClass() {
+    return AuView.class;
+  }
+
+  @Override
+  public GridBagLayoutModel getDefaultLayoutModel() {
+    return DEFAULT_VIEW;
   }
 
   public Series<?> getSeries() {

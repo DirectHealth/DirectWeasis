@@ -15,8 +15,9 @@ import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.Rectangle;
 import java.awt.geom.Line2D;
+import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
-import java.util.HashMap;
+import java.util.EnumMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
@@ -25,22 +26,21 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.osgi.service.prefs.Preferences;
 import org.weasis.core.api.gui.util.DecFormatter;
 import org.weasis.core.api.image.OpManager;
-import org.weasis.core.api.image.PseudoColorOp;
 import org.weasis.core.api.image.WindowOp;
-import org.weasis.core.api.image.op.ByteLut;
-import org.weasis.core.api.image.op.ByteLutCollection;
 import org.weasis.core.api.image.util.Unit;
 import org.weasis.core.api.media.data.ImageElement;
 import org.weasis.core.api.service.BundlePreferences;
 import org.weasis.core.api.util.FontTools;
 import org.weasis.core.ui.editor.image.DisplayByteLut;
 import org.weasis.core.ui.editor.image.HistogramData;
+import org.weasis.core.ui.editor.image.HistogramView;
 import org.weasis.core.ui.editor.image.PixelInfo;
 import org.weasis.core.ui.editor.image.ViewButton;
 import org.weasis.core.ui.editor.image.ViewCanvas;
 import org.weasis.core.ui.model.utils.imp.DefaultUUID;
 import org.weasis.core.ui.pref.ViewSetting;
 import org.weasis.core.util.StringUtil;
+import org.weasis.opencv.op.lut.ColorLut;
 import org.weasis.opencv.op.lut.WlParams;
 
 public abstract class AbstractInfoLayer<E extends ImageElement> extends DefaultUUID
@@ -48,7 +48,8 @@ public abstract class AbstractInfoLayer<E extends ImageElement> extends DefaultU
 
   protected static final Color highlight = new Color(255, 153, 153);
   public static final AtomicBoolean applyToAllView = new AtomicBoolean(true);
-  public static final Map<LayerItem, Boolean> defaultDisplayPreferences = new HashMap<>();
+  protected static final Map<LayerItem, Boolean> defaultDisplayPreferences =
+      new EnumMap<>(LayerItem.class);
 
   static {
     for (LayerItem item : LayerItem.values()) {
@@ -67,7 +68,7 @@ public abstract class AbstractInfoLayer<E extends ImageElement> extends DefaultU
       Unit pixelUnit,
       String pixelDescription) {}
 
-  protected final HashMap<LayerItem, Boolean> displayPreferences = new HashMap<>();
+  protected final Map<LayerItem, Boolean> displayPreferences = new EnumMap<>(LayerItem.class);
   protected boolean visible = true;
   protected static final Color color = Color.yellow;
   protected final ViewCanvas<E> view2DPane;
@@ -80,6 +81,8 @@ public abstract class AbstractInfoLayer<E extends ImageElement> extends DefaultU
   protected String name;
   protected boolean useGlobalPreferences;
 
+  private final Map<Position, Point2D> positions = new EnumMap<>(Position.class);
+
   protected AbstractInfoLayer(ViewCanvas<E> view2DPane) {
     this(view2DPane, true);
   }
@@ -89,14 +92,35 @@ public abstract class AbstractInfoLayer<E extends ImageElement> extends DefaultU
     this.pixelInfoBound = new Rectangle();
     this.preloadingProgressBound = new Rectangle();
     this.useGlobalPreferences = useGlobalPreferences;
+    positions.put(Position.TopLeft, new Point2D.Double(0, 0));
+    positions.put(Position.TopRight, new Point2D.Double(0, 0));
+    positions.put(Position.BottomLeft, new Point2D.Double(0, 0));
+    positions.put(Position.BottomRight, new Point2D.Double(0, 0));
+  }
+
+  @Override
+  public Point2D getPosition(Position position) {
+    return positions.get(position);
+  }
+
+  @Override
+  public void setPosition(Position position, double x, double y) {
+    Point2D p = positions.get(position);
+    if (p != null) {
+      p.setLocation(x, y);
+    }
   }
 
   public ViewCanvas<E> getView2DPane() {
     return view2DPane;
   }
 
-  protected void setLayerValue(HashMap<LayerItem, Boolean> prefMap, LayerItem item) {
+  protected void setLayerValue(Map<LayerItem, Boolean> prefMap, LayerItem item) {
     prefMap.put(item, getDisplayPreferences(item));
+  }
+
+  public static Map<LayerItem, Boolean> getDefaultDisplayPreferences() {
+    return defaultDisplayPreferences;
   }
 
   public static void applyPreferences(Preferences prefs) {
@@ -263,7 +287,7 @@ public abstract class AbstractInfoLayer<E extends ImageElement> extends DefaultU
     WlParams p = getWinLeveParameters();
     if (p != null && bound.height > 350) {
       DisplayByteLut lut = getLut(p);
-      byte[][] table = lut.getLutTable();
+      byte[][] table = lut.getByteLut().lutTable();
       float length = table[0].length;
 
       int width = 0;
@@ -345,18 +369,9 @@ public abstract class AbstractInfoLayer<E extends ImageElement> extends DefaultU
     if (view2DPane != null) {
       int channels = view2DPane.getSourceImage().channels();
       if (channels == 1) {
-        DisplayByteLut disLut = null;
-        OpManager dispOp = view2DPane.getDisplayOpManager();
-        PseudoColorOp lutOp = (PseudoColorOp) dispOp.getNode(PseudoColorOp.OP_NAME);
-        if (lutOp != null) {
-          ByteLut lutTable = (ByteLut) lutOp.getParam(PseudoColorOp.P_LUT);
-          if (lutTable != null && lutTable.getLutTable() != null) {
-            disLut = new DisplayByteLut(lutTable);
-          }
-        }
-
+        DisplayByteLut disLut = HistogramView.buildDisplayByteLut(view2DPane);
         if (disLut == null) {
-          disLut = new DisplayByteLut(ByteLutCollection.Lut.GRAY.getByteLut());
+          disLut = new DisplayByteLut(ColorLut.GRAY.getByteLut());
         }
         disLut.setInvert(p.isInverseLut());
         lut = disLut;
@@ -364,7 +379,7 @@ public abstract class AbstractInfoLayer<E extends ImageElement> extends DefaultU
     }
 
     if (lut == null) {
-      lut = new DisplayByteLut(ByteLutCollection.Lut.GRAY.getByteLut());
+      lut = new DisplayByteLut(ColorLut.GRAY.getByteLut());
     }
     return lut;
   }

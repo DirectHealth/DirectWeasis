@@ -9,39 +9,32 @@
  */
 package org.weasis.dicom.explorer;
 
-import it.cnr.imaa.essi.lablib.gui.checkboxtree.TreeCheckingModel;
-import it.cnr.imaa.essi.lablib.gui.checkboxtree.TreeCheckingModel.CheckingMode;
+import eu.essilab.lablib.checkboxtree.TreeCheckingModel;
+import eu.essilab.lablib.checkboxtree.TreeCheckingModel.CheckingMode;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Window;
 import java.io.IOException;
-import java.net.MalformedURLException;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.Hashtable;
 import java.util.List;
-import java.util.Properties;
 import java.util.Set;
 import javax.swing.JButton;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.TreePath;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.FrameworkUtil;
-import org.osgi.framework.InvalidSyntaxException;
 import org.osgi.framework.ServiceReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.gui.InsertableUtil;
 import org.weasis.core.api.gui.util.AbstractItemDialogPage;
 import org.weasis.core.api.gui.util.AbstractWizardDialog;
+import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.gui.util.PageItem;
 import org.weasis.core.api.media.data.Series;
-import org.weasis.core.api.service.BundleTools;
-import org.weasis.core.ui.docking.UIManager;
 import org.weasis.dicom.codec.DicomSeries;
-import org.weasis.dicom.explorer.internal.Activator;
 
 public class DicomExport extends AbstractWizardDialog {
   private static final Logger LOGGER = LoggerFactory.getLogger(DicomExport.class);
@@ -70,20 +63,7 @@ public class DicomExport extends AbstractWizardDialog {
     exportButton.addActionListener(e -> exportSelection());
     exportButton.setText(Messages.getString("DicomExport.exp"));
 
-    JButton jButtonHelp = new JButton();
-    jButtonHelp.putClientProperty("JButton.buttonType", "help");
-    jButtonHelp.addActionListener(
-        e -> {
-          try {
-            GuiUtils.openInDefaultBrowser(
-                jButtonHelp,
-                new URL(
-                    BundleTools.SYSTEM_PREFERENCES.getProperty("weasis.help.online")
-                        + "dicom-export/#dicom-export"));
-          } catch (MalformedURLException e1) {
-            LOGGER.error("Cannot open online help", e1);
-          }
-        });
+    JButton jButtonHelp = GuiUtils.createHelpButton("dicom-export/#dicom-export"); // NON-NLS
 
     jPanelBottom.removeAll();
     jPanelBottom.add(
@@ -98,7 +78,7 @@ public class DicomExport extends AbstractWizardDialog {
 
     initializePages();
     pack();
-    showPage(Activator.IMPORT_EXPORT_PERSISTENCE.getProperty(LAST_PAGE));
+    showPage(LocalPersistence.getProperties().getProperty(LAST_PAGE));
   }
 
   @Override
@@ -112,7 +92,7 @@ public class DicomExport extends AbstractWizardDialog {
     ArrayList<AbstractItemDialogPage> list = new ArrayList<>();
     list.add(new LocalExport(dicomModel, treeModel));
 
-    BundleContext context = FrameworkUtil.getBundle(this.getClass()).getBundleContext();
+    BundleContext context = AppProperties.getBundleContext(this.getClass());
     try {
       for (ServiceReference<DicomExportFactory> service :
           context.getServiceReferences(DicomExportFactory.class, null)) {
@@ -124,7 +104,7 @@ public class DicomExport extends AbstractWizardDialog {
           }
         }
       }
-    } catch (InvalidSyntaxException e) {
+    } catch (Exception e) {
       LOGGER.error("Insert DICOM export plugins", e);
     }
 
@@ -144,7 +124,8 @@ public class DicomExport extends AbstractWizardDialog {
     TreeCheckingModel checkingModel = treeModel.getCheckingModel();
     checkingModel.setCheckingMode(CheckingMode.PROPAGATE_PRESERVING_UNCHECK);
 
-    if (UIManager.getExplorerPlugin(DicomExplorer.NAME) instanceof DicomExplorer explorer) {
+    if (GuiUtils.getUICore().getExplorerPlugin(DicomExplorer.NAME)
+        instanceof DicomExplorer explorer) {
 
       Set<Series<?>> openSeriesSet = explorer.getSelectedPatientOpenSeries();
       Object rootNode = treeModel.getModel().getRoot();
@@ -201,13 +182,9 @@ public class DicomExport extends AbstractWizardDialog {
   public void dispose() {
     PageItem page = getSelectedPage();
     if (page != null) {
-      Activator.IMPORT_EXPORT_PERSISTENCE.setProperty(LAST_PAGE, page.getTitle());
+      LocalPersistence.getProperties().setProperty(LAST_PAGE, page.getTitle());
     }
     closeAllPages();
     super.dispose();
-  }
-
-  public static Properties getImportExportProperties() {
-    return Activator.IMPORT_EXPORT_PERSISTENCE;
   }
 }

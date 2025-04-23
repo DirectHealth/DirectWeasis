@@ -7,17 +7,19 @@
     {
       "code": "felix.auto.start.45",
       "value": "${dollar}{weasis.codebase.url}/bundle/weasis-base-explorer-${app.version}.jar${xz.ext} ${dollar}{weasis.codebase.url}/bundle/weasis-acquire-explorer-${app.version}.jar${xz.ext}",
-      "description": "Thumbnail explorer",
+      "description": "Base and Thumbnail explorer",
       "type": "A",
       "category": "FELIX_INSTALL"
     },
     {
       "code": "felix.auto.start.70",
-      "value": ""
+      "value": "",
+      "description": "REMOVE - DICOM Viewer 2D and SR viewer"
     },
     {
       "code": "felix.auto.start.75",
-      "value": ""
+      "value": "",
+      "description": "REMOVE - DICOM AU and ECG"
     },
     {
       "code": "felix.auto.start.85",
@@ -28,7 +30,8 @@
     },
     {
       "code": "felix.auto.start.110",
-      "value": "${dollar}{weasis.codebase.url}/bundle/weasis-dicom-send-${app.version}.jar${xz.ext}"
+      "value": "${dollar}{weasis.codebase.url}/bundle/weasis-dicom-send-${app.version}.jar${xz.ext}",
+      "description": "DICOM send only, REMOVE - Q/R and ISO writer"
     },
     {
       "code": "weasis.name",
@@ -63,6 +66,10 @@
       "value": "zoom"
     },
     {
+      "code": "weasis.import.images",
+      "value": "false"
+    },
+    {
       "code": "weasis.acquire.dest.host",
       "value": null,
       "description": "Hostname of DICOM send destination for Dicomizer. If no value, the list of DICOM nodes for storage is displayed.",
@@ -81,7 +88,7 @@
       "value": "11112",
       "description": "Port of DICOM send destination for Dicomizer",
       "type": "A",
-      "JavaType": "INT",
+      "javaType": "INT",
       "category": "DICOM"
     },
     {
@@ -107,14 +114,14 @@
     },
     {
       "code": "weasis.acquire.meta.series.display",
-      "value": "Modality,OperatorsName,ReferringPhysicianName,BodyPartExamined,SeriesDescription",
+      "value": "Modality,OperatorsName,ReferringPhysicianName,SeriesDescription",
       "description": "Comma-separated list of series tags which are displayed in UI. When a required tag has no value, it will be displayed.",
       "type": "A",
       "category": "METADATA"
     },
     {
       "code": "weasis.acquire.meta.series.edit",
-      "value": "ReferringPhysicianName,BodyPartExamined,SeriesDescription",
+      "value": "ReferringPhysicianName,SeriesDescription",
       "description": "Comma-separated list of series tags which are editable in UI. When a required tag has no value, it will be editable.",
       "type": "A",
       "category": "METADATA"
@@ -128,14 +135,14 @@
     },
     {
       "code": "weasis.acquire.meta.image.display",
-      "value": "ImageComments,ContentDate,ContentTime",
+      "value": "ImageComments,ContentDate,ContentTime,AnatomicRegion",
       "description": "Comma-separated list of image tags which are displayed in UI. When a required tag has no value, it will be displayed.",
       "type": "A",
       "category": "METADATA"
     },
     {
       "code": "weasis.acquire.meta.image.edit",
-      "value": "ImageComments,ContentDate,ContentTime",
+      "value": "ImageComments,ContentDate,ContentTime,AnatomicRegion",
       "description": "Comma-separated list of image tags which are editable in UI. When a required tag has no value, it will be editable.",
       "type": "A",
       "category": "METADATA"
@@ -149,7 +156,7 @@
     },
     {
       "code": "weasis.acquire.meta.study.description",
-      "value": "",
+      "value": "Pictures of follow-up,Pictures of observation,Pictures preoperative,Pictures intraoperative,Pictures postoperative",
       "description": "Comma-separated list of study description elements (to obtain a selection in a combo box). Empty value will be an editable text field",
       "type": "A",
       "category": "METADATA"
@@ -166,7 +173,7 @@
       "value": "false",
       "description": "Base thumbnail explorer",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "FACTORY"
     },
     {
@@ -174,7 +181,7 @@
       "value": "false",
       "description": "Open a file with the default system application",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "FACTORY"
     },
     {
@@ -182,7 +189,7 @@
       "value": "false",
       "description": "DICOM series explorer",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "FACTORY"
     },
     {
@@ -190,27 +197,15 @@
       "value": "false",
       "description": "DICOM Explorer preferences",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "FACTORY"
-    },
-    {
-      "code": "org.weasis.dicom.explorer.pref.node.DicomNodePrefFactory",
-      "value": "false",
-      "description": "DICOM node list preferences",
-      "type": "A",
-      "JavaType": "BOOLEAN",
-      "category": "FACTORY"
-    },
-    {
-      "code": "weasis.import.images",
-      "value": "false"
     },
     {
       "code": "weasis-base-viewer2d.all.rotationtoolbar.enable",
       "value": "false",
       "description": "Show the rotation toolbar with base 2D viewer",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -218,7 +213,7 @@
       "value": "false",
       "description": "Show the import toolbar with base 2D viewer",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -231,9 +226,9 @@
     {
       "code": "weasis-base-viewer2d.all.imagetool.enable",
       "value": "false",
-      "description": "Show the image tool with base 2D viewer",
+      "description": "Show Image Tools with base 2D viewer",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -241,7 +236,7 @@
       "value": "false",
       "description": "Application",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -249,7 +244,7 @@
       "value": "false",
       "description": "Show the layout toolbar",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -257,7 +252,7 @@
       "value": "false",
       "description": "Show the synch toolbar",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     }
   ]

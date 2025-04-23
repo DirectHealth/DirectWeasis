@@ -216,12 +216,6 @@
                 </artifactItem>
                 <artifactItem>
                   <groupId>org.apache.felix</groupId>
-                  <artifactId>org.apache.felix.metatype</artifactId>
-                  <version>${felix.metatype.version}</version>
-                  <outputDirectory>${tmp.bundle.dir}</outputDirectory>
-                </artifactItem>
-                <artifactItem>
-                  <groupId>org.apache.felix</groupId>
                   <artifactId>org.apache.felix.prefs</artifactId>
                   <version>${felix.prefs.version}</version>
                   <outputDirectory>${tmp.bundle.dir}</outputDirectory>
@@ -248,24 +242,6 @@
                 <!-- ===================================== -->
                 <!-- Other required bundles -->
                 <!-- ===================================== -->
-                <artifactItem>
-                  <groupId>org.slf4j</groupId>
-                  <artifactId>slf4j-api</artifactId>
-                  <version>${slf4j.version}</version>
-                  <outputDirectory>${tmp.bundle.dir}</outputDirectory>
-                </artifactItem>
-                <artifactItem>
-                  <groupId>org.apache.sling</groupId>
-                  <artifactId>org.apache.sling.commons.log</artifactId>
-                  <version>${sling.commons.log.version}</version>
-                  <outputDirectory>${tmp.bundle.dir}</outputDirectory>
-                </artifactItem>
-                <artifactItem>
-                  <groupId>org.glassfish</groupId>
-                  <artifactId>jakarta.json</artifactId>
-                  <version>${javax.json.version}</version>
-                  <outputDirectory>${tmp.bundle.dir}</outputDirectory>
-                </artifactItem>
                 <artifactItem>
                   <groupId>org.weasis.thirdparty</groupId>
                   <artifactId>jaxb-osgi</artifactId>
@@ -339,7 +315,6 @@
                   <groupId>org.weasis.core</groupId>
                   <artifactId>weasis-core-img</artifactId>
                   <version>${weasis.core.img.version}</version>
-                  <classifier>jdk11</classifier>
                   <outputDirectory>${tmp.bundle.dir}</outputDirectory>
                 </artifactItem>
                 <artifactItem>
@@ -357,6 +332,12 @@
                 <artifactItem>
                   <groupId>org.weasis.opencv</groupId>
                   <artifactId>weasis-opencv-core-linux-aarch64</artifactId>
+                  <version>${weasis.opencv.native.version}</version>
+                  <outputDirectory>${tmp.bundle.dir}</outputDirectory>
+                </artifactItem>
+                <artifactItem>
+                  <groupId>org.weasis.opencv</groupId>
+                  <artifactId>weasis-opencv-core-macosx-aarch64</artifactId>
                   <version>${weasis.opencv.native.version}</version>
                   <outputDirectory>${tmp.bundle.dir}</outputDirectory>
                 </artifactItem>
@@ -415,6 +396,12 @@
                 <artifactItem>
                   <groupId>org.weasis.thirdparty.org.jogamp</groupId>
                   <artifactId>jogamp-linux-aarch64</artifactId>
+                  <version>${jogamp.version}</version>
+                  <outputDirectory>${tmp.bundle.dir}</outputDirectory>
+                </artifactItem>
+                <artifactItem>
+                  <groupId>org.weasis.thirdparty.org.jogamp</groupId>
+                  <artifactId>jogamp-macosx-aarch64</artifactId>
                   <version>${jogamp.version}</version>
                   <outputDirectory>${tmp.bundle.dir}</outputDirectory>
                 </artifactItem>
@@ -559,22 +546,6 @@
               <outputDirectory>${project.build.directory}</outputDirectory>
             </configuration>
           </execution>
-          <execution>
-            <id>web</id>
-            <phase>package</phase>
-            <goals>
-              <goal>single</goal>
-            </goals>
-            <configuration>
-              <attach>true</attach>
-              <finalName>weasis</finalName>
-              <appendAssemblyId>false</appendAssemblyId>
-              <outputDirectory>${project.build.directory}/web-dist</outputDirectory>
-              <descriptors>
-                <descriptor>src/assembly/web-dist.xml</descriptor>
-              </descriptors>
-            </configuration>
-          </execution>
         </executions>
       </plugin>
     </plugins>
@@ -681,7 +652,6 @@
           <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-jarsigner-plugin</artifactId>
-            <version>3.0.0</version>
             <!-- Uncomment and provide proxy server setting when it is necessary to reach time stamping server from corporate network -->
             <!--<configuration> -->
             <!--<arguments> -->

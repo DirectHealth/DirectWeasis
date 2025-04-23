@@ -24,6 +24,7 @@ import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.explorer.model.AbstractFileModel;
 import org.weasis.core.api.explorer.model.DataExplorerModel;
 import org.weasis.core.api.gui.util.AppProperties;
+import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.media.MimeInspector;
 import org.weasis.core.api.media.data.Codec;
 import org.weasis.core.api.media.data.FileCache;
@@ -36,7 +37,6 @@ import org.weasis.core.api.media.data.MediaSeriesGroupNode;
 import org.weasis.core.api.media.data.Series;
 import org.weasis.core.api.media.data.TagW;
 import org.weasis.core.api.service.BundleTools;
-import org.weasis.core.ui.docking.UIManager;
 import org.weasis.core.ui.model.GraphicModel;
 import org.weasis.core.ui.serialize.XmlSerializer;
 
@@ -152,7 +152,7 @@ public class ViewerPluginBuilder {
       }
     }
     for (String mime : mimes) {
-      SeriesViewerFactory plugin = UIManager.getViewerFactory(mime);
+      SeriesViewerFactory plugin = GuiUtils.getUICore().getViewerFactory(mime);
       if (plugin != null) {
         ArrayList<MediaSeries<? extends MediaElement>> seriesList = new ArrayList<>();
         for (MediaSeries<? extends MediaElement> s : series) {
@@ -167,13 +167,13 @@ public class ViewerPluginBuilder {
   }
 
   public static void openSequenceInDefaultPlugin(
-      MediaSeries<MediaElement> series,
+      MediaSeries<? extends MediaElement> series,
       DataExplorerModel model,
       boolean compareEntryToBuildNewViewer,
       boolean removeOldSeries) {
     if (series != null) {
       String mime = series.getMimeType();
-      SeriesViewerFactory plugin = UIManager.getViewerFactory(mime);
+      SeriesViewerFactory plugin = GuiUtils.getUICore().getViewerFactory(mime);
       openSequenceInPlugin(
           plugin,
           series,
@@ -199,7 +199,7 @@ public class ViewerPluginBuilder {
 
   public static void openSequenceInDefaultPlugin(
       File file, boolean compareEntryToBuildNewViewer, boolean bestDefaultLayout) {
-    MediaReader reader = getMedia(file);
+    MediaReader<MediaElement> reader = getMedia(file);
     if (reader != null) {
       MediaSeries<MediaElement> s = buildMediaSeriesWithDefaultModel(reader);
       openSequenceInDefaultPlugin(
@@ -207,17 +207,17 @@ public class ViewerPluginBuilder {
     }
   }
 
-  public static MediaReader getMedia(File file) {
+  public static MediaReader<MediaElement> getMedia(File file) {
     return getMedia(file, true);
   }
 
-  public static MediaReader getMedia(File file, boolean systemReader) {
+  public static MediaReader<MediaElement> getMedia(File file, boolean systemReader) {
     if (file != null && file.canRead()) {
       // If file has been downloaded or copied
       boolean cache = file.getPath().startsWith(AppProperties.FILE_CACHE_DIR.getPath());
       String mimeType = MimeInspector.getMimeType(file);
       if (mimeType != null) {
-        Codec codec = BundleTools.getCodec(mimeType, "dcm4che"); // NON-NLS
+        Codec<?> codec = BundleTools.getCodec(mimeType, "dcm4che"); // NON-NLS
         if (codec != null) {
           MediaReader mreader = codec.getMediaIO(file.toURI(), mimeType, null);
           if (cache) {
@@ -227,7 +227,7 @@ public class ViewerPluginBuilder {
         }
       }
       if (systemReader) {
-        MediaReader mreader = new DefaultMimeIO(file.toURI(), null);
+        MediaReader<MediaElement> mreader = new DefaultMimeIO(file.toURI(), null);
         if (cache) {
           mreader.getFileCache().setOriginalTempFile(file);
         }
@@ -247,7 +247,11 @@ public class ViewerPluginBuilder {
   }
 
   public static MediaSeries<MediaElement> buildMediaSeriesWithDefaultModel(
-      MediaReader reader, String groupUID, TagW groupName, String groupValue, String seriesUID) {
+      MediaReader<MediaElement> reader,
+      String groupUID,
+      TagW groupName,
+      String groupValue,
+      String seriesUID) {
     if (reader instanceof DefaultMimeIO) {
       return reader.getMediaSeries();
     }

@@ -31,10 +31,10 @@ import javax.swing.JSeparator;
 import javax.swing.KeyStroke;
 import org.dcm4che3.img.lut.PresetWindowLevel;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.FrameworkUtil;
 import org.osgi.service.prefs.Preferences;
 import org.weasis.core.api.gui.util.ActionState;
 import org.weasis.core.api.gui.util.ActionW;
+import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.BasicActionState;
 import org.weasis.core.api.gui.util.ComboItemListener;
 import org.weasis.core.api.gui.util.DecFormatter;
@@ -48,7 +48,6 @@ import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.media.data.SeriesComparator;
 import org.weasis.core.api.service.AuditLog;
 import org.weasis.core.api.service.BundlePreferences;
-import org.weasis.core.api.service.BundleTools;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.ActionIcon;
 import org.weasis.core.ui.editor.SeriesViewerEvent;
@@ -67,10 +66,13 @@ import org.weasis.core.ui.model.utils.bean.PanPoint;
 import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.codec.SortSeriesStack;
 import org.weasis.dicom.codec.display.Modality;
+import org.weasis.dicom.explorer.DicomExportAction;
 import org.weasis.dicom.viewer2d.Messages;
 import org.weasis.dicom.viewer2d.ResetTools;
 import org.weasis.dicom.viewer2d.View2dContainer;
 import org.weasis.dicom.viewer2d.mip.MipView;
+import org.weasis.dicom.viewer3d.dockable.SegmentationTool;
+import org.weasis.dicom.viewer3d.dockable.SegmentationTool.Type;
 import org.weasis.dicom.viewer3d.geometry.ArcballMouseListener;
 import org.weasis.dicom.viewer3d.geometry.Axis;
 import org.weasis.dicom.viewer3d.geometry.Camera;
@@ -129,6 +131,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
     setAction(newLutShapeAction());
     setAction(newPreset3DAction());
     setAction(newInverseLutAction());
+    setAction(newSegmentationMode());
     setAction(newSortStackAction());
     setAction(newInverseStackAction());
     setAction(
@@ -146,7 +149,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
     setAction(newCrosshairAction());
     setAction(new BasicActionState(ActionW.RESET));
 
-    final BundleContext context = FrameworkUtil.getBundle(this.getClass()).getBundleContext();
+    final BundleContext context = AppProperties.getBundleContext(this.getClass());
     Preferences prefs = BundlePreferences.getDefaultPreferences(context);
     zoomSetting.applyPreferences(prefs);
     // Default 3D mouse actions
@@ -401,7 +404,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
   private ComboItemListener<LutShape> newLutShapeAction() {
     return new ComboItemListener<>(
-        ActionW.LUT_SHAPE, LutShape.DEFAULT_FACTORY_FUNCTIONS.toArray(new LutShape[0])) {
+        ActionW.LUT_SHAPE, DicomImageElement.DEFAULT_LUT_FUNCTIONS.toArray(new LutShape[0])) {
 
       @Override
       public void itemStateChanged(Object object) {
@@ -420,6 +423,20 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
         firePropertyChange(ActionW.SYNCH.cmd(), null, new SynchEvent(view, action.cmd(), object));
         if (view instanceof View3d view3d) {
           updateWindowLevelComponentsListener(view3d);
+        }
+      }
+    };
+  }
+
+  private ComboItemListener<SegmentationTool.Type> newSegmentationMode() {
+    return new ComboItemListener<>(ActionVol.SEG_TYPE, SegmentationTool.Type.values()) {
+
+      @Override
+      public void itemStateChanged(Object object) {
+        ImageViewerPlugin<DicomImageElement> container = getSelectedView2dContainer();
+        if (container instanceof View3DContainer view3DContainer) {
+          view3DContainer.setSegmentationType((SegmentationTool.Type) object);
+          view3DContainer.reload();
         }
       }
     };
@@ -662,16 +679,17 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
     }
 
     clearAllPropertyChangeListeners();
-    Optional<SliderChangeListener> cineAction = getAction(ActionVol.SCROLLING);
 
     if (!(view2d instanceof View3d canvas) || canvas.getVolTexture() == null) {
       enableActions(false);
+      View3DContainer.UI.updateDynamicTools(view2d.getSeries());
       return false;
     }
 
     if (!enabledAction) {
       enableActions(true);
     }
+    View3DContainer.UI.updateDynamicTools(view2d.getSeries());
 
     RenderingLayer rendering = canvas.getRenderingLayer();
     updateWindowLevelComponentsListener(canvas);
@@ -700,6 +718,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
     Optional<ComboItemListener<MipView.Type>> mipType = getAction(ActionVol.MIP_TYPE);
     mipType.ifPresent(a -> a.setSelectedItemWithoutTriggerAction(rendering.getMipType()));
 
+    Optional<SliderChangeListener> cineAction = getAction(ActionVol.SCROLLING);
     cineAction.ifPresent(
         a ->
             a.setSliderMinMaxValue(
@@ -768,6 +787,23 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
                 a.setSelectedWithoutTriggerAction(
                     (Boolean) canvas.getActionValue(ActionW.INVERSE_STACK.cmd())));
 
+    Optional<ComboItemListener<Type>> segType = getAction(ActionVol.SEG_TYPE);
+    Type segmenationType;
+    if (selectedView2dContainer instanceof View3DContainer view3DContainer) {
+      segmenationType = view3DContainer.getSegmentationType();
+      segType.ifPresent(a -> a.setSelectedItemWithoutTriggerAction(segmenationType));
+    } else {
+      segmenationType = Type.NONE;
+    }
+
+    boolean segDisable = segmenationType == Type.NONE;
+    // getAction(ActionVol.VOL_PRESET).ifPresent(a -> a.enableAction(segDisable));
+    //    getAction(ActionW.WINLEVEL).ifPresent(a -> a.enableAction(segDisable));
+    //    getAction(ActionW.WINDOW).ifPresent(a -> a.enableAction(segDisable));
+    //    getAction(ActionW.LEVEL).ifPresent(a -> a.enableAction(segDisable));
+    // getAction(ActionW.PRESET).ifPresent(a -> a.enableAction(segDisable));
+    // getAction(ActionW.LUT_SHAPE).ifPresent(a -> a.enableAction(segDisable));
+
     // register all actions for the selected view and for the other views register according to
     // synchview.
     ComboItemListener<SynchView> synchAction = getAction(ActionW.SYNCH).orElse(null);
@@ -833,6 +869,11 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
         }
       }
     }
+  }
+
+  @Override
+  public String resolvePlaceholders(String template) {
+    return DicomExportAction.resolvePlaceholders(template, this);
   }
 
   @Override
@@ -938,7 +979,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
   public JMenu getResetMenu(String prop) {
     JMenu menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       ButtonGroup group = new ButtonGroup();
       menu = new JMenu(ActionW.RESET.getTitle());
       menu.setIcon(ResourceUtil.getIcon(ActionIcon.RESET));
@@ -962,7 +1003,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
   public JMenu getPresetMenu(String prop) {
     JMenu menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<? extends ComboItemListener<?>> presetAction = getAction(ActionW.PRESET);
       if (presetAction.isPresent()) {
         menu =
@@ -984,7 +1025,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
   public JMenu getLutShapeMenu(String prop) {
     JMenu menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<? extends ComboItemListener<?>> lutShapeAction = getAction(ActionW.LUT_SHAPE);
       if (lutShapeAction.isPresent()) {
         menu = lutShapeAction.get().createUnregisteredRadioMenu(ActionW.LUT_SHAPE.getTitle());
@@ -995,7 +1036,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
   public JMenu getZoomMenu(String prop) {
     JMenu menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<SliderChangeListener> zoomAction = getAction(ActionW.ZOOM);
       if (zoomAction.isPresent()) {
         menu = new JMenu(ActionW.ZOOM.getTitle());
@@ -1015,7 +1056,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
   public JMenu getOrientationMenu(String prop) {
     JMenu menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<SliderChangeListener> rotateAction = getAction(ActionW.ROTATION);
       if (rotateAction.isPresent()) {
         menu = new JMenu(Messages.getString("View2dContainer.orientation"));
@@ -1054,7 +1095,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
   public JMenu getSortStackMenu(String prop) {
     JMenu menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<ComboItemListener<SeriesComparator<?>>> sortStackAction =
           getAction(ActionW.SORT_STACK);
       if (sortStackAction.isPresent()) {
@@ -1078,7 +1119,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
   public JMenu getLutMenu(String prop) {
     JMenu menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<ComboItemListener<Preset>> action = getAction(ActionVol.VOL_PRESET);
       if (action.isPresent()) {
         Modality curModality = Modality.DEFAULT;
@@ -1097,7 +1138,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
   public JMenu getViewTypeMenu(String prop) {
     JMenu menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<ComboItemListener<RenderingType>> viewTypeAction =
           getAction(ActionVol.RENDERING_TYPE);
       if (viewTypeAction.isPresent()) {
@@ -1110,7 +1151,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
   public JMenu getMipTypeMenu(String prop) {
     JMenu menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<ComboItemListener<MipView.Type>> viewTypeAction = getAction(ActionVol.MIP_TYPE);
       if (viewTypeAction.isPresent()) {
         menu = viewTypeAction.get().createUnregisteredRadioMenu(ActionVol.MIP_TYPE.getTitle());
@@ -1121,7 +1162,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
   public JCheckBoxMenuItem getShadingMenu(String prop) {
     JCheckBoxMenuItem menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<ToggleButtonListener> shadingAction = getAction(ActionVol.VOL_SHADING);
       if (shadingAction.isPresent()) {
         menu =
@@ -1135,7 +1176,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
   public JCheckBoxMenuItem getSProjectionMenu(String prop) {
     JCheckBoxMenuItem menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<ToggleButtonListener> shadingAction = getAction(ActionVol.VOL_PROJECTION);
       if (shadingAction.isPresent()) {
         menu =
@@ -1151,7 +1192,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
   public JCheckBoxMenuItem getSlicingMenu(String prop) {
     JCheckBoxMenuItem menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<ToggleButtonListener> shadingAction = getAction(ActionVol.VOL_SLICING);
       if (shadingAction.isPresent()) {
         menu =

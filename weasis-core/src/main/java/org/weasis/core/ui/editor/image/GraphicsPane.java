@@ -12,12 +12,15 @@ package org.weasis.core.ui.editor.image;
 import java.awt.Graphics;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.Shape;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.NoninvertibleTransformException;
+import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.beans.PropertyChangeListener;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -43,7 +46,7 @@ import org.weasis.core.util.LangUtil;
  *
  * @author Nicolas Roduit
  */
-public class GraphicsPane extends JComponent implements Canvas {
+public abstract class GraphicsPane extends JComponent implements Canvas {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(GraphicsPane.class);
 
@@ -80,15 +83,13 @@ public class GraphicsPane extends JComponent implements Canvas {
     Objects.requireNonNull(graphicManager);
     GraphicModel graphicManagerOld = this.graphicManager;
     if (!Objects.equals(graphicManager, graphicManagerOld)) {
-      graphicManagerOld.removeChangeListener(layerModelHandler);
-      graphicManagerOld.removeGraphicChangeHandler(graphicsChangeHandler);
-      graphicManagerOld.deleteNonSerializableGraphics();
+      removeGraphicManager(graphicManagerOld, layerModelHandler);
       this.graphicManager = graphicManager;
-      this.graphicManager.addGraphicChangeHandler(graphicsChangeHandler);
+      graphicManager.addGraphicChangeHandler(graphicsChangeHandler);
       if (this instanceof ViewCanvas<?> viewCanvas) {
-        this.graphicManager.updateLabels(Boolean.TRUE, viewCanvas);
+        graphicManager.updateLabels(Boolean.TRUE, viewCanvas);
       }
-      this.graphicManager.addChangeListener(layerModelHandler);
+      graphicManager.addChangeListener(layerModelHandler);
       firePropertyChange("graphicManager", graphicManagerOld, this.graphicManager);
     }
   }
@@ -122,8 +123,7 @@ public class GraphicsPane extends JComponent implements Canvas {
     Optional.ofNullable(viewModel)
         .ifPresent(model -> model.removeViewModelChangeListener(viewModelHandler));
     // Unregister listener
-    graphicManager.removeChangeListener(layerModelHandler);
-    graphicManager.removeGraphicChangeHandler(graphicsChangeHandler);
+    removeGraphicManager(graphicManager, layerModelHandler);
   }
 
   /**
@@ -231,6 +231,18 @@ public class GraphicsPane extends JComponent implements Canvas {
     return new Point2D.Double(b.getX(), b.getY());
   }
 
+  public Path2D getVisibleImageViewBounds() {
+    Point2D p = getClipViewCoordinatesOffset();
+    Rectangle2D bounds = new Rectangle2D.Double(-p.getX(), -p.getY(), getWidth(), getHeight());
+    Shape path = inverseTransform.createTransformedShape(bounds);
+    if (path instanceof Path2D path2D) {
+      return path2D;
+    }
+    Path2D path2D = new Path2D.Double();
+    path2D.append(bounds, false);
+    return path2D;
+  }
+
   @Override
   public Rectangle2D getImageViewBounds() {
     return getImageViewBounds(getWidth(), getHeight());
@@ -327,7 +339,7 @@ public class GraphicsPane extends JComponent implements Canvas {
       affineTransform.setTransform(fmx[0], fmx[1], fmx[2], fmx[3], fmx[4], fmx[5]);
 
       // Convert to openCV affine matrix
-      double[] m = new double[] {fmx[0], fmx[2], fmx[4], fmx[1], fmx[3], fmx[5]};
+      List<Double> m = List.of(fmx[0], fmx[2], fmx[4], fmx[1], fmx[3], fmx[5]);
       node.setParam(AffineTransformOp.P_AFFINE_MATRIX, m);
 
       node.setParam(AffineTransformOp.P_DST_BOUNDS, dstBounds);

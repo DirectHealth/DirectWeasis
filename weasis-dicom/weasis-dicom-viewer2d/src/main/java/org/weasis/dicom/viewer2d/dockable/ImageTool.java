@@ -12,6 +12,7 @@ package org.weasis.dicom.viewer2d.dockable;
 import bibliothek.gui.dock.common.CLocation;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import java.awt.Component;
+import java.text.DecimalFormat;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
@@ -21,8 +22,8 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
 import javax.swing.JToggleButton;
-import javax.swing.JViewport;
 import javax.swing.border.Border;
+import javax.swing.text.NumberFormatter;
 import org.weasis.core.api.gui.Insertable;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.GuiUtils;
@@ -31,7 +32,9 @@ import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.ActionIcon;
 import org.weasis.core.api.util.ResourceUtil.OtherIcon;
 import org.weasis.core.ui.docking.PluginTool;
+import org.weasis.core.ui.editor.image.ImageViewerEventManager;
 import org.weasis.core.util.StringUtil;
+import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.viewer2d.EventManager;
 import org.weasis.dicom.viewer2d.Messages;
 import org.weasis.dicom.viewer2d.ResetTools;
@@ -52,28 +55,20 @@ public class ImageTool extends PluginTool {
 
   private void init() {
     setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
-    add(getWindowLevelPanel());
-    add(getTransformPanel());
-    add(getSlicePanel());
-    add(getResetPanel());
+    add(getWindowLevelPanel(EventManager.getInstance(), spaceY, true));
+    add(getTransformPanel(spaceY));
+    add(getSlicePanel(spaceY));
+    add(getResetPanel(spaceY));
     add(GuiUtils.boxYLastElement(3));
     rootPane.setBorder(BorderFactory.createEmptyBorder()); // remove default line
   }
 
   @Override
   public Component getToolComponent() {
-    JViewport viewPort = rootPane.getViewport();
-    if (viewPort == null) {
-      viewPort = new JViewport();
-      rootPane.setViewport(viewPort);
-    }
-    if (viewPort.getView() != this) {
-      viewPort.setView(this);
-    }
-    return rootPane;
+    return getToolComponentFromJScrollPane(rootPane);
   }
 
-  public JPanel getResetPanel() {
+  public static JPanel getResetPanel(Border hspace) {
     JComboBox<ResetTools> resetComboBox = new JComboBox<>(ResetTools.values());
     JButton resetButton = new JButton(ActionW.RESET.getTitle());
     resetButton.addActionListener(
@@ -94,27 +89,31 @@ public class ImageTool extends PluginTool {
     JPanel panel = GuiUtils.getFlowLayoutPanel(resetComboBox, resetButton);
     panel.setBorder(
         BorderFactory.createCompoundBorder(
-            spaceY, GuiUtils.getTitledBorder(ActionW.RESET.getTitle())));
+            hspace, GuiUtils.getTitledBorder(ActionW.RESET.getTitle())));
     return panel;
   }
 
-  public JPanel getSlicePanel() {
+  public static JPanel getSlicePanel(Border hspace) {
     JPanel framePanel = GuiUtils.getVerticalBoxLayoutPanel();
     framePanel.setBorder(
         BorderFactory.createCompoundBorder(
-            spaceY, GuiUtils.getTitledBorder(Messages.getString("cine"))));
+            hspace, GuiUtils.getTitledBorder(Messages.getString("cine"))));
 
     EventManager.getInstance()
         .getAction(ActionW.SCROLL_SERIES)
         .ifPresent(
             sliderItem -> {
               JSliderW frameSlider = sliderItem.createSlider(2, true);
+              framePanel.add(frameSlider);
 
               JLabel speedLabel = new JLabel();
               speedLabel.setText(Messages.getString("speed.fps") + StringUtil.COLON);
 
               JSpinner speedSpinner = new JSpinner(sliderItem.getSpeedModel());
-              GuiUtils.formatCheckAction(speedSpinner);
+              NumberFormatter formatter = new NumberFormatter(new DecimalFormat("##"));
+              formatter.setValueClass(Double.class);
+              GuiUtils.formatCheckAction(speedSpinner, formatter);
+              GuiUtils.setSpinnerWidth(speedSpinner, 2);
 
               JButton startButton = new JButton();
               startButton.setActionCommand(ActionW.CINESTART.cmd());
@@ -129,21 +128,34 @@ public class ImageTool extends PluginTool {
               stopButton.setIcon(ResourceUtil.getIcon(ActionIcon.SUSPEND));
               stopButton.addActionListener(EventManager.getInstance());
               sliderItem.registerActionState(stopButton);
-              framePanel.add(frameSlider);
-              framePanel.add(
+
+              JPanel cinePanel =
                   GuiUtils.getFlowLayoutPanel(
-                      3, 3, speedLabel, speedSpinner, startButton, stopButton));
+                      3, 3, speedLabel, speedSpinner, startButton, stopButton);
+              EventManager.getInstance()
+                  .getAction(ActionW.CINE_SWEEP)
+                  .ifPresent(
+                      toggleButton -> {
+                        FlatSVGIcon icon = ResourceUtil.getIcon(ActionIcon.LOOP);
+                        JToggleButton checkBox = toggleButton.createJToggleButton(icon);
+                        checkBox.setPreferredSize(GuiUtils.getBigIconButtonSize(checkBox));
+                        checkBox.setToolTipText(toggleButton.getActionW().getTitle());
+                        cinePanel.add(checkBox);
+                      });
+
+              framePanel.add(cinePanel);
             });
     return framePanel;
   }
 
-  public JPanel getWindowLevelPanel() {
+  public static JPanel getWindowLevelPanel(
+      ImageViewerEventManager<DicomImageElement> manager, Border hspace, boolean all) {
     int gabY = 7;
     JPanel winLevelPanel = GuiUtils.getVerticalBoxLayoutPanel();
     winLevelPanel.setBorder(
         BorderFactory.createCompoundBorder(
-            spaceY, GuiUtils.getTitledBorder(Messages.getString("ImageTool.wl"))));
-    EventManager.getInstance()
+            hspace, GuiUtils.getTitledBorder(Messages.getString("ImageTool.wl"))));
+    manager
         .getAction(ActionW.WINDOW)
         .ifPresent(
             sliderItem -> {
@@ -153,7 +165,7 @@ public class ImageTool extends PluginTool {
               winLevelPanel.add(GuiUtils.boxVerticalStrut(gabY));
             });
 
-    EventManager.getInstance()
+    manager
         .getAction(ActionW.LEVEL)
         .ifPresent(
             sliderItem -> {
@@ -163,7 +175,7 @@ public class ImageTool extends PluginTool {
               winLevelPanel.add(GuiUtils.boxVerticalStrut(gabY));
             });
 
-    EventManager.getInstance()
+    manager
         .getAction(ActionW.PRESET)
         .ifPresent(
             comboItem -> {
@@ -175,7 +187,7 @@ public class ImageTool extends PluginTool {
               winLevelPanel.add(GuiUtils.boxVerticalStrut(gabY));
             });
 
-    EventManager.getInstance()
+    manager
         .getAction(ActionW.LUT_SHAPE)
         .ifPresent(
             comboItem -> {
@@ -186,44 +198,47 @@ public class ImageTool extends PluginTool {
               winLevelPanel.add(GuiUtils.boxVerticalStrut(gabY));
             });
 
-    EventManager.getInstance()
-        .getAction(ActionW.LUT)
-        .ifPresent(
-            comboItem -> {
-              JLabel lutLabel = new JLabel(ActionW.LUT.getTitle() + StringUtil.COLON);
-              JComboBox<?> lutComboBox = comboItem.createCombo(140);
-              JPanel lutPanel = GuiUtils.getHorizontalBoxLayoutPanel(5, lutLabel, lutComboBox);
-              EventManager.getInstance()
-                  .getAction(ActionW.INVERT_LUT)
-                  .ifPresent(
-                      toggleButton -> {
-                        FlatSVGIcon icon = ResourceUtil.getIcon(ActionIcon.INVERSE_LUT);
-                        JToggleButton checkBox = toggleButton.createJToggleButton(icon);
-                        checkBox.setPreferredSize(GuiUtils.getBigIconButtonSize(checkBox));
-                        checkBox.setToolTipText(toggleButton.getActionW().getTitle());
-                        lutPanel.add(checkBox);
-                      });
-              winLevelPanel.add(lutPanel);
-              winLevelPanel.add(GuiUtils.boxVerticalStrut(gabY));
-            });
+    if (all) {
+      manager
+          .getAction(ActionW.LUT)
+          .ifPresent(
+              comboItem -> {
+                JLabel lutLabel = new JLabel(ActionW.LUT.getTitle() + StringUtil.COLON);
+                JComboBox<?> lutComboBox = comboItem.createCombo(140);
+                JPanel lutPanel = GuiUtils.getHorizontalBoxLayoutPanel(5, lutLabel, lutComboBox);
+                manager
+                    .getAction(ActionW.INVERT_LUT)
+                    .ifPresent(
+                        toggleButton -> {
+                          FlatSVGIcon icon = ResourceUtil.getIcon(ActionIcon.INVERSE_LUT);
+                          JToggleButton checkBox = toggleButton.createJToggleButton(icon);
+                          checkBox.setPreferredSize(GuiUtils.getBigIconButtonSize(checkBox));
+                          checkBox.setToolTipText(toggleButton.getActionW().getTitle());
+                          lutPanel.add(checkBox);
+                        });
+                winLevelPanel.add(lutPanel);
+                winLevelPanel.add(GuiUtils.boxVerticalStrut(gabY));
+              });
 
-    EventManager.getInstance()
-        .getAction(ActionW.FILTER)
-        .ifPresent(
-            comboItem -> {
-              JLabel label = new JLabel(Messages.getString("ImageTool.filter") + StringUtil.COLON);
-              JComboBox<?> combo = comboItem.createCombo(160);
-              winLevelPanel.add(GuiUtils.getHorizontalBoxLayoutPanel(5, label, combo));
-              winLevelPanel.add(GuiUtils.boxVerticalStrut(5));
-            });
+      manager
+          .getAction(ActionW.FILTER)
+          .ifPresent(
+              comboItem -> {
+                JLabel label =
+                    new JLabel(Messages.getString("ImageTool.filter") + StringUtil.COLON);
+                JComboBox<?> combo = comboItem.createCombo(160);
+                winLevelPanel.add(GuiUtils.getHorizontalBoxLayoutPanel(5, label, combo));
+                winLevelPanel.add(GuiUtils.boxVerticalStrut(5));
+              });
+    }
     return winLevelPanel;
   }
 
-  public JPanel getTransformPanel() {
+  public static JPanel getTransformPanel(Border hspace) {
     JPanel transform = GuiUtils.getVerticalBoxLayoutPanel();
     transform.setBorder(
         BorderFactory.createCompoundBorder(
-            spaceY, GuiUtils.getTitledBorder(Messages.getString("ImageTool.transform"))));
+            hspace, GuiUtils.getTitledBorder(Messages.getString("ImageTool.transform"))));
 
     EventManager.getInstance()
         .getAction(ActionW.ZOOM)

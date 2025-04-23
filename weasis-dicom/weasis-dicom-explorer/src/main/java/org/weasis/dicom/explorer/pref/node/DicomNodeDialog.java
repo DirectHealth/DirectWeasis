@@ -26,7 +26,7 @@ import javax.swing.WindowConstants;
 import javax.swing.text.NumberFormatter;
 import net.miginfocom.swing.MigLayout;
 import org.weasis.core.api.gui.util.GuiUtils;
-import org.weasis.core.api.util.LocalUtil;
+import org.weasis.core.api.gui.util.WinUtil;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.explorer.Messages;
 import org.weasis.dicom.explorer.pref.node.AbstractDicomNode.UsageType;
@@ -100,7 +100,7 @@ public class DicomNodeDialog extends JDialog {
     panel.add(hostnameTf);
 
     JLabel portLabel = new JLabel(Messages.getString("PrinterDialog.port") + StringUtil.COLON);
-    NumberFormat myFormat = LocalUtil.getNumberInstance();
+    NumberFormat myFormat = NumberFormat.getNumberInstance();
     myFormat.setMinimumIntegerDigits(0);
     myFormat.setMaximumIntegerDigits(65535);
     myFormat.setMaximumFractionDigits(0);
@@ -149,7 +149,7 @@ public class DicomNodeDialog extends JDialog {
         || !StringUtil.hasText(hostname)
         || port == null) {
       JOptionPane.showMessageDialog(
-          this,
+          WinUtil.getValidComponent(this),
           Messages.getString("PrinterDialog.fill_message"),
           Messages.getString("PrinterDialog.error"),
           JOptionPane.ERROR_MESSAGE);
@@ -158,7 +158,7 @@ public class DicomNodeDialog extends JDialog {
 
     if (aeTitle.length() > 16) {
       JOptionPane.showMessageDialog(
-          this,
+          WinUtil.getValidComponent(this),
           Messages.getString("DicomNodeDialog.long_aet_msg"),
           Messages.getString("PrinterDialog.error"),
           JOptionPane.ERROR_MESSAGE);

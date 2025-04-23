@@ -28,7 +28,6 @@ import org.weasis.core.Messages;
 import org.weasis.core.api.gui.util.AbstractItemDialogPage;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.util.FontItem;
-import org.weasis.core.ui.docking.UIManager;
 import org.weasis.core.ui.editor.image.ImageViewerPlugin;
 import org.weasis.core.ui.editor.image.MeasureToolBar;
 import org.weasis.core.ui.editor.image.ViewCanvas;
@@ -44,16 +43,14 @@ public class LabelsPrefView extends AbstractItemDialogPage {
   private final JPanel panelList = new JPanel();
   private final JComboBox<Graphic> comboBoxTool;
   private final JComboBox<FontItem> fontItemJComboBox;
-  private final ViewSetting viewSetting;
   private final Map<JCheckBox, Measurement> map;
 
   public LabelsPrefView() {
-    super(MeasureTool.LABEL_PREF_NAME, 510);
-    this.map = new HashMap<>(ImageStatistics.ALL_MEASUREMENTS.length);
-    this.viewSetting = Objects.requireNonNull(MeasureTool.viewSetting);
+    super(MeasureTool.LABEL_PREF_NAME, 710);
+    this.map = HashMap.newHashMap(ImageStatistics.ALL_MEASUREMENTS.length);
 
-    ArrayList<Graphic> tools = new ArrayList<>(MeasureToolBar.measureGraphicList);
-    tools.remove(0);
+    ArrayList<Graphic> tools = new ArrayList<>(MeasureToolBar.getMeasureGraphicList());
+    tools.removeFirst();
     this.comboBoxTool = new JComboBox<>(tools.toArray(Graphic[]::new));
     this.fontItemJComboBox = new JComboBox<>(FontItem.values());
 
@@ -118,6 +115,7 @@ public class LabelsPrefView extends AbstractItemDialogPage {
 
     getProperties().setProperty(PreferenceDialog.KEY_SHOW_APPLY, Boolean.TRUE.toString());
     getProperties().setProperty(PreferenceDialog.KEY_SHOW_RESTORE, Boolean.TRUE.toString());
+    getProperties().setProperty(PreferenceDialog.KEY_HELP, "draw-measure/#preferences"); // NON-NLS
   }
 
   private void selectTool(Graphic graph) {
@@ -143,26 +141,21 @@ public class LabelsPrefView extends AbstractItemDialogPage {
   }
 
   private void initialize() {
-    String key = viewSetting.getFontKey();
-    if (StringUtil.hasText(key)) {
-      fontItemJComboBox.setSelectedItem(FontItem.getFontItem(key));
-    } else {
-      fontItemJComboBox.setSelectedItem(FontItem.SMALL_SEMIBOLD);
-    }
+    FontItem item = MeasureTool.viewSetting.getFontItem();
+    fontItemJComboBox.setSelectedItem(item == null ? ViewSetting.DEFAULT_FONT : item);
 
     selectTool((Graphic) comboBoxTool.getSelectedItem());
   }
 
   @Override
   public void closeAdditionalWindow() {
-    viewSetting.setFontKey(
-        ((FontItem) Objects.requireNonNull(fontItemJComboBox.getSelectedItem())).getKey());
-    MeasureToolBar.measureGraphicList.forEach(
-        g -> MeasureToolBar.applyDefaultSetting(viewSetting, g));
+    ViewSetting settings = MeasureTool.viewSetting;
+    settings.setFontItem((FontItem) Objects.requireNonNull(fontItemJComboBox.getSelectedItem()));
 
-    synchronized (UIManager.VIEWER_PLUGINS) {
-      for (int i = UIManager.VIEWER_PLUGINS.size() - 1; i >= 0; i--) {
-        ViewerPlugin<?> p = UIManager.VIEWER_PLUGINS.get(i);
+    List<ViewerPlugin<?>> viewerPlugins = GuiUtils.getUICore().getViewerPlugins();
+    synchronized (viewerPlugins) {
+      for (int i = viewerPlugins.size() - 1; i >= 0; i--) {
+        ViewerPlugin<?> p = viewerPlugins.get(i);
         if (p instanceof ImageViewerPlugin viewerPlugin) {
           for (Object v : viewerPlugin.getImagePanels()) {
             if (v instanceof ViewCanvas<?> view) {
@@ -177,14 +170,15 @@ public class LabelsPrefView extends AbstractItemDialogPage {
 
   @Override
   public void resetToDefaultValues() {
-    viewSetting.setFontKey(FontItem.SMALL_SEMIBOLD.getKey());
+    MeasureTool.viewSetting.setFontItem(ViewSetting.DEFAULT_FONT);
     initialize();
-    MeasureToolBar.measureGraphicList.forEach(
-        g -> {
-          List<Measurement> list = g.getMeasurementList();
-          Optional.ofNullable(list)
-              .ifPresent(l -> l.forEach(Measurement::resetToGraphicLabelValue));
-        });
+    MeasureToolBar.getMeasureGraphicList()
+        .forEach(
+            g -> {
+              List<Measurement> list = g.getMeasurementList();
+              Optional.ofNullable(list)
+                  .ifPresent(l -> l.forEach(Measurement::resetToGraphicLabelValue));
+            });
 
     selectTool((Graphic) comboBoxTool.getSelectedItem());
 

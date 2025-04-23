@@ -18,10 +18,10 @@ import javax.swing.tree.TreeNode;
 import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.explorer.model.DataExplorerModel;
 import org.weasis.core.api.explorer.model.TreeModelNode;
+import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.media.data.Codec;
 import org.weasis.core.api.media.data.MediaElement;
 import org.weasis.core.api.media.data.Series;
-import org.weasis.core.api.service.BundleTools;
 
 public class FileTreeModel extends DefaultTreeModel implements DataExplorerModel {
 
@@ -59,8 +59,8 @@ public class FileTreeModel extends DefaultTreeModel implements DataExplorerModel
   }
 
   @Override
-  public List<Codec> getCodecPlugins() {
-    return BundleTools.CODEC_PLUGINS;
+  public List<Codec<MediaElement>> getCodecPlugins() {
+    return GuiUtils.getUICore().getCodecPlugins();
   }
 
   @Override
@@ -69,7 +69,7 @@ public class FileTreeModel extends DefaultTreeModel implements DataExplorerModel
   }
 
   @Override
-  public boolean applySplittingRules(Series original, MediaElement media) {
+  public boolean applySplittingRules(Series<?> original, MediaElement media) {
     return false;
   }
 }

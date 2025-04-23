@@ -9,7 +9,7 @@
  */
 package org.weasis.core.ui.model.graphic.imp;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.awt.Color;
 import java.awt.geom.Point2D;
@@ -24,7 +24,7 @@ public class PointGraphicTest extends GraphicTester<PointGraphic> {
   private static final String XML_1 = "/graphic/point/point.graphic.1.xml"; // NON-NLS
 
   static final String BASIC_TPL =
-      "<point pointSize=\"%s\" fill=\"%s\" showLabel=\"%s\" thickness=\"%s\" uuid=\"%s\">" // NON-NLS
+      "<point pointSize=\"%s\" fillOpacity=\"%s\" fill=\"%s\" showLabel=\"%s\" thickness=\"%s\" uuid=\"%s\">" // NON-NLS
           + "<paint rgb=\"%s\"/>" // NON-NLS
           + "<pts/>" // NON-NLS
           + "</point>"; // NON-NLS
@@ -49,6 +49,7 @@ public class PointGraphicTest extends GraphicTester<PointGraphic> {
   public Object[] getParameters() {
     return new Object[] {
       PointGraphic.DEFAULT_POINT_SIZE,
+      Graphic.DEFAULT_FILL_OPACITY,
       Graphic.DEFAULT_FILLED,
       Graphic.DEFAULT_LABEL_VISIBLE,
       Graphic.DEFAULT_LINE_THICKNESS,
@@ -60,7 +61,7 @@ public class PointGraphicTest extends GraphicTester<PointGraphic> {
   @Override
   public void additionalTestsForDeserializeBasicGraphic(
       PointGraphic result, PointGraphic expected) {
-    assertThat(result.getPointSize()).isEqualTo(PointGraphic.DEFAULT_POINT_SIZE);
+    assertEquals(PointGraphic.DEFAULT_POINT_SIZE, result.getPointSize());
   }
 
   @Override
@@ -81,6 +82,6 @@ public class PointGraphicTest extends GraphicTester<PointGraphic> {
   @Override
   public void additionalTestsForDeserializeCompleteGraphic(
       PointGraphic result, PointGraphic expected) {
-    assertThat(result.getPointSize()).isEqualTo(expected.getPointSize());
+    assertEquals(expected.getPointSize(), result.getPointSize());
   }
 }

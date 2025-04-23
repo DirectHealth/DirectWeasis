@@ -9,7 +9,7 @@
  */
 package org.weasis.core.ui.model.graphic.imp.line;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.awt.Color;
 import java.awt.geom.Point2D;
@@ -24,7 +24,7 @@ public class LineWithGapGraphicTest extends GraphicTester<LineWithGapGraphic> {
   private static final String XML_1 = "/graphic/lineWithGap/lineWithGap.graphic.1.xml"; // NON-NLS
 
   static final String BASIC_TPL =
-      "<lineWithGap gapSize=\"%s\" fill=\"%s\" showLabel=\"%s\" thickness=\"%s\" uuid=\"%s\">" // NON-NLS
+      "<lineWithGap gapSize=\"%s\" fillOpacity=\"%s\" fill=\"%s\" showLabel=\"%s\" thickness=\"%s\" uuid=\"%s\">" // NON-NLS
           + "<paint rgb=\"%s\"/>" // NON-NLS
           + "<pts/>" // NON-NLS
           + "</lineWithGap>"; // NON-NLS
@@ -49,6 +49,7 @@ public class LineWithGapGraphicTest extends GraphicTester<LineWithGapGraphic> {
   public Object[] getParameters() {
     return new Object[] {
       LineWithGapGraphic.DEFAULT_GAP_SIZE,
+      Graphic.DEFAULT_FILL_OPACITY,
       Graphic.DEFAULT_FILLED,
       Graphic.DEFAULT_LABEL_VISIBLE,
       Graphic.DEFAULT_LINE_THICKNESS,
@@ -60,7 +61,7 @@ public class LineWithGapGraphicTest extends GraphicTester<LineWithGapGraphic> {
   @Override
   public void additionalTestsForDeserializeBasicGraphic(
       LineWithGapGraphic result, LineWithGapGraphic expected) {
-    assertThat(result.getGapSize()).isEqualTo(LineWithGapGraphic.DEFAULT_GAP_SIZE);
+    assertEquals(LineWithGapGraphic.DEFAULT_GAP_SIZE, result.getGapSize());
   }
 
   @Override

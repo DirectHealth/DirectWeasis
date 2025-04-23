@@ -85,7 +85,6 @@ import org.weasis.dicom.codec.FileExtractor;
 import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.TransferSyntax;
 import org.weasis.dicom.codec.display.WindowAndPresetsOp;
-import org.weasis.dicom.explorer.internal.Activator;
 import org.weasis.dicom.explorer.pr.DicomPrSerializer;
 import org.weasis.dicom.param.AttributeEditor;
 import org.weasis.dicom.param.DefaultAttributeEditor;
@@ -191,7 +190,7 @@ public class LocalExport extends AbstractItemDialogPage implements ExportDicom {
   }
 
   protected Properties getPreferences() {
-    return Activator.IMPORT_EXPORT_PERSISTENCE;
+    return LocalPersistence.getProperties();
   }
 
   protected void showExportingOptions() {
@@ -272,7 +271,8 @@ public class LocalExport extends AbstractItemDialogPage implements ExportDicom {
 
       int response =
           JOptionPane.showOptionDialog(
-              WinUtil.getParentWindow(this), // Use parent because this has large size
+              WinUtil.getValidComponent(
+                  WinUtil.getParentWindow(this)), // Use parent because this has large size
               options.toArray(),
               Messages.getString("LocalExport.export_message"),
               JOptionPane.OK_CANCEL_OPTION,
@@ -333,7 +333,8 @@ public class LocalExport extends AbstractItemDialogPage implements ExportDicom {
 
       int response =
           JOptionPane.showOptionDialog(
-              WinUtil.getParentWindow(this), // Use parent because this has large size
+              WinUtil.getValidComponent(
+                  WinUtil.getParentWindow(this)), // Use parent because this has large size
               options.toArray(),
               Messages.getString("LocalExport.export_message"),
               JOptionPane.OK_CANCEL_OPTION,
@@ -551,8 +552,22 @@ public class LocalExport extends AbstractItemDialogPage implements ExportDicom {
           }
 
           DefaultMutableTreeNode node = (DefaultMutableTreeNode) treePath.getLastPathComponent();
+          Object object = node.getUserObject();
 
-          if (node.getUserObject() instanceof DicomImageElement img) {
+          if (object instanceof MediaElement dcm && object instanceof FileExtractor) {
+            File fileSrc = ((FileExtractor) dcm).getExtractFile();
+            if (fileSrc != null) {
+              // Get instance number instead SOPInstanceUID to handle multiframe
+              String instance = instanceFileName(dcm);
+              String path = buildPath(dcm, keepNames, node);
+              File destinationDir = new File(exportDir, path);
+              destinationDir.mkdirs();
+
+              File destinationFile =
+                  new File(destinationDir, instance + FileUtil.getExtension(fileSrc.getName()));
+              FileUtil.nioCopyFile(fileSrc, destinationFile);
+            }
+          } else if (object instanceof DicomImageElement img) {
             // Get instance number instead SOPInstanceUID to handle multiframe
             String instance = instanceFileName(img);
             String path = buildPath(img, keepNames, node);
@@ -591,20 +606,6 @@ public class LocalExport extends AbstractItemDialogPage implements ExportDicom {
                   "Cannot export DICOM file to {}: {}",
                   format,
                   img.getFileCache().getOriginalFile().orElse(null));
-            }
-          } else if (node.getUserObject() instanceof MediaElement dcm
-              && node.getUserObject() instanceof FileExtractor) {
-            File fileSrc = ((FileExtractor) dcm).getExtractFile();
-            if (fileSrc != null) {
-              // Get instance number instead SOPInstanceUID to handle multiframe
-              String instance = instanceFileName(dcm);
-              String path = buildPath(dcm, keepNames, node);
-              File destinationDir = new File(exportDir, path);
-              destinationDir.mkdirs();
-
-              File destinationFile =
-                  new File(destinationDir, instance + FileUtil.getExtension(fileSrc.getName()));
-              FileUtil.nioCopyFile(fileSrc, destinationFile);
             }
           }
         }
@@ -695,6 +696,9 @@ public class LocalExport extends AbstractItemDialogPage implements ExportDicom {
                     tsuid, onlyRaw, dicomEditors, jpegQuality, compressionRatio);
             Attributes attributes = img.saveToFile(destinationFile, dicomExportParameters);
             if (attributes != null) {
+              if (attributes.isEmpty()) {
+                attributes = img.getMediaReader().getDicomObject();
+              }
               writeInDicomDir(writer, attributes, node, iuid, destinationFile);
             }
           } else if (node.getUserObject() instanceof DicomElement dcm) {
@@ -714,6 +718,9 @@ public class LocalExport extends AbstractItemDialogPage implements ExportDicom {
                     null, onlyRaw, getAttributeEditors(editor), jpegQuality, compressionRatio);
             Attributes attributes = dcm.saveToFile(destinationFile, dicomExportParameters);
             if (attributes != null) {
+              if (attributes.isEmpty()) {
+                attributes = dcm.getMediaReader().getDicomObject();
+              }
               writeInDicomDir(writer, attributes, node, iuid, destinationFile);
             }
           } else if (node.getUserObject() instanceof Series) {

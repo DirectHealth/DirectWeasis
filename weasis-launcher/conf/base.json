@@ -2,7 +2,7 @@
   "weasisPreferences": [
     {
       "code": "framework.system.packages.extra.basic",
-      "value": "com.formdev.flatlaf, com.formdev.flatlaf.extras, com.formdev.flatlaf.extras.components, com.formdev.flatlaf.icons, com.formdev.flatlaf.ui, com.formdev.flatlaf.util, com.sun.awt, com.sun.image.codec.jpeg, com.sun.imageio.spi, javax.accessibility, javax.imageio, javax.imageio.event, javax.imageio.metadata, javax.imageio.plugins.jpeg, javax.imageio.spi, javax.imageio.stream, javax.media, javax.swing, javax.swing.border, javax.swing.event, javax.swing.filechooser, javax.swing.plaf, javax.swing.plaf.basic, javax.swing.plaf.metal, javax.swing.table, javax.swing.text, javax.swing.tree, javax.xml.bind, javax.xml.parsers, javax.xml.namespace, javax.xml.stream, javax.xml.transform, javax.xml.transform.stax, javax.xml.validation, net.miginfocom.layout, net.miginfocom.swing, org.w3c.dom, org.xml.sax, org.xml.sax.ext, org.xml.sax.helpers, sun.awt, sun.awt.geom, sun.awt.image, sun.awt.image.codec, sun.java2d.opengl, sun.security.action, sun.misc, sun.net.www.protocol.file, sun.reflect",
+      "value": "ch.qos.logback.classic,ch.qos.logback.classic.encoder,ch.qos.logback.classic.spi,ch.qos.logback.core,ch.qos.logback.core.encoder,ch.qos.logback.core.rolling,ch.qos.logback.core.util,com.formdev.flatlaf, com.formdev.flatlaf.extras, com.formdev.flatlaf.extras.components, com.formdev.flatlaf.icons, com.formdev.flatlaf.ui, com.formdev.flatlaf.util, com.sun.awt, com.sun.image.codec.jpeg, com.sun.imageio.spi, javax.accessibility, javax.imageio, javax.imageio.event, javax.imageio.metadata, javax.imageio.plugins.jpeg, javax.imageio.spi, javax.imageio.stream, javax.media, javax.swing, javax.swing.border, javax.swing.event, javax.swing.filechooser, javax.swing.plaf, javax.swing.plaf.basic, javax.swing.plaf.metal, javax.swing.table, javax.swing.text, javax.swing.tree, javax.xml.bind, javax.xml.parsers, javax.xml.namespace, javax.xml.stream, javax.xml.transform, javax.xml.transform.stax, javax.xml.validation, net.miginfocom.layout, net.miginfocom.swing, org.slf4j, org.w3c.dom, org.weasis.pref, org.xml.sax, org.xml.sax.ext, org.xml.sax.helpers, sun.awt, sun.awt.geom, sun.awt.image, sun.awt.image.codec, sun.java2d.opengl, sun.security.action, sun.misc, sun.net.www.protocol.file, sun.reflect",
       "description": "List of additional packages for Felix (by default only java.* is visible in main class loader)",
       "type": "A",
       "category": "FELIX_CONFIG"
@@ -40,7 +40,7 @@
       "value": "130",
       "description": "The initial start level of the framework upon startup",
       "type": "A",
-      "JavaType": "INT",
+      "javaType": "INT",
       "category": "FELIX_CONFIG"
     },
     {
@@ -48,20 +48,13 @@
       "value": "300",
       "description": "The start level of newly installed bundles",
       "type": "A",
-      "JavaType": "INT",
+      "javaType": "INT",
       "category": "FELIX_CONFIG"
     },
     {
       "code": "felix.auto.start.1",
       "value": "file:${maven.localRepository}/org/apache/felix/org.apache.felix.gogo.runtime/${felix.gogo.version}/org.apache.felix.gogo.runtime-${felix.gogo.version}.jar",
       "description": "OSGI runtime",
-      "type": "A",
-      "category": "FELIX_INSTALL"
-    },
-    {
-      "code": "felix.auto.start.2",
-      "value": "file:${maven.localRepository}/org/slf4j/slf4j-api/${slf4j.version}/slf4j-api-${slf4j.version}.jar file:${maven.localRepository}/org/apache/sling/org.apache.sling.commons.log/${sling.commons.log.version}/org.apache.sling.commons.log-${sling.commons.log.version}.jar",
-      "description": "OSGI logger",
       "type": "A",
       "category": "FELIX_INSTALL"
     },
@@ -74,14 +67,14 @@
     },
     {
       "code": "felix.auto.start.4",
-      "value": "file:${maven.localRepository}/org/apache/felix/org.apache.felix.bundlerepository/${felix.bundlerepository.version}/org.apache.felix.bundlerepository-${felix.bundlerepository.version}.jar file:${maven.localRepository}/org/glassfish/jakarta.json/${javax.json.version}/jakarta.json-${javax.json.version}.jar file:${maven.localRepository}/org/osgi/osgi.promise/${osgi.promise.version}/osgi.promise-${osgi.promise.version}.jar",
+      "value": "file:${maven.localRepository}/org/apache/felix/org.apache.felix.bundlerepository/${felix.bundlerepository.version}/org.apache.felix.bundlerepository-${felix.bundlerepository.version}.jar file:${maven.localRepository}/org/osgi/osgi.promise/${osgi.promise.version}/osgi.promise-${osgi.promise.version}.jar",
       "description": "OSGI bundle repository",
       "type": "A",
       "category": "FELIX_INSTALL"
     },
     {
       "code": "felix.auto.start.5",
-      "value": "file:${maven.localRepository}/org/osgi/org.osgi.service.component/${osgi.component.version}/org.osgi.service.component-${osgi.component.version}.jar file:${maven.localRepository}/org/apache/felix/org.apache.felix.configadmin/${felix.configadmin.version}/org.apache.felix.configadmin-${felix.configadmin.version}.jar file:${maven.localRepository}/org/apache/felix/org.apache.felix.prefs/${felix.prefs.version}/org.apache.felix.prefs-${felix.prefs.version}.jar file:${maven.localRepository}/org/apache/felix/org.apache.felix.scr/${felix.scr.version}/org.apache.felix.scr-${felix.scr.version}.jar file:${maven.localRepository}/org/apache/felix/org.apache.felix.metatype/${felix.metatype.version}/org.apache.felix.metatype-${felix.metatype.version}.jar",
+      "value": "file:${maven.localRepository}/org/osgi/org.osgi.service.component/${osgi.component.version}/org.osgi.service.component-${osgi.component.version}.jar file:${maven.localRepository}/org/apache/felix/org.apache.felix.configadmin/${felix.configadmin.version}/org.apache.felix.configadmin-${felix.configadmin.version}.jar file:${maven.localRepository}/org/apache/felix/org.apache.felix.prefs/${felix.prefs.version}/org.apache.felix.prefs-${felix.prefs.version}.jar file:${maven.localRepository}/org/apache/felix/org.apache.felix.scr/${felix.scr.version}/org.apache.felix.scr-${felix.scr.version}.jar",
       "description": "OSGI configuration and preferences",
       "type": "A",
       "category": "FELIX_INSTALL"
@@ -95,7 +88,7 @@
     },
     {
       "code": "felix.auto.start.10",
-      "value": "file:${maven.localRepository}/org/weasis/thirdparty/docking-frames/${dockingframes.version}/docking-frames-${dockingframes.version}.jar file:${maven.localRepository}/org/weasis/core/weasis-core-img/${weasis.core.img.version}/weasis-core-img-${weasis.core.img.version}-jdk11.jar file:${maven.localRepository}/net/lingala/zip4j/zip4j/${zip4j.version}/zip4j-${zip4j.version}.jar file:${maven.localRepository}/org/joml/joml/${joml.version}/joml-${joml.version}.jar",
+      "value": "file:${maven.localRepository}/org/weasis/thirdparty/docking-frames/${dockingframes.version}/docking-frames-${dockingframes.version}.jar file:${maven.localRepository}/org/weasis/core/weasis-core-img/${weasis.core.img.version}/weasis-core-img-${weasis.core.img.version}.jar file:${maven.localRepository}/net/lingala/zip4j/zip4j/${zip4j.version}/zip4j-${zip4j.version}.jar file:${maven.localRepository}/org/joml/joml/${joml.version}/joml-${joml.version}.jar",
       "description": "Docking-frames, core image, joml and zip",
       "type": "A",
       "category": "FELIX_INSTALL"
@@ -203,7 +196,7 @@
       "value": "2",
       "description": "Set the logging levels for OSGI framework  0=None / 1(default)=Error / 2=Warning / 3=Information / 4=Debug",
       "type": "A",
-      "JavaType": "INT",
+      "javaType": "INT",
       "category": "LOG"
     },
     {
@@ -218,15 +211,15 @@
       "value": "false",
       "description": "Activation of rolling log files",
       "type": "F",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "LOG"
     },
     {
       "code": "org.apache.sling.commons.log.file.number",
-      "value": "5",
+      "value": "20",
       "description": "The max number of rolling log files",
       "type": "F",
-      "JavaType": "INT",
+      "javaType": "INT",
       "category": "LOG"
     },
     {
@@ -238,7 +231,7 @@
     },
     {
       "code": "org.apache.sling.commons.log.pattern",
-      "value": "{0,date,dd.MM.yyyy HH:mm:ss.SSS} *{4}* [{2}] {3}: {5}",
+      "value": "%d{dd.MM.yyyy HH:mm:ss.SSS} *%-5level* [%thread] %logger{36}: %msg%ex{3}%n",
       "description": "Log pattern: {0} The timestamp of type java.util.Date, {1} the log marker, \n{2} the name of the current thread, {3} the name of the logger, {4} the debug level and {5} the actual debug message.",
       "type": "F",
       "category": "LOG"
@@ -248,15 +241,15 @@
       "value": "-1",
       "description": "Defines the maximum number of lines for stack trace (0 => NONE, -1 => ALL). Default value is 3",
       "type": "F",
-      "JavaType": "INT",
+      "javaType": "INT",
       "category": "LOG"
     },
     {
       "code": "audit.log",
       "value": "false",
-      "description": "Audit log for giving statistics about usage of Weasis",
+      "description": "Audit log for usage statistics in Weasis",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "LOG"
     },
     {
@@ -292,7 +285,7 @@
       "value": "false",
       "description": "If true, the bundle cache is cleared when the weasis version has changed from the previous launch",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "LAUNCH"
     },
     {
@@ -349,7 +342,7 @@
       "value": "false",
       "description": "Show a disclaimer at the first launch of Weasis (requires to be accepted to start the application)",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "LAUNCH"
     },
     {
@@ -357,7 +350,7 @@
       "value": "false",
       "description": "Show a message when the release has changed",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "LAUNCH"
     },
     {
@@ -365,7 +358,7 @@
       "value": "false",
       "description": "Show a message when a new release is available",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "LAUNCH"
     },
     {
@@ -392,14 +385,14 @@
     {
       "code": "weasis.help.online",
       "value": "https://nroduit.github.io/en/tutorials/",
-      "description": "Online tutorial",
+      "description": "The online tutorial",
       "type": "A",
       "category": "DOC"
     },
     {
       "code": "weasis.help.shortcuts",
       "value": "https://nroduit.github.io/en/basics/shortcuts",
-      "description": "List of shortcuts",
+      "description": "Provides a list of available shortcuts.",
       "type": "A",
       "category": "DOC"
     },
@@ -415,27 +408,27 @@
       "value": "false",
       "description": "Show a message of confirmation when closing the application",
       "type": "F",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "GENERAL"
     },
     {
       "code": "locale.lang.code",
       "value": "en",
-      "description": "Language code (see Java Locale: https://www.oracle.com/java/technologies/javase/jdk20-suported-locales.html). Default value is \"en\".",
+      "description": "Specifies the language code (see Java Locale: https://www.oracle.com/java/technologies/javase/jdk20-suported-locales.html). Default value is \"en\".",
       "type": "F",
       "category": "GENERAL"
     },
     {
       "code": "locale.format.code",
       "value": "system",
-      "description": "If value is \"system\" then the locale of the operating system will be used (in client-side).\nSee Java Locale: https://www.oracle.com/java/technologies/javase/jdk20-suported-locales.html",
+      "description": "Uses the operating system's locale (on the client-side) with \"system\".\nFor other values refer to Java Locale: https://www.oracle.com/java/technologies/javase/jdk20-suported-locales.html",
       "type": "F",
       "category": "GENERAL"
     },
     {
       "code": "weasis.aet",
-      "value": "WEASIS_AE",
-      "description": "Calling AETitle for DICOM send and DICOM print",
+      "value": null,
+      "description": "Calling AETitle for DICOM send and Dicomizer publish. ? null means displaying the DICOM calling node combobox otherwise the combo is not displayed and the value is directly used",
       "type": "A",
       "category": "DICOM"
     },
@@ -451,23 +444,23 @@
       "value": "true",
       "description": "Start to download series immediately",
       "type": "F",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "DICOM"
     },
     {
       "code": "download.concurrent.series",
       "value": "3",
-      "description": "The number of concurrently downloaded series",
+      "description": "Controls the number of series downloaded simultaneously",
       "type": "A",
-      "JavaType": "INT",
+      "javaType": "INT",
       "category": "DICOM"
     },
     {
       "code": "download.concurrent.series.images",
       "value": "4",
-      "description": "The number of concurrently downloaded images in a series",
+      "description": "The number of concurrently downloaded images within a series",
       "type": "A",
-      "JavaType": "INT",
+      "javaType": "INT",
       "category": "DICOM"
     },
     {
@@ -475,7 +468,7 @@
       "value": "true",
       "description": "Allow applying Window/Level on color images",
       "type": "F",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "VIEWER"
     },
     {
@@ -483,7 +476,7 @@
       "value": "true",
       "description": "Inverse level direction (moving the cursor down to increase brightness",
       "type": "F",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "VIEWER"
     },
     {
@@ -491,7 +484,7 @@
       "value": "false",
       "description": "Apply by default the most recent Presentation State to the related image",
       "type": "F",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "VIEWER"
     },
     {
@@ -499,7 +492,7 @@
       "value": "false",
       "description": "Force to detect a graphic card at every launch",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "VIEWER"
     },
     {
@@ -535,7 +528,7 @@
       "value": "true",
       "description": "Show the import image toolbar and menu",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -543,7 +536,7 @@
       "value": "true",
       "description": "Show the DICOM import menu and dialog",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -551,7 +544,7 @@
       "value": "true",
       "description": "Show the DICOM Q/R page in the DICOM Export dialog",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -559,7 +552,7 @@
       "value": "true",
       "description": "Show the DICOM export menu and dialog",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -567,7 +560,7 @@
       "value": "true",
       "description": "Show the send page in the DICOM Export dialog",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -575,7 +568,7 @@
       "value": "7170",
       "description": "Show all mouse buttons. Sum of LEFT=1024 + MIDDLE=2048 + RIGHT=4096 + SCROLL=2. Show all:7170 and show none:0.",
       "type": "A",
-      "JavaType": "INT",
+      "javaType": "INT",
       "category": "UI"
     },
     {
@@ -583,7 +576,7 @@
       "value": "false",
       "description": "Show all the cine toolbars",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -591,7 +584,7 @@
       "value": "false",
       "description": "Show all the key object toolbars",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -599,7 +592,7 @@
       "value": "false",
       "description": "Show the rotation toolbars in DICOM 2D viewer",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -607,7 +600,7 @@
       "value": "false",
       "description": "Show LUT Shape in the contextual menu",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -615,7 +608,7 @@
       "value": "false",
       "description": "Show LUT in the contextual menu",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
       "category": "UI"
     },
     {
@@ -623,7 +616,15 @@
       "value": "false",
       "description": "Show Filter in the contextual menu",
       "type": "A",
-      "JavaType": "BOOLEAN",
+      "javaType": "BOOLEAN",
+      "category": "UI"
+    },
+    {
+      "code": "weasis.plugins.license",
+      "value": "true",
+      "description": "Show license activation in Help menu",
+      "type": "A",
+      "javaType": "BOOLEAN",
       "category": "UI"
     }
   ]

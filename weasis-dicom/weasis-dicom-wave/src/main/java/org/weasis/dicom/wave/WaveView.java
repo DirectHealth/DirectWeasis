@@ -39,6 +39,7 @@ import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.BulkData;
 import org.dcm4che3.data.Sequence;
 import org.dcm4che3.data.Tag;
+import org.dcm4che3.img.util.DicomUtils;
 import org.dcm4che3.util.StreamUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,7 +50,6 @@ import org.weasis.core.api.media.data.MediaSeriesGroup;
 import org.weasis.core.api.media.data.Series;
 import org.weasis.core.api.media.data.TagView;
 import org.weasis.core.api.media.data.TagW;
-import org.weasis.core.ui.docking.UIManager;
 import org.weasis.core.ui.editor.SeriesViewerEvent;
 import org.weasis.core.ui.editor.SeriesViewerEvent.EVENT;
 import org.weasis.core.ui.editor.SeriesViewerListener;
@@ -58,7 +58,6 @@ import org.weasis.core.ui.util.ImagePrint;
 import org.weasis.dicom.codec.DicomMediaIO;
 import org.weasis.dicom.codec.DicomSpecialElement;
 import org.weasis.dicom.codec.TagD;
-import org.weasis.dicom.codec.utils.DicomMediaUtils;
 import org.weasis.dicom.explorer.DicomExplorer;
 import org.weasis.dicom.explorer.DicomModel;
 import org.weasis.dicom.wave.dockable.MeasureAnnotationTool;
@@ -215,10 +214,10 @@ public class WaveView extends JPanel implements SeriesViewerListener {
       return;
     }
     boolean open = false;
-    synchronized (UIManager.VIEWER_PLUGINS) {
-      List<ViewerPlugin<?>> plugins = UIManager.VIEWER_PLUGINS;
+    List<ViewerPlugin<?>> viewerPlugins = GuiUtils.getUICore().getViewerPlugins();
+    synchronized (viewerPlugins) {
       pluginList:
-      for (final ViewerPlugin<?> plugin : plugins) {
+      for (final ViewerPlugin<?> plugin : viewerPlugins) {
         List<? extends MediaSeries<?>> openSeries = plugin.getOpenSeries();
         if (openSeries != null) {
           for (MediaSeries<?> s : openSeries) {
@@ -266,7 +265,7 @@ public class WaveView extends JPanel implements SeriesViewerListener {
       Attributes dcm = Optional.of(attributes.getNestedDataset(Tag.WaveformSequence)).get();
 
       this.channelNumber =
-          DicomMediaUtils.getIntegerFromDicomElement(dcm, Tag.NumberOfWaveformChannels, 0);
+          DicomUtils.getIntegerFromDicomElement(dcm, Tag.NumberOfWaveformChannels, 0);
       Sequence chDefSeq = Optional.of(dcm.getSequence(Tag.ChannelDefinitionSequence)).get();
       this.channels.clear();
       for (int i = 0; i < chDefSeq.size(); i++) {
@@ -277,8 +276,8 @@ public class WaveView extends JPanel implements SeriesViewerListener {
       String originality = dcm.getString(Tag.WaveformOriginality);
 
       this.sampleNumber =
-          DicomMediaUtils.getIntegerFromDicomElement(dcm, Tag.NumberOfWaveformSamples, 0);
-      double frequency = DicomMediaUtils.getDoubleFromDicomElement(dcm, Tag.SamplingFrequency, 1.0);
+          DicomUtils.getIntegerFromDicomElement(dcm, Tag.NumberOfWaveformSamples, 0);
+      double frequency = DicomUtils.getDoubleFromDicomElement(dcm, Tag.SamplingFrequency, 1.0);
       this.seconds = sampleNumber / frequency;
       this.samplesPerSecond = (int) (sampleNumber / seconds);
 
@@ -347,8 +346,7 @@ public class WaveView extends JPanel implements SeriesViewerListener {
       throw new IOException("Cannot read Waveform data");
     }
 
-    int bitsAllocated =
-        DicomMediaUtils.getIntegerFromDicomElement(dcm, Tag.WaveformBitsAllocated, 0);
+    int bitsAllocated = DicomUtils.getIntegerFromDicomElement(dcm, Tag.WaveformBitsAllocated, 0);
 
     ByteBuffer byteBuffer = ByteBuffer.wrap(array.toByteArray());
     byteBuffer.order(dcm.bigEndian() ? ByteOrder.BIG_ENDIAN : ByteOrder.LITTLE_ENDIAN);
@@ -524,8 +522,7 @@ public class WaveView extends JPanel implements SeriesViewerListener {
   }
 
   private void printHeader(Graphics2D g2, int midWidth) {
-    DataExplorerView dicomView =
-        org.weasis.core.ui.docking.UIManager.getExplorerPlugin(DicomExplorer.NAME);
+    DataExplorerView dicomView = GuiUtils.getUICore().getExplorerPlugin(DicomExplorer.NAME);
     DicomModel model = null;
     if (dicomView != null) {
       model = (DicomModel) dicomView.getDataExplorerModel();

@@ -1,7 +1,7 @@
 name: weasis
 title: Weasis
-base: core20
-version: '4.2.0'
+base: core24
+version: '4.6.0'
 summary: A free/libre/open medical DICOM viewer
 description: |
   Weasis is a multipurpose standalone and web-based DICOM viewer with 
@@ -24,30 +24,35 @@ description: |
 license: Apache-2.0
 grade: stable
 confinement: strict
-architectures:
-  - build-on: [amd64, arm64]
-    run-on: [amd64, arm64]
-
-assumes:
-  - snapd2.43
+platforms:
+  amd64:
+    build-on: [amd64]
+  arm64:
+    build-on: [arm64]
 
 plugs:
-  gnome-3-38-2004:
-    default-provider: gnome-3-38-2004
-    interface: content
-    target: $SNAP/gnome-platform
+  desktop:
+    mount-host-font-cache: false
   gtk-3-themes:
-    default-provider: gtk-common-themes
     interface: content
     target: $SNAP/data-dir/themes
-  icon-themes:
     default-provider: gtk-common-themes
+  icon-themes:
     interface: content
     target: $SNAP/data-dir/icons
-  sound-themes:
     default-provider: gtk-common-themes
+  sound-themes:
     interface: content
     target: $SNAP/data-dir/sounds
+    default-provider: gtk-common-themes
+  gnome-46-2404:
+    interface: content
+    target: $SNAP/gnome-platform
+    default-provider: gnome-46-2404
+  gpu-2404:
+    interface: content
+    target: $SNAP/gpu-2404
+    default-provider: mesa-2404
 
 layout:
   /usr/bin/lpr:
@@ -57,8 +62,11 @@ parts:
   remote-openjdk:
     plugin: dump
     source:
-      - on amd64: https://github.com/adoptium/temurin21-binaries/releases/download/jdk21-2023-08-09-06-56-beta/OpenJDK21U-jdk_x64_linux_hotspot_2023-08-09-06-56.tar.gz
-      - on arm64: https://github.com/adoptium/temurin21-binaries/releases/download/jdk21-2023-08-09-06-56-beta/OpenJDK21U-jdk_aarch64_linux_hotspot_2023-08-09-06-56.tar.gz
+      - on amd64: https://github.com/adoptium/temurin24-binaries/releases/download/jdk-24.0.1%2B9/OpenJDK24U-jdk_x64_linux_hotspot_24.0.1_9.tar.gz
+      - on arm64: https://github.com/adoptium/temurin24-binaries/releases/download/jdk-24.0.1%2B9/OpenJDK24U-jdk_aarch64_linux_hotspot_24.0.1_9.tar.gz
+    source-checksum:
+      - on amd64: sha256/78832cb5ea4074f2215cde0d01d6192d09c87636fc24b36647aea61fb23b8272
+      - on arm64: sha256/a598260e340028d9b2383c23df16aa286769a661bd3bf28a52e8c1a5774b1110
     organize:
       '*': java-runtime/
     override-stage: 'true'
@@ -74,7 +82,8 @@ parts:
       - libstdc++6
       - libgcc1
     #source: weasis-distributions/target/native-dist/weasis-native.zip
-    source: https://github.com/nroduit/Weasis/releases/download/v4.2.0/weasis-native.zip
+    source: https://github.com/nroduit/Weasis/releases/download/v4.6.0/weasis-native.zip
+    source-checksum: sha256/a3a73591274fe9f86bb520064355541423fbc68ef7218f98aa8110cb3cf722eb
     organize:
       '*': weasis-native/
     override-stage: 'true'
@@ -87,28 +96,27 @@ parts:
     source-type: local
     source-subdir: weasis-distributions
     override-build: |
-      cp -Rf /root/parts/remote-weasis-build/install/weasis-native ${SNAPCRAFT_PART_BUILD}/
-      weasis-native/build/script/package-weasis.sh --output ${SNAPCRAFT_PART_INSTALL} --no-installer --jdk /root/parts/remote-openjdk/install/java-runtime
+      echo "Preparing Weasis build environment..."
+      WEASIS_REMOTE=$(echo ${SNAPCRAFT_PART_INSTALL} | sed 's|parts/weasis/|parts/remote-weasis-build/|g')
+      WEASIS_JDK=$(echo ${SNAPCRAFT_PART_INSTALL} | sed 's|parts/weasis/|parts/remote-openjdk/|g')
+      cp -Rf ${WEASIS_REMOTE}/weasis-native ${SNAPCRAFT_PART_BUILD}/
+      weasis-native/build/script/package-weasis.sh --output ${SNAPCRAFT_PART_INSTALL} --no-installer --jdk ${WEASIS_JDK}/java-runtime
       mv ${SNAPCRAFT_PART_INSTALL}/Weasis/* ${SNAPCRAFT_PART_INSTALL}/
       rm -rf ${SNAPCRAFT_PART_INSTALL}/Weasis
       snapcraftctl build
 
 apps:
   weasis:
-    extensions:
-      - gnome-3-38
+    extensions: [gnome]
     command: bin/Weasis
     environment:
       _JAVA_OPTIONS: -Duser.home=$SNAP_USER_DATA
     plugs:
       - network
       - desktop
-      - desktop-legacy
-      - wayland
       - x11
       - home
       - network-bind
-      - unity7
       - gsettings
       - opengl
       - avahi-control
@@ -117,20 +125,16 @@ apps:
       - cups-control
   
   dicomizer:
-    extensions:
-      - gnome-3-38
+    extensions: [gnome]
     command: bin/Dicomizer
     environment:
       _JAVA_OPTIONS: -Duser.home=$SNAP_USER_DATA
     plugs:
       - network
       - desktop
-      - desktop-legacy
-      - wayland
       - x11
       - home
       - network-bind
-      - unity7
       - gsettings
       - opengl
       - avahi-control

@@ -43,7 +43,6 @@ import org.weasis.core.api.media.data.SeriesThumbnail;
 import org.weasis.core.api.media.data.TagW;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.ActionIcon;
-import org.weasis.core.ui.docking.UIManager;
 import org.weasis.core.ui.editor.SeriesViewer;
 import org.weasis.core.ui.editor.SeriesViewerFactory;
 import org.weasis.core.ui.editor.ViewerPluginBuilder;
@@ -66,22 +65,7 @@ public class ThumbnailMouseAndKeyAdapter extends MouseAdapter implements KeyList
   @Override
   public void mouseClicked(MouseEvent e) {
     if (e.getClickCount() == 2) {
-      final SeriesSelectionModel selList = getSeriesSelectionModel();
-      selList.setOpeningSeries(true);
-      Map<String, Object> props = Collections.synchronizedMap(new HashMap<>());
-      props.put(ViewerPluginBuilder.CMP_ENTRY_BUILD_NEW_VIEWER, true);
-      props.put(ViewerPluginBuilder.BEST_DEF_LAYOUT, false);
-      props.put(ViewerPluginBuilder.OPEN_IN_SELECTION, true);
-
-      String mime = series.getMimeType();
-      SeriesViewerFactory plugin = UIManager.getViewerFactory(mime);
-      if (plugin != null) {
-        ArrayList<MediaSeries<MediaElement>> list = new ArrayList<>(1);
-        list.add(series);
-        ViewerPluginBuilder builder = new ViewerPluginBuilder(plugin, list, dicomModel, props);
-        ViewerPluginBuilder.openSequenceInPlugin(builder);
-      }
-      selList.setOpeningSeries(false);
+      openSeriesInDefaultPlugin(dicomModel, series);
     }
   }
 
@@ -98,7 +82,7 @@ public class ThumbnailMouseAndKeyAdapter extends MouseAdapter implements KeyList
       JPopupMenu popupMenu = new JPopupMenu();
 
       List<SeriesViewerFactory> plugins =
-          UIManager.getViewerFactoryList(new String[] {series.getMimeType()});
+          GuiUtils.getUICore().getViewerFactoryList(new String[] {series.getMimeType()});
       if (!selList.contains(series)) {
         selList.setSelectionInterval(series, series);
       }
@@ -391,10 +375,10 @@ public class ThumbnailMouseAndKeyAdapter extends MouseAdapter implements KeyList
     } else if (e.isControlDown() && code == KeyEvent.VK_A) {
       selList.setSelectionInterval(selList.getFirstElement(), selList.getLastElement());
     } else if (code == KeyEvent.VK_PAGE_DOWN || code == KeyEvent.VK_END) {
-      Series val = selList.getLastElement();
+      Series<?> val = selList.getLastElement();
       selList.setSelectionInterval(val, val);
     } else if (code == KeyEvent.VK_PAGE_UP || code == KeyEvent.VK_HOME) {
-      Series val = selList.getFirstElement();
+      Series<?> val = selList.getFirstElement();
       selList.setSelectionInterval(val, val);
     }
   }
@@ -405,9 +389,29 @@ public class ThumbnailMouseAndKeyAdapter extends MouseAdapter implements KeyList
   }
 
   public static SeriesSelectionModel getSeriesSelectionModel() {
-    DataExplorerView explorer = UIManager.getExplorerPlugin(DicomExplorer.NAME);
-    return explorer instanceof DicomExplorer model
-        ? model.getSelectionList()
+    DataExplorerView explorer = GuiUtils.getUICore().getExplorerPlugin(DicomExplorer.NAME);
+    return explorer instanceof DicomExplorer dicomExplorer
+        ? dicomExplorer.getSelectionList()
         : new SeriesSelectionModel(null);
+  }
+
+  public static void openSeriesInDefaultPlugin(
+      DicomModel dicomModel, MediaSeries<? extends MediaElement> series) {
+    final SeriesSelectionModel selList = getSeriesSelectionModel();
+    selList.setOpeningSeries(true);
+    Map<String, Object> props = Collections.synchronizedMap(new HashMap<>());
+    props.put(ViewerPluginBuilder.CMP_ENTRY_BUILD_NEW_VIEWER, true);
+    props.put(ViewerPluginBuilder.BEST_DEF_LAYOUT, false);
+    props.put(ViewerPluginBuilder.OPEN_IN_SELECTION, true);
+
+    String mime = series.getMimeType();
+    SeriesViewerFactory plugin = GuiUtils.getUICore().getViewerFactory(mime);
+    if (plugin != null) {
+      List<MediaSeries<? extends MediaElement>> list = new ArrayList<>(1);
+      list.add(series);
+      ViewerPluginBuilder builder = new ViewerPluginBuilder(plugin, list, dicomModel, props);
+      ViewerPluginBuilder.openSequenceInPlugin(builder);
+    }
+    selList.setOpeningSeries(false);
   }
 }

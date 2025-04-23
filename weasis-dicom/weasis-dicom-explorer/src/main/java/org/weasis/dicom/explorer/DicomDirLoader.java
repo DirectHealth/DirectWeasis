@@ -24,6 +24,7 @@ import org.dcm4che3.img.DicomImageReader;
 import org.dcm4che3.img.Transcoder;
 import org.dcm4che3.img.stream.BytesWithImageDescriptor;
 import org.dcm4che3.img.stream.ImageDescriptor;
+import org.dcm4che3.img.util.DicomUtils;
 import org.dcm4che3.media.DicomDirReader;
 import org.dcm4che3.media.DicomDirWriter;
 import org.dcm4che3.media.RecordFactory;
@@ -33,12 +34,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.explorer.model.DataExplorerModel;
 import org.weasis.core.api.gui.util.GuiExecutor;
+import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.media.data.MediaSeriesGroup;
 import org.weasis.core.api.media.data.MediaSeriesGroupNode;
-import org.weasis.core.api.media.data.Series;
 import org.weasis.core.api.media.data.TagW;
 import org.weasis.core.api.media.data.Thumbnail;
-import org.weasis.core.ui.docking.UIManager;
 import org.weasis.core.ui.editor.image.ViewerPlugin;
 import org.weasis.dicom.codec.DicomSeries;
 import org.weasis.dicom.codec.TagD;
@@ -95,18 +95,18 @@ public class DicomDirLoader {
     if (patient != null) {
       // In case of the patient already exists, select it
       final MediaSeriesGroup uniquePatient = patient;
-      GuiExecutor.instance()
-          .execute(
-              () -> {
-                synchronized (UIManager.VIEWER_PLUGINS) {
-                  for (final ViewerPlugin p : UIManager.VIEWER_PLUGINS) {
-                    if (uniquePatient.equals(p.getGroupID())) {
-                      p.setSelectedAndGetFocus();
-                      break;
-                    }
-                  }
+      GuiExecutor.execute(
+          () -> {
+            List<ViewerPlugin<?>> viewerPlugins = GuiUtils.getUICore().getViewerPlugins();
+            synchronized (viewerPlugins) {
+              for (final ViewerPlugin p : viewerPlugins) {
+                if (uniquePatient.equals(p.getGroupID())) {
+                  p.setSelectedAndGetFocus();
+                  break;
                 }
-              });
+              }
+            }
+          });
     }
     for (LoadSeries loadSeries : seriesList) {
       String modality = TagD.getTagValue(loadSeries.getDicomSeries(), Tag.Modality, String.class);
@@ -167,7 +167,7 @@ public class DicomDirLoader {
     while (series != null) {
       if (RecordType.SERIES.name().equals(series.getString(Tag.DirectoryRecordType))) {
         String seriesUID = series.getString(Tag.SeriesInstanceUID, TagW.NO_VALUE);
-        Series dicomSeries = (Series) dicomModel.getHierarchyNode(study, seriesUID);
+        DicomSeries dicomSeries = (DicomSeries) dicomModel.getHierarchyNode(study, seriesUID);
         if (dicomSeries == null) {
           dicomSeries = new DicomSeries(seriesUID);
           dicomSeries.setTag(TagW.ExplorerModel, dicomModel);
@@ -200,7 +200,7 @@ public class DicomDirLoader {
           String sopInstanceUID = instance.getString(Tag.ReferencedSOPInstanceUIDInFile);
           if (sopInstanceUID != null) {
             Integer frame =
-                DicomMediaUtils.getIntegerFromDicomElement(instance, Tag.InstanceNumber, null);
+                DicomUtils.getIntegerFromDicomElement(instance, Tag.InstanceNumber, null);
             SopInstance sop = seriesInstanceList.getSopInstance(sopInstanceUID, frame);
             if (sop == null) {
               File file = toFileName(instance, reader);

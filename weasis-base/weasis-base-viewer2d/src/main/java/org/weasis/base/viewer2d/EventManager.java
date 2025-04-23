@@ -11,6 +11,7 @@ package org.weasis.base.viewer2d;
 
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,14 +23,13 @@ import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JSeparator;
 import javax.swing.KeyStroke;
-import javax.swing.SwingUtilities;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.FrameworkUtil;
 import org.osgi.service.prefs.Preferences;
 import org.weasis.core.api.gui.Insertable.Type;
 import org.weasis.core.api.gui.InsertableUtil;
 import org.weasis.core.api.gui.util.ActionState;
 import org.weasis.core.api.gui.util.ActionW;
+import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.BasicActionState;
 import org.weasis.core.api.gui.util.ComboItemListener;
 import org.weasis.core.api.gui.util.Feature;
@@ -45,7 +45,6 @@ import org.weasis.core.api.image.ImageOpNode;
 import org.weasis.core.api.image.OpManager;
 import org.weasis.core.api.image.PseudoColorOp;
 import org.weasis.core.api.image.WindowOp;
-import org.weasis.core.api.image.op.ByteLut;
 import org.weasis.core.api.image.op.ByteLutCollection;
 import org.weasis.core.api.image.util.KernelData;
 import org.weasis.core.api.image.util.Unit;
@@ -54,7 +53,6 @@ import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.media.data.TagW;
 import org.weasis.core.api.service.AuditLog;
 import org.weasis.core.api.service.BundlePreferences;
-import org.weasis.core.api.service.BundleTools;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.ActionIcon;
 import org.weasis.core.ui.editor.SeriesViewerEvent;
@@ -68,15 +66,15 @@ import org.weasis.core.ui.editor.image.SynchView;
 import org.weasis.core.ui.editor.image.ViewCanvas;
 import org.weasis.core.ui.editor.image.ZoomToolBar;
 import org.weasis.core.ui.model.graphic.Graphic;
-import org.weasis.core.ui.util.ColorLayerUI;
-import org.weasis.core.ui.util.PrintDialog;
 import org.weasis.core.util.LangUtil;
+import org.weasis.opencv.op.lut.ByteLut;
+import org.weasis.opencv.op.lut.ColorLut;
 import org.weasis.opencv.op.lut.DefaultWlPresentation;
 
 /**
  * The event processing center for this application. This class responses for loading data sets,
  * processing the events from the utility menu that includes changing the operation scope, the
- * layout, window/level, rotation angle, zoom factor, starting/stoping the cining-loop etc.
+ * layout, window/level, rotation angle, zoom factor, starting/stopping the cining-loop etc.
  */
 public class EventManager extends ImageViewerEventManager<ImageElement> implements ActionListener {
 
@@ -92,7 +90,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
     setAction(new BasicActionState(ActionW.DRAW));
     setAction(new BasicActionState(ActionW.MEASURE));
 
-    setAction(getMoveTroughSliceAction(10, TIME.MINUTE, 0.1));
+    setAction(getMoveTroughSliceAction(10.0, TIME.MINUTE, 0.1));
     setAction(newWindowAction());
     setAction(newLevelAction());
     setAction(newRotateAction());
@@ -112,13 +110,13 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
     setAction(newSynchAction(View2dContainer.DEFAULT_SYNCH_LIST.toArray(new SynchView[0])));
     getAction(ActionW.SYNCH)
         .ifPresent(a -> a.setSelectedItemWithoutTriggerAction(SynchView.DEFAULT_STACK));
-    setAction(newMeasurementAction(MeasureToolBar.measureGraphicList.toArray(new Graphic[0])));
-    setAction(newDrawAction(MeasureToolBar.drawGraphicList.toArray(new Graphic[0])));
+    setAction(newMeasurementAction(MeasureToolBar.getMeasureGraphicList().toArray(new Graphic[0])));
+    setAction(newDrawAction(MeasureToolBar.getDrawGraphicList().toArray(new Graphic[0])));
     setAction(newSpatialUnit(Unit.values()));
     setAction(newPanAction());
     setAction(new BasicActionState(ActionW.RESET));
 
-    final BundleContext context = FrameworkUtil.getBundle(this.getClass()).getBundleContext();
+    final BundleContext context = AppProperties.getBundleContext(this.getClass());
     Preferences prefs = BundlePreferences.getDefaultPreferences(context);
     zoomSetting.applyPreferences(prefs);
     mouseActions.applyPreferences(prefs);
@@ -169,11 +167,11 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
 
   private ComboItemListener<ByteLut> newLutAction() {
     List<ByteLut> luts = new ArrayList<>();
-    luts.add(ByteLutCollection.Lut.GRAY.getByteLut());
+    luts.add(ColorLut.GRAY.getByteLut());
     ByteLutCollection.readLutFilesFromResourcesDir(
         luts, ResourceUtil.getResource("luts")); // NON-NLS
     // Set default first as the list has been sorted
-    luts.add(0, ByteLutCollection.Lut.IMAGE.getByteLut());
+    luts.add(0, ColorLut.IMAGE.getByteLut());
 
     return new ComboItemListener<>(ActionW.LUT, luts.toArray(new ByteLut[0])) {
       @Override
@@ -212,38 +210,9 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
 
   @Override
   public void keyPressed(KeyEvent e) {
-
-    int keyEvent = e.getKeyCode();
-    int modifiers = e.getModifiers();
-
-    if (keyEvent == KeyEvent.VK_ESCAPE) {
-      resetDisplay();
-    } else if (keyEvent == ActionW.CINESTART.getKeyCode()
-        && ActionW.CINESTART.getModifier() == modifiers) {
-      getAction(ActionW.SCROLL_SERIES)
-          .ifPresent(
-              s -> {
-                if (s.isActionEnabled()) {
-                  if (s.isCining()) {
-                    s.stop();
-                  } else {
-                    s.start();
-                  }
-                }
-              });
-
-    } else if (keyEvent == KeyEvent.VK_P && modifiers == 0) {
-      ImageViewerPlugin<ImageElement> view = getSelectedView2dContainer();
-      if (view != null) {
-        ColorLayerUI layer = ColorLayerUI.createTransparentLayerUI(view);
-        PrintDialog<?> dialog =
-            new PrintDialog<>(
-                SwingUtilities.getWindowAncestor(view),
-                Messages.getString("View2dContainer.print_layout"),
-                this);
-        ColorLayerUI.showCenterScreen(dialog, layer);
-      }
-    } else {
+    if (!commonDisplayShortcuts(e)) {
+      int keyEvent = e.getKeyCode();
+      int modifiers = e.getModifiers();
       triggerDrawingToolKeyEvent(keyEvent, modifiers);
     }
   }
@@ -329,8 +298,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
           new SynchEvent(getSelectedViewPane(), ActionW.RESET.cmd(), true));
     } else if (ResetTools.ZOOM.equals(action)) {
       // Pass the value 0.0 (convention: default value according the zoom type) directly to the
-      // property change,
-      // otherwise the value is adjusted by the BoundedRangeModel
+      // property change, otherwise the value is adjusted by the BoundedRangeModel
       firePropertyChange(
           ActionW.SYNCH.cmd(),
           null,
@@ -482,7 +450,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
                     (Filter<ImageElement>) view2d.getActionValue(ActionW.FILTERED_SERIES.cmd())),
                 view2d.getFrameIndex() + 1,
                 false));
-    final Integer speed = (Integer) series.getTagValue(TagW.get("CineRate"));
+    Double speed = (Double) series.getTagValue(TagW.get("CineRate"));
     if (speed != null) {
       cineAction.ifPresent(a -> a.setSpeed(speed));
     }
@@ -511,9 +479,10 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
       setSliderPreference(prefNode, ActionW.ROTATION);
       setSliderPreference(prefNode, ActionW.ZOOM);
 
-      Preferences containerNode = prefs.node(View2dContainer.class.getSimpleName().toLowerCase());
-      InsertableUtil.savePreferences(View2dContainer.TOOLBARS, containerNode, Type.TOOLBAR);
-      InsertableUtil.savePreferences(View2dContainer.TOOLS, containerNode, Type.TOOL);
+      Preferences containerNode =
+          prefs.node(View2dContainer.UI.clazz.getSimpleName().toLowerCase());
+      InsertableUtil.savePreferences(View2dContainer.UI.toolBars, containerNode, Type.TOOLBAR);
+      InsertableUtil.savePreferences(View2dContainer.UI.tools, containerNode, Type.TOOL);
     }
   }
 
@@ -542,7 +511,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
 
   public JMenu getResetMenu(String prop) {
     JMenu menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       ButtonGroup group = new ButtonGroup();
       menu = new JMenu(Messages.getString("ResetTools.reset"));
       menu.setIcon(ResourceUtil.getIcon(ActionIcon.RESET));
@@ -565,7 +534,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
 
   public JMenu getZoomMenu(String prop) {
     JMenu menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<SliderChangeListener> zoomAction = getAction(ActionW.ZOOM);
       if (zoomAction.isPresent()) {
         menu = new JMenu(ActionW.ZOOM.getTitle());
@@ -585,7 +554,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
 
   public JMenu getOrientationMenu(String prop) {
     JMenu menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<SliderChangeListener> rotateAction = getAction(ActionW.ROTATION);
       if (rotateAction.isPresent()) {
         menu = new JMenu(Messages.getString("View2dContainer.orientation"));
@@ -599,7 +568,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
           menu.add(menuItem);
           menuItem = new JMenuItem(Messages.getString("View2dContainer.-90"));
           menuItem.setIcon(ResourceUtil.getIcon(ActionIcon.ROTATE_COUNTERCLOCKWISE));
-          menuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_L, KeyEvent.ALT_DOWN_MASK));
+          menuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_L, InputEvent.ALT_DOWN_MASK));
           menuItem.addActionListener(
               e ->
                   rotateAction
@@ -608,7 +577,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
           menu.add(menuItem);
           menuItem.setIcon(ResourceUtil.getIcon(ActionIcon.ROTATE_CLOCKWISE));
           menuItem = new JMenuItem(Messages.getString("View2dContainer.+90"));
-          menuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_R, KeyEvent.ALT_DOWN_MASK));
+          menuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_R, InputEvent.ALT_DOWN_MASK));
           menuItem.addActionListener(
               e ->
                   rotateAction
@@ -632,7 +601,8 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
                     .createUnregisteredJCCheckBoxMenuItem(
                         Messages.getString("View2dContainer.flip_h"),
                         ResourceUtil.getIcon(ActionIcon.FLIP));
-            menuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F, KeyEvent.ALT_DOWN_MASK));
+            menuItem.setAccelerator(
+                KeyStroke.getKeyStroke(KeyEvent.VK_F, InputEvent.ALT_DOWN_MASK));
             menu.add(menuItem);
           }
         }
@@ -643,7 +613,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
 
   // public JMenu getSortStackMenu(String prop) {
   // JMenu menu = null;
-  // if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+  // if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
   // menu =
   // sortStackAction.createUnregisteredRadioMenu(Messages.getString("View2dContainer.sort_stack"));
   //
@@ -656,7 +626,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
   // }
 
   public JMenu getLutMenu(String prop) {
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<ComboItemListener<ByteLut>> lutAction = getAction(ActionW.LUT);
       if (lutAction.isPresent()) {
         return lutAction
@@ -670,7 +640,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
 
   public JCheckBoxMenuItem getLutInverseMenu(String prop) {
     JCheckBoxMenuItem menu = null;
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<ToggleButtonListener> inverseLutAction = getAction(ActionW.INVERT_LUT);
       if (inverseLutAction.isPresent()) {
         menu =
@@ -684,7 +654,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
   }
 
   public JMenu getFilterMenu(String prop) {
-    if (BundleTools.SYSTEM_PREFERENCES.getBooleanProperty(prop, true)) {
+    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
       Optional<ComboItemListener<KernelData>> filterAction = getAction(ActionW.FILTER);
       if (filterAction.isPresent()) {
         return filterAction

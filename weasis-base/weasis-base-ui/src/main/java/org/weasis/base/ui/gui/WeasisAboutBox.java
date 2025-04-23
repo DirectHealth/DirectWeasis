@@ -27,7 +27,7 @@ import javax.swing.WindowConstants;
 import org.weasis.base.ui.Messages;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiUtils;
-import org.weasis.core.api.service.BundleTools;
+import org.weasis.core.api.service.WProperties;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.ui.util.SimpleTableModel;
 
@@ -58,7 +58,6 @@ public class WeasisAboutBox extends JDialog {
 
   private void init() {
     setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
-    setModal(true);
     JPanel panelRoot = new JPanel();
     panelRoot.setLayout(new BorderLayout());
 
@@ -77,6 +76,7 @@ public class WeasisAboutBox extends JDialog {
     jTextPane1.setEditable(false);
 
     jTextPane1.addHyperlinkListener(GuiUtils.buildHyperlinkListener());
+    WProperties preferences = GuiUtils.getUICore().getSystemPreferences();
     String html =
         """
         <div align="center">
@@ -91,9 +91,9 @@ public class WeasisAboutBox extends JDialog {
             .formatted(
                 AppProperties.WEASIS_NAME,
                 AppProperties.WEASIS_VERSION,
-                BundleTools.SYSTEM_PREFERENCES.getProperty("weasis.releasenotes", ""),
+                preferences.getProperty("weasis.releasenotes", ""),
                 Messages.getString("WeasisWin.release"),
-                BundleTools.SYSTEM_PREFERENCES.getProperty("weasis.copyrights", ""),
+                preferences.getProperty("weasis.copyrights", ""),
                 AppProperties.WEASIS_NAME,
                 "",
                 Messages.getString("WeasisWin.otherSoft"),

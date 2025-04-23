@@ -22,12 +22,12 @@ import org.weasis.core.api.gui.util.Feature.SliderChangeListenerValue;
 import org.weasis.core.api.gui.util.Feature.SliderCineListenerValue;
 import org.weasis.core.api.gui.util.Feature.ToggleButtonListenerValue;
 import org.weasis.core.api.image.GridBagLayoutModel;
-import org.weasis.core.api.image.op.ByteLut;
 import org.weasis.core.api.image.util.KernelData;
 import org.weasis.core.api.image.util.Unit;
 import org.weasis.core.api.media.data.SeriesComparator;
 import org.weasis.core.ui.editor.image.SynchView;
 import org.weasis.core.ui.model.graphic.Graphic;
+import org.weasis.opencv.op.lut.ByteLut;
 
 public class ActionW {
   public static final String DRAW_CMD_PREFIX = "draw.sub."; // NON-NLS
@@ -71,6 +71,8 @@ public class ActionW {
   public static final BasicActionStateValue CINESTOP =
       new BasicActionStateValue(
           Messages.getString("ActionW.stop"), "cinestop", 0, 0, null); // NON-NLS
+  public static final ToggleButtonListenerValue CINE_SWEEP =
+      new ToggleButtonListenerValue("Loop Sweep", "cinesweep", 0, 0, null); // NON-NLS
   public static final Feature<SliderChangeListener> WINDOW =
       new SliderChangeListenerValue(
           Messages.getString("ActionW.win"), "window", 0, 0, null); // NON-NLS

@@ -9,22 +9,19 @@
  */
 package org.weasis.core.ui.pref;
 
-import java.io.File;
+import ch.qos.logback.classic.LoggerContext;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
+import javax.swing.JPanel;
 import javax.swing.JSpinner;
-import org.osgi.framework.BundleContext;
-import org.osgi.framework.FrameworkUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.Messages;
 import org.weasis.core.api.gui.util.AbstractItemDialogPage;
-import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.service.AuditLog;
 import org.weasis.core.api.service.AuditLog.LEVEL;
-import org.weasis.core.api.service.BundleTools;
 import org.weasis.core.api.service.WProperties;
 import org.weasis.core.util.StringUtil;
 
@@ -54,7 +51,7 @@ public class LoggingPrefView extends AbstractItemDialogPage {
 
     try {
       GuiUtils.setNumberModel(
-          spinner, getIntPreferences(AuditLog.LOG_FILE_NUMBER, 5, null), 1, 99, 1);
+          spinner, getIntPreferences(AuditLog.LOG_FILE_NUMBER, 20, null), 1, 99, 1);
       GuiUtils.setNumberModel(
           spinner1, getIntPreferences(AuditLog.LOG_FILE_SIZE, 10, "MB"), 1, 99, 1);
 
@@ -66,19 +63,20 @@ public class LoggingPrefView extends AbstractItemDialogPage {
   }
 
   private void jbInit() {
-    add(GuiUtils.getFlowLayoutPanel(0, ITEM_SEPARATOR_LARGE, checkboxFileLog));
-    add(
+    JPanel panel = GuiUtils.getVerticalBoxLayoutPanel();
+    panel.add(GuiUtils.getFlowLayoutPanel(ITEM_SEPARATOR_SMALL, ITEM_SEPARATOR, checkboxFileLog));
+    panel.add(
         GuiUtils.getFlowLayoutPanel(
-            ITEM_SEPARATOR_SMALL,
-            10,
             labelNumber,
             spinner,
             GuiUtils.boxHorizontalStrut(BLOCK_SEPARATOR),
             labelSize,
             spinner1));
+    panel.setBorder(GuiUtils.getTitledBorder(Messages.getString("file")));
+    add(panel);
     add(
         GuiUtils.getFlowLayoutPanel(
-            0,
+            ITEM_SEPARATOR_SMALL,
             10,
             lblLogLevel,
             comboBoxLogLevel,
@@ -86,7 +84,7 @@ public class LoggingPrefView extends AbstractItemDialogPage {
             lblStacktraceLimit,
             comboBoxStackLimit));
 
-    add(GuiUtils.boxYLastElement(5));
+    add(GuiUtils.boxYLastElement(LAST_FILLER_HEIGHT));
 
     checkboxFileLog.addActionListener(e -> checkRollingLog());
 
@@ -102,7 +100,7 @@ public class LoggingPrefView extends AbstractItemDialogPage {
 
   private static int getIntPreferences(String key, int defaultValue, String removedSuffix) {
     if (key != null) {
-      String s = BundleTools.SYSTEM_PREFERENCES.getProperty(key);
+      String s = GuiUtils.getUICore().getSystemPreferences().getProperty(key);
       if (s != null) {
         if (removedSuffix != null) {
           int index = s.lastIndexOf(removedSuffix);
@@ -121,7 +119,7 @@ public class LoggingPrefView extends AbstractItemDialogPage {
   }
 
   protected void initialize() {
-    WProperties prefs = BundleTools.SYSTEM_PREFERENCES;
+    WProperties prefs = GuiUtils.getUICore().getSystemPreferences();
 
     comboBoxLogLevel.setSelectedItem(LEVEL.getLevel(prefs.getProperty(AuditLog.LOG_LEVEL, "INFO")));
     int limit = getIntPreferences(AuditLog.LOG_STACKTRACE_LIMIT, 3, null);
@@ -138,61 +136,48 @@ public class LoggingPrefView extends AbstractItemDialogPage {
     comboBoxStackLimit.setSelectedItem(limit >= 0 ? Integer.toString(limit) : "");
 
     checkboxFileLog.setSelected(prefs.getBooleanProperty(AuditLog.LOG_FILE_ACTIVATION, false));
-    spinner.setValue(getIntPreferences(AuditLog.LOG_FILE_NUMBER, 5, null));
+    spinner.setValue(getIntPreferences(AuditLog.LOG_FILE_NUMBER, 20, null));
     spinner1.setValue(getIntPreferences(AuditLog.LOG_FILE_SIZE, 10, "MB"));
     checkRollingLog();
   }
 
   @Override
   public void closeAdditionalWindow() {
+    WProperties preferences = GuiUtils.getUICore().getSystemPreferences();
     String limit = (String) comboBoxStackLimit.getSelectedItem();
-    BundleTools.SYSTEM_PREFERENCES.setProperty(
+    preferences.setProperty(
         AuditLog.LOG_STACKTRACE_LIMIT, StringUtil.hasText(limit) ? limit : "-1");
 
     LEVEL level = (LEVEL) comboBoxLogLevel.getSelectedItem();
     if (level == null) {
       level = LEVEL.INFO;
     }
-    BundleTools.SYSTEM_PREFERENCES.setProperty(AuditLog.LOG_LEVEL, level.toString());
-    BundleTools.SYSTEM_PREFERENCES.putBooleanProperty(
-        AuditLog.LOG_FILE_ACTIVATION, checkboxFileLog.isSelected());
-    String logFile =
-        checkboxFileLog.isSelected()
-            ? AppProperties.WEASIS_PATH + File.separator + "log" + File.separator + "default.log"
-            : ""; // NON-NLS
-    BundleTools.SYSTEM_PREFERENCES.setProperty(AuditLog.LOG_FILE, logFile);
-    String fileNb = null;
-    String fileSize = null;
+    preferences.setProperty(AuditLog.LOG_LEVEL, level.toString());
+    preferences.putBooleanProperty(AuditLog.LOG_FILE_ACTIVATION, checkboxFileLog.isSelected());
+    String logFile = checkboxFileLog.isSelected() ? AuditLog.LOG_FOLDER_PATH + "default.log" : "";
+    preferences.setProperty(AuditLog.LOG_FILE, logFile);
+
     if (checkboxFileLog.isSelected()) {
-      fileNb = spinner.getValue().toString();
-      fileSize = spinner1.getValue().toString() + "MB";
-      BundleTools.SYSTEM_PREFERENCES.setProperty(AuditLog.LOG_FILE_NUMBER, fileNb);
-      BundleTools.SYSTEM_PREFERENCES.setProperty(AuditLog.LOG_FILE_SIZE, fileSize);
+      String fileNb = spinner.getValue().toString();
+      String fileSize = spinner1.getValue().toString() + "MB";
+      preferences.setProperty(AuditLog.LOG_FILE_NUMBER, fileNb);
+      preferences.setProperty(AuditLog.LOG_FILE_SIZE, fileSize);
     }
-    String pattern =
-        BundleTools.SYSTEM_PREFERENCES.getProperty(
-            AuditLog.LOG_PATTERN, "{0,date,dd.MM.yyyy HH:mm:ss.SSS} *{4}* [{2}] {3}: {5}");
-    BundleContext context = FrameworkUtil.getBundle(this.getClass()).getBundleContext();
-    AuditLog.createOrUpdateLogger(
-        context,
-        "default.log",
-        new String[] {"org"}, // NON-NLS
-        level.toString(),
-        logFile,
-        pattern,
-        fileNb,
-        fileSize,
-        limit);
+
+    LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+
+    AuditLog.applyConfig(preferences, loggerContext);
   }
 
   @Override
   public void resetToDefaultValues() {
     // Reset properties used by OSGI service (Sling Logger)
-    BundleTools.SYSTEM_PREFERENCES.resetServiceProperty(AuditLog.LOG_STACKTRACE_LIMIT, "3");
-    BundleTools.SYSTEM_PREFERENCES.resetServiceProperty(AuditLog.LOG_LEVEL, "INFO");
-    BundleTools.SYSTEM_PREFERENCES.resetServiceProperty(AuditLog.LOG_FILE, "");
-    BundleTools.SYSTEM_PREFERENCES.resetServiceProperty(AuditLog.LOG_FILE_NUMBER, "5");
-    BundleTools.SYSTEM_PREFERENCES.resetServiceProperty(AuditLog.LOG_FILE_SIZE, "10MB"); // NON-NLS
+    WProperties preferences = GuiUtils.getUICore().getSystemPreferences();
+    preferences.resetServiceProperty(AuditLog.LOG_STACKTRACE_LIMIT, "3");
+    preferences.resetServiceProperty(AuditLog.LOG_LEVEL, "INFO");
+    preferences.resetServiceProperty(AuditLog.LOG_FILE, "");
+    preferences.resetServiceProperty(AuditLog.LOG_FILE_NUMBER, "20");
+    preferences.resetServiceProperty(AuditLog.LOG_FILE_SIZE, "10MB"); // NON-NLS
 
     initialize();
   }

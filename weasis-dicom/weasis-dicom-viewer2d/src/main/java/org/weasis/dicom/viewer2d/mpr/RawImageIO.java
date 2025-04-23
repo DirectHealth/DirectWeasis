@@ -32,11 +32,12 @@ import org.weasis.core.api.explorer.model.DataExplorerModel;
 import org.weasis.core.api.media.data.Codec;
 import org.weasis.core.api.media.data.FileCache;
 import org.weasis.core.api.media.data.MediaElement;
-import org.weasis.core.api.media.data.MediaSeries;
-import org.weasis.core.api.media.data.SoftHashMap;
 import org.weasis.core.api.media.data.TagW;
+import org.weasis.core.util.SoftHashMap;
 import org.weasis.dicom.codec.DcmMediaReader;
+import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.codec.DicomMediaIO;
+import org.weasis.dicom.codec.DicomSeries;
 import org.weasis.dicom.codec.utils.DicomMediaUtils;
 import org.weasis.opencv.data.FileRawImage;
 import org.weasis.opencv.data.PlanarImage;
@@ -79,7 +80,7 @@ public class RawImageIO implements DcmMediaReader {
   public File getDicomFile() {
     Attributes dcm = getDicomObject();
 
-    File file = imageCV.getFile();
+    File file = imageCV.file();
     BulkData bdl =
         new BulkData(
             file.toURI().toString(),
@@ -107,7 +108,7 @@ public class RawImageIO implements DcmMediaReader {
 
   @Override
   public URI getUri() {
-    return imageCV.getFile().toURI();
+    return imageCV.file().toURI();
   }
 
   @Override
@@ -121,12 +122,12 @@ public class RawImageIO implements DcmMediaReader {
   }
 
   @Override
-  public MediaElement[] getMediaElement() {
+  public DicomImageElement[] getMediaElement() {
     return null;
   }
 
   @Override
-  public MediaSeries<MediaElement> getMediaSeries() {
+  public DicomSeries getMediaSeries() {
     return null;
   }
 
@@ -187,17 +188,6 @@ public class RawImageIO implements DcmMediaReader {
     return tags.entrySet().iterator();
   }
 
-  public void copyTags(TagW[] tagList, MediaElement media, boolean allowNullValue) {
-    if (tagList != null && media != null) {
-      for (TagW tag : tagList) {
-        Object value = media.getTagValue(tag);
-        if (allowNullValue || value != null) {
-          tags.put(tag, value);
-        }
-      }
-    }
-  }
-
   @Override
   public void replaceURI(URI uri) {
     throw new UnsupportedOperationException();
@@ -239,7 +229,7 @@ public class RawImageIO implements DcmMediaReader {
     dcm.setSpecificCharacterSet(cs.toCodes());
     DicomMediaUtils.fillAttributes(tags, dcm);
     dcm.addAll(attributes);
-    File file = imageCV.getFile();
+    File file = imageCV.file();
     BulkData bdl =
         new BulkData(
             file.toURI().toString(),

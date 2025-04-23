@@ -47,21 +47,14 @@ public final class JIThumbnailCache {
           queue,
           ThreadUtil.getThreadFactory("Thumbnail Cache")); // NON-NLS
 
-  private final Map<URI, ThumbnailIcon> cachedThumbnails;
-
-  public JIThumbnailCache() {
-    this.cachedThumbnails =
-        Collections.synchronizedMap(
-            new LinkedHashMap<>(80) {
-
-              private static final int MAX_ENTRIES = 100;
-
-              @Override
-              protected boolean removeEldestEntry(final Map.Entry eldest) {
-                return size() > MAX_ENTRIES;
-              }
-            });
-  }
+  private final Map<URI, ThumbnailIcon> cachedThumbnails =
+      Collections.synchronizedMap(
+          new LinkedHashMap<>(80) {
+            @Override
+            protected boolean removeEldestEntry(final Map.Entry eldest) {
+              return size() > 100;
+            }
+          });
 
   public synchronized void invalidate() {
     this.cachedThumbnails.clear();
@@ -155,7 +148,7 @@ public final class JIThumbnailCache {
     public void run() {
       PlanarImage img = null;
 
-      // Get the final that contain the thumbnail when the uncompress mode is activated
+      // Get the final that contain the thumbnail when the uncompressed mode is activated
       File file = diskObject.getFile();
       if (file != null && file.getName().endsWith(".wcv")) {
         File thumbFile = new File(ImageCVIO.changeExtension(file.getPath(), ".jpg"));
@@ -176,14 +169,13 @@ public final class JIThumbnailCache {
           ImageConversion.toBufferedImage(
               (PlanarImage) ImageProcessor.buildThumbnail(img, ThumbnailRenderer.ICON_DIM, true));
 
-      GuiExecutor.instance()
-          .execute(
-              () -> {
-                if (tIcon != null) {
-                  cachedThumbnails.put(diskObject.getMediaURI(), new ThumbnailIcon(tIcon));
-                }
-                thumbnailList.getThumbnailListModel().notifyAsUpdated(index);
-              });
+      GuiExecutor.execute(
+          () -> {
+            if (tIcon != null) {
+              cachedThumbnails.put(diskObject.getMediaURI(), new ThumbnailIcon(tIcon));
+            }
+            thumbnailList.getThumbnailListModel().notifyAsUpdated(index);
+          });
     }
   }
 }
