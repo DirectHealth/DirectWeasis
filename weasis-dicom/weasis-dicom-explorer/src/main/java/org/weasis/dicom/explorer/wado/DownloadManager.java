@@ -38,7 +38,6 @@ import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import javax.xml.transform.Source;
 import javax.xml.transform.stax.StAXSource;
-import javax.xml.transform.stream.StreamSource;
 import javax.xml.validation.Schema;
 import javax.xml.validation.SchemaFactory;
 import javax.xml.validation.Validator;
@@ -122,7 +121,7 @@ public class DownloadManager {
           0L,
           TimeUnit.MILLISECONDS,
           PRIORITY_QUEUE,
-          ThreadUtil.getThreadFactory("Series Downloader")); // NON-NLS
+          ThreadUtil.namedThreadFactory("SeriesDownloader"));
 
   public static class PriorityTaskComparator implements Comparator<Runnable> {
 
@@ -189,7 +188,8 @@ public class DownloadManager {
   public static synchronized void addLoadSeries(
       final LoadSeries series, DicomModel dicomModel, boolean startLoading) {
     if (series != null) {
-      if (startLoading) {
+      boolean isHiddenSeries = DicomModel.isHiddenModality(series.getDicomSeries());
+      if (startLoading || isHiddenSeries) {
         offerSeriesInQueue(series);
       } else {
         GuiExecutor.execute(
@@ -203,7 +203,7 @@ public class DownloadManager {
             new ObservableEvent(
                 ObservableEvent.BasicAction.LOADING_START, dicomModel, null, series));
       }
-      if (!DownloadManager.TASKS.contains(series)) {
+      if (!isHiddenSeries && !DownloadManager.TASKS.contains(series)) {
         DownloadManager.TASKS.add(series);
       }
     }
@@ -231,6 +231,13 @@ public class DownloadManager {
                 .getSystemPreferences()
                 .getIntProperty(DownloadManager.CONCURRENT_SERIES, 3));
       }
+    }
+  }
+
+  public static boolean hasRunningTasks() {
+    synchronized (DownloadManager.getTasks()) {
+      return DownloadManager.getTasks().stream()
+          .anyMatch(loadSeries -> StateValue.STARTED.equals(loadSeries.getState()));
     }
   }
 
@@ -329,20 +336,14 @@ public class DownloadManager {
       SchemaFactory schemaFactory = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
       try {
         Schema schema =
-            schemaFactory.newSchema(
-                new Source[] {
-                  new StreamSource(
-                      DownloadManager.class.getResource("/config/wado_query.xsd").toExternalForm()),
-                  new StreamSource(
-                      DownloadManager.class.getResource("/config/manifest.xsd").toExternalForm())
-                });
+            schemaFactory.newSchema(DownloadManager.class.getResource("/config/manifest.xsd"));
         Validator validator = schema.newValidator();
         validator.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, StringUtil.EMPTY_STRING);
         validator.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, StringUtil.EMPTY_STRING);
         validator.validate(xmlFile);
-        LOGGER.info("[Validate with XSD schema] wado_query is valid");
+        LOGGER.info("[Validate with XSD schema] the manifest is valid");
       } catch (SAXException e) {
-        LOGGER.error("[Validate with XSD schema] wado_query is NOT valid", e);
+        LOGGER.error("[Validate with XSD schema] the manifest is NOT valid", e);
       } catch (Exception e) {
         LOGGER.error("Error when validate XSD schema.", e);
       }
@@ -449,9 +450,13 @@ public class DownloadManager {
     String additionalParameters =
         TagUtil.getTagAttribute(xmler, ArcParameters.ADDITIONNAL_PARAMETERS, "");
     String overrideList = TagUtil.getTagAttribute(xmler, ArcParameters.OVERRIDE_TAGS, null);
+    String queryMode = TagUtil.getTagAttribute(xmler, "queryMode", null);
+    // TODO replace with enum in library
+    boolean wadoRs = "DICOM_WEB".equals(queryMode); // NON-NLS
     String webLogin = TagUtil.getTagAttribute(xmler, ArcParameters.WEB_LOGIN, null);
     final WadoParameters wadoParameters =
-        new WadoParameters(wadoURL, onlySopUID, additionalParameters, overrideList, webLogin);
+        new WadoParameters(
+            "", wadoURL, onlySopUID, additionalParameters, overrideList, webLogin, wadoRs);
     params.wadoUri = getWadoUrl(wadoURL);
     readQuery(xmler, params, wadoParameters, WadoParameters.TAG_WADO_QUERY);
   }
@@ -520,9 +525,7 @@ public class DownloadManager {
           });
     }
     for (LoadSeries loadSeries : params.getSeriesMap().values()) {
-      String modality = TagD.getTagValue(loadSeries.getDicomSeries(), Tag.Modality, String.class);
-      boolean ps = "PR".equals(modality) || "KO".equals(modality); // NON-NLS
-      if (!ps) {
+      if (!DicomModel.isHiddenModality(loadSeries.getDicomSeries())) {
         loadSeries.startDownloadImageReference(wadoParameters);
       }
     }
@@ -626,7 +629,12 @@ public class DownloadManager {
 
       TagW[] tags =
           TagD.getTagFromIDs(
-              Tag.Modality, Tag.SeriesNumber, Tag.SeriesDescription, Tag.ReferringPhysicianName);
+              Tag.Modality,
+              Tag.SeriesNumber,
+              Tag.SeriesDate,
+              Tag.SeriesTime,
+              Tag.SeriesDescription,
+              Tag.ReferringPhysicianName);
       for (TagW tag : tags) {
         tag.readValue(xmler, dicomSeries);
       }
@@ -669,7 +677,10 @@ public class DownloadManager {
                     xmler, TagD.getKeywordFromTag(Tag.InstanceNumber, null), null);
             SopInstance sop = seriesInstanceList.getSopInstance(sopInstanceUID, frame);
             if (sop == null) {
-              sop = new SopInstance(sopInstanceUID, frame);
+              String sopClassUID =
+                  TagUtil.getTagAttribute(
+                      xmler, TagD.getKeywordFromTag(Tag.SOPClassUID, null), null);
+              sop = new SopInstance(sopInstanceUID, sopClassUID, frame);
               sop.setDirectDownloadFile(
                   TagUtil.getTagAttribute(xmler, TagW.DirectDownloadFile.getKeyword(), null));
               seriesInstanceList.addSopInstance(sop);

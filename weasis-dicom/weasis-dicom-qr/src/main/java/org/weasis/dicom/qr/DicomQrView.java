@@ -33,6 +33,7 @@ import java.util.Objects;
 import java.util.Properties;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.swing.ComboBoxModel;
@@ -66,7 +67,6 @@ import org.slf4j.LoggerFactory;
 import org.weasis.core.api.auth.AuthMethod;
 import org.weasis.core.api.auth.OAuth2ServiceFactory;
 import org.weasis.core.api.explorer.DataExplorerView;
-import org.weasis.core.api.gui.task.CircularProgressBar;
 import org.weasis.core.api.gui.util.AbstractItemDialogPage;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.CheckBoxModel;
@@ -84,6 +84,7 @@ import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.OtherIcon;
 import org.weasis.core.api.util.ThreadUtil;
 import org.weasis.core.ui.pref.PreferenceDialog;
+import org.weasis.core.ui.tp.raven.spinner.SpinnerProgress;
 import org.weasis.core.ui.util.CalendarUtil;
 import org.weasis.core.util.FileUtil;
 import org.weasis.core.util.StringUtil;
@@ -118,85 +119,98 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
   private DicomWebNode retrieveNode;
 
   public enum Period {
-    ALL(Messages.getString("DicomQrView.all_dates"), null),
+    ALL(Messages.getString("DicomQrView.all_dates"), () -> null),
 
-    TODAY(Messages.getString("DicomQrView.today"), LocalDate.now()),
+    TODAY(Messages.getString("DicomQrView.today"), LocalDate::now),
 
-    YESTERDAY(Messages.getString("DicomQrView.yesterday"), LocalDate.now().minusDays(1)),
+    YESTERDAY(Messages.getString("DicomQrView.yesterday"), () -> LocalDate.now().minusDays(1)),
 
     BEFORE_YESTERDAY(
-        Messages.getString("DicomQrView.day_before_yest"), LocalDate.now().minusDays(2)),
+        Messages.getString("DicomQrView.day_before_yest"), () -> LocalDate.now().minusDays(2)),
 
     CUR_WEEK(
         Messages.getString("DicomQrView.this_week"),
-        LocalDate.now().with(WeekFields.of(Locale.getDefault(Category.FORMAT)).dayOfWeek(), 1),
-        LocalDate.now()),
+        () ->
+            LocalDate.now().with(WeekFields.of(Locale.getDefault(Category.FORMAT)).dayOfWeek(), 1),
+        LocalDate::now),
 
     CUR_MONTH(
         Messages.getString("DicomQrView.this_month"),
-        LocalDate.now().with(TemporalAdjusters.firstDayOfMonth()),
-        LocalDate.now()),
+        () -> LocalDate.now().with(TemporalAdjusters.firstDayOfMonth()),
+        LocalDate::now),
 
     CUR_YEAR(
         Messages.getString("DicomQrView.this_year"),
-        LocalDate.now().with(TemporalAdjusters.firstDayOfYear()),
-        LocalDate.now()),
+        () -> LocalDate.now().with(TemporalAdjusters.firstDayOfYear()),
+        LocalDate::now),
 
     LAST_DAY(
-        Messages.getString("DicomQrView.last_24h"), LocalDate.now().minusDays(1), LocalDate.now()),
+        Messages.getString("DicomQrView.last_24h"),
+        () -> LocalDate.now().minusDays(1),
+        LocalDate::now),
 
     LAST_2_DAYS(
-        Messages.getString("DicomQrView.last_2_d"), LocalDate.now().minusDays(2), LocalDate.now()),
+        Messages.getString("DicomQrView.last_2_d"),
+        () -> LocalDate.now().minusDays(2),
+        LocalDate::now),
 
     LAST_3_DAYS(
-        Messages.getString("DicomQrView.last_3_d"), LocalDate.now().minusDays(3), LocalDate.now()),
+        Messages.getString("DicomQrView.last_3_d"),
+        () -> LocalDate.now().minusDays(3),
+        LocalDate::now),
 
     LAST_WEEK(
-        Messages.getString("DicomQrView.last_w"), LocalDate.now().minusWeeks(1), LocalDate.now()),
+        Messages.getString("DicomQrView.last_w"),
+        () -> LocalDate.now().minusWeeks(1),
+        LocalDate::now),
 
     LAST_2_WEEKS(
-        Messages.getString("DicomQrView.last_2_w"), LocalDate.now().minusWeeks(2), LocalDate.now()),
+        Messages.getString("DicomQrView.last_2_w"),
+        () -> LocalDate.now().minusWeeks(2),
+        LocalDate::now),
 
     LAST_MONTH(
-        Messages.getString("DicomQrView.last_m"), LocalDate.now().minusMonths(1), LocalDate.now()),
+        Messages.getString("DicomQrView.last_m"),
+        () -> LocalDate.now().minusMonths(1),
+        LocalDate::now),
 
     LAST_3_MONTHS(
         Messages.getString("DicomQrView.last_3_m"),
-        LocalDate.now().minusMonths(3),
-        LocalDate.now()),
+        () -> LocalDate.now().minusMonths(3),
+        LocalDate::now),
 
     LAST_6_MONTHS(
         Messages.getString("DicomQrView.last_6_m"),
-        LocalDate.now().minusMonths(6),
-        LocalDate.now()),
+        () -> LocalDate.now().minusMonths(6),
+        LocalDate::now),
 
     LAST_YEAR(
         Messages.getString("DicomQrView.last_year"),
-        LocalDate.now().minusYears(1),
-        LocalDate.now());
+        () -> LocalDate.now().minusYears(1),
+        LocalDate::now);
 
     private final String displayName;
-    private final LocalDate start;
-    private final LocalDate end;
+    private final Supplier<LocalDate> startSupplier;
+    private final Supplier<LocalDate> endSupplier;
 
-    Period(String name, LocalDate date) {
+    Period(String name, Supplier<LocalDate> dateSupplier) {
       this.displayName = name;
-      this.start = date;
-      this.end = date;
+      this.startSupplier = dateSupplier;
+      this.endSupplier = dateSupplier;
     }
 
-    Period(String name, LocalDate start, LocalDate end) {
+    Period(String name, Supplier<LocalDate> startSupplier, Supplier<LocalDate> endSupplier) {
       this.displayName = name;
-      this.start = start;
-      this.end = end;
+      this.startSupplier = startSupplier;
+      this.endSupplier = endSupplier;
     }
 
     public LocalDate getStart() {
-      return start;
+      return startSupplier.get();
     }
 
     public LocalDate getEnd() {
-      return end;
+      return endSupplier.get();
     }
 
     @Override
@@ -295,13 +309,12 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
   private final JComboBox<AbstractDicomNode> comboCallingNode = new JComboBox<>();
   private final JComboBox<CharsetEncoding> comboCharset = new JComboBox<>(CharsetEncoding.values());
   private final DicomListener dicomListener;
-  private final ExecutorService executor =
-      ThreadUtil.buildNewFixedThreadExecutor(3, "Dicom Q/R task"); // NON-NLS
+  private final ExecutorService executor = ThreadUtil.newFixedThreadPool(3, "DicomQueryRetrieve");
   private final JSpinner limitSpinner = new JSpinner();
   private final JSpinner pageSpinner = new JSpinner();
   private QueryProcess process;
   private AuthMethod authMethod;
-  private final CircularProgressBar progressBar = new CircularProgressBar();
+  private final SpinnerProgress progressBar = new SpinnerProgress();
   final JLabel lblCalling =
       new JLabel(Messages.getString("DicomQrView.calling_node") + StringUtil.COLON);
   private final JLabel lblCharset = new JLabel(Messages.getString("charset") + StringUtil.COLON);

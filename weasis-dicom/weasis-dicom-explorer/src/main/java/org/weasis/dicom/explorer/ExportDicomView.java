@@ -23,7 +23,6 @@ import org.dcm4che3.util.UIDUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.explorer.ObservableEvent;
-import org.weasis.core.api.gui.task.CircularProgressBar;
 import org.weasis.core.api.gui.util.AbstractItemDialogPage;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiExecutor;
@@ -34,6 +33,7 @@ import org.weasis.core.api.media.data.TagReadable;
 import org.weasis.core.api.media.data.TagW;
 import org.weasis.core.api.util.ThreadUtil;
 import org.weasis.core.ui.model.GraphicModel;
+import org.weasis.core.ui.tp.raven.spinner.SpinnerProgress;
 import org.weasis.core.util.FileUtil;
 import org.weasis.core.util.LangUtil;
 import org.weasis.dicom.codec.DicomElement;
@@ -47,8 +47,7 @@ public class ExportDicomView extends AbstractItemDialogPage implements ExportDic
   protected final File exportDir;
   protected final DicomModel dicomModel;
   protected final ExportTree exportTree;
-  protected final ExecutorService executor =
-      ThreadUtil.buildNewFixedThreadExecutor(3, "Dicom Send task"); // NON-NLS
+  protected final ExecutorService executor = ThreadUtil.newFixedThreadPool(3, "DicomSend");
 
   public ExportDicomView(
       String title, int position, DicomModel dicomModel, CheckTreeModel treeModel) {
@@ -127,7 +126,7 @@ public class ExportDicomView extends AbstractItemDialogPage implements ExportDic
   }
 
   private static DicomProgress getDicomProgress(ExplorerTask<Boolean, String> t) {
-    final CircularProgressBar progressBar = t.getBar();
+    final SpinnerProgress progressBar = t.getBar();
     DicomProgress dicomProgress = new DicomProgress();
     dicomProgress.addProgressListener(
         p ->

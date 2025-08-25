@@ -47,13 +47,14 @@ public class AuthMethodDialog extends JDialog {
   private final JTextField clientID = new JTextField(50);
   private final JTextField clientSecret = new JTextField(50);
   private final JTextField scope = new JTextField(50);
+  private final JTextField audience = new JTextField(50);
 
   public AuthMethodDialog(
       Window parent, String title, AuthMethod authMethod, JComboBox<AuthMethod> parentCombobox) {
     super(parent, title, ModalityType.APPLICATION_MODAL);
     this.parentCombobox = parentCombobox;
     comboBoxAuth.addItem(OAuth2ServiceFactory.googleAuthTemplate);
-    comboBoxAuth.addItem(OAuth2ServiceFactory.keycloackTemplate);
+    comboBoxAuth.addItem(OAuth2ServiceFactory.keycloakTemplate);
     boolean addAuth = false;
     if (authMethod == null) {
       addAuth = true;
@@ -61,7 +62,7 @@ public class AuthMethodDialog extends JDialog {
           new DefaultAuthMethod(
               UUID.randomUUID().toString(),
               new AuthProvider(null, null, null, null, false),
-              new AuthRegistration(null, null, null));
+              new AuthRegistration());
       this.authMethod.setLocal(true);
     } else {
       this.authMethod = authMethod;
@@ -102,7 +103,7 @@ public class AuthMethodDialog extends JDialog {
     buttonFill.addActionListener(
         e -> {
           AuthMethod m = (AuthMethod) comboBoxAuth.getSelectedItem();
-          if (OAuth2ServiceFactory.keycloackTemplate.equals(m)) {
+          if (OAuth2ServiceFactory.keycloakTemplate.equals(m)) {
             JTextField textFieldName = new JTextField();
             JTextField textFieldURL = new JTextField();
             JTextField textFieldRealm = new JTextField();
@@ -126,7 +127,7 @@ public class AuthMethodDialog extends JDialog {
 
             if (option == JOptionPane.OK_OPTION) {
               AuthProvider p =
-                  OAuth2ServiceFactory.buildKeycloackProvider(
+                  OAuth2ServiceFactory.buildKeycloakProvider(
                       textFieldName.getText(), textFieldURL.getText(), textFieldRealm.getText());
               m = new DefaultAuthMethod(UUID.randomUUID().toString(), p, m.getAuthRegistration());
               m.setLocal(true);
@@ -150,11 +151,15 @@ public class AuthMethodDialog extends JDialog {
 
     panel.add(new JLabel("Name" + StringUtil.COLON), GuiUtils.NEWLINE); // NON-NLS
     panel.add(name, "");
+    GuiUtils.addValidation(name, StringUtil::hasText);
     panel.add(new JLabel("Authorization URI" + StringUtil.COLON), GuiUtils.NEWLINE); // NON-NLS
     panel.add(authorizationURI, "");
+    GuiUtils.addValidation(authorizationURI, NetworkUtil::isValidUrlLikeUri);
     panel.add(new JLabel("Token URI" + StringUtil.COLON), GuiUtils.NEWLINE); // NON-NLS
+    GuiUtils.addValidation(tokenURI, NetworkUtil::isValidUrlLikeUri);
     panel.add(tokenURI, "");
     panel.add(new JLabel("Revoke URI" + StringUtil.COLON), GuiUtils.NEWLINE); // NON-NLS
+    GuiUtils.addValidation(revokeTokenURI, NetworkUtil::isValidUrlLikeUri);
     panel.add(revokeTokenURI, "");
     return panel;
   }
@@ -172,6 +177,8 @@ public class AuthMethodDialog extends JDialog {
     panel.add(clientSecret, "");
     panel.add(new JLabel("Scope" + StringUtil.COLON), GuiUtils.NEWLINE); // NON-NLS
     panel.add(scope, "");
+    panel.add(new JLabel("Audience" + StringUtil.COLON), GuiUtils.NEWLINE); // NON-NLS
+    panel.add(audience, "");
     return panel;
   }
 
@@ -188,6 +195,7 @@ public class AuthMethodDialog extends JDialog {
       clientID.setText(reg.getClientId());
       clientSecret.setText(reg.getClientSecret());
       scope.setText(reg.getScope());
+      audience.setText(reg.getAudience());
     }
   }
 
@@ -199,9 +207,9 @@ public class AuthMethodDialog extends JDialog {
 
     if (!StringUtil.hasText(n)
         || !StringUtil.hasText(authURI)
-        || !NetworkUtil.urlValidator(authURI)
-        || !StringUtil.hasText(tURI)
-        || !NetworkUtil.urlValidator(tURI)) {
+        || !NetworkUtil.isValidUrlLikeUri(authURI)
+        || !NetworkUtil.isValidUrlLikeUri(tURI)
+        || !NetworkUtil.isValidUrlLikeUri(tURI)) {
       JOptionPane.showMessageDialog(
           WinUtil.getValidComponent(this),
           Messages.getString("missing.fields"),
@@ -224,6 +232,7 @@ public class AuthMethodDialog extends JDialog {
     reg.setClientId(clientID.getText());
     reg.setClientSecret(clientSecret.getText());
     reg.setScope(scope.getText());
+    reg.setAudience(audience.getText());
 
     if (addMethod) {
       parentCombobox.addItem(authMethod);

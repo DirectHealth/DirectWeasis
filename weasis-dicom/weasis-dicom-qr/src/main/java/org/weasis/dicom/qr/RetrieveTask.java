@@ -21,7 +21,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
-import java.util.concurrent.ExecutionException;
 import javax.swing.JOptionPane;
 import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.Tag;
@@ -29,7 +28,6 @@ import org.dcm4che3.net.Status;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.explorer.ObservableEvent;
-import org.weasis.core.api.gui.task.CircularProgressBar;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
@@ -40,6 +38,7 @@ import org.weasis.core.api.media.data.Series;
 import org.weasis.core.api.media.data.TagW;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.URLParameters;
+import org.weasis.core.ui.tp.raven.spinner.SpinnerProgress;
 import org.weasis.core.util.FileUtil;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.DicomSeries;
@@ -101,7 +100,7 @@ public class RetrieveTask extends ExplorerTask<ExplorerTask<Boolean, String>, St
 
     ExplorerTask<Boolean, String> loadingTask = null;
     String errorMessage = null;
-    final CircularProgressBar progressBar = getBar();
+    final SpinnerProgress progressBar = getBar();
     DicomProgress progress = new DicomProgress();
     progress.addProgressListener(
         p ->
@@ -270,8 +269,7 @@ public class RetrieveTask extends ExplorerTask<ExplorerTask<Boolean, String>, St
         }
 
         if (tempFolder != null) {
-          loadingTask =
-              new LoadLocalDicom(new File[] {tempFolder}, false, explorerDcmModel, openingStrategy);
+          explorerDcmModel.allSeriesPostProcessing();
         }
       }
 
@@ -293,7 +291,7 @@ public class RetrieveTask extends ExplorerTask<ExplorerTask<Boolean, String>, St
                   JOptionPane.ERROR_MESSAGE));
     }
 
-    return loadingTask;
+    return null;
   }
 
   @Override
@@ -309,10 +307,9 @@ public class RetrieveTask extends ExplorerTask<ExplorerTask<Boolean, String>, St
         DicomModel.LOADING_EXECUTOR.execute(task);
       }
     } catch (InterruptedException e) {
-      LOGGER.warn("Retrieving task Interruption");
       Thread.currentThread().interrupt();
-    } catch (ExecutionException e) {
-      LOGGER.error("Retrieving task", e);
+    } catch (Exception e) {
+      LOGGER.error("Retrieving DICOM data:", e);
     }
   }
 
@@ -431,9 +428,7 @@ public class RetrieveTask extends ExplorerTask<ExplorerTask<Boolean, String>, St
       wp.addHttpTag("Accept", "image/jpeg"); // NON-NLS
 
       for (final LoadSeries loadSeries : loadMap.values()) {
-        String modality = TagD.getTagValue(loadSeries.getDicomSeries(), Tag.Modality, String.class);
-        boolean ps = "PR".equals(modality) || "KO".equals(modality); // NON-NLS
-        if (!ps) {
+        if (!DicomModel.isHiddenModality(loadSeries.getDicomSeries())) {
           loadSeries.startDownloadImageReference(wp);
         }
         loadSeries.setPOpeningStrategy(openingStrategy);
@@ -540,19 +535,29 @@ public class RetrieveTask extends ExplorerTask<ExplorerTask<Boolean, String>, St
       Series<?> dicomSeries,
       Properties props,
       URLParameters urlParameters) {
-    String serieInstanceUID = seriesDataset.getString(Tag.SeriesInstanceUID);
+    String seriesUID = seriesDataset.getString(Tag.SeriesInstanceUID);
     String seriesRetrieveURL = TagD.getTagValue(dicomSeries, Tag.RetrieveURL, String.class);
-    if (StringUtil.hasText(serieInstanceUID) && StringUtil.hasText(seriesRetrieveURL)) {
-      StringBuilder buf = new StringBuilder(seriesRetrieveURL);
-      buf.append("/instances?includefield="); // NON-NLS
-      buf.append(RsQueryResult.INSTANCE_QUERY);
-      buf.append(props.getProperty(RsQueryParams.P_QUERY_EXT, ""));
+    if (StringUtil.hasText(seriesUID) && StringUtil.hasText(seriesRetrieveURL)) {
+      StringBuilder baseQuery = new StringBuilder(seriesRetrieveURL);
+      baseQuery.append("/instances?includefield="); // NON-NLS
+      baseQuery.append(RsQueryResult.INSTANCE_QUERY);
+      baseQuery.append(props.getProperty(RsQueryParams.P_QUERY_EXT, ""));
 
+      int offset = 0;
+      int limit = 1000; // Maximum number of instances to fetch per query
       try {
-        LOGGER.debug(RsQueryResult.QIDO_REQUEST, buf);
-        List<Attributes> instances =
-            RsQueryResult.parseJSON(buf.toString(), dicomQrView.getAuthMethod(), urlParameters);
-        if (!instances.isEmpty()) {
+        while (true) {
+          StringBuilder paginatedQuery = new StringBuilder(baseQuery);
+          paginatedQuery.append("&offset=").append(offset); // NON-NLS
+          paginatedQuery.append("&limit=").append(limit); // NON-NLS
+          LOGGER.debug(RsQueryResult.QIDO_REQUEST, paginatedQuery);
+          List<Attributes> instances =
+              RsQueryResult.parseJSON(
+                  paginatedQuery.toString(), dicomQrView.getAuthMethod(), urlParameters);
+          if (instances.isEmpty()) {
+            break;
+          }
+
           SeriesInstanceList seriesInstanceList =
               (SeriesInstanceList) dicomSeries.getTagValue(TagW.WadoInstanceReferenceList);
           if (seriesInstanceList != null) {
@@ -560,9 +565,13 @@ public class RetrieveTask extends ExplorerTask<ExplorerTask<Boolean, String>, St
               RsQueryResult.addSopInstance(instanceDataSet, seriesInstanceList, seriesRetrieveURL);
             }
           }
+          offset += instances.size();
+          if (instances.size() < limit) {
+            break;
+          }
         }
       } catch (Exception e) {
-        LOGGER.error("QIDO-RS all instances with seriesUID {}", serieInstanceUID, e);
+        LOGGER.error("QIDO-RS all instances with seriesUID {}", seriesUID, e);
       }
     }
   }

@@ -11,7 +11,7 @@ ENV PATH=$JAVA_HOME/bin:$PATH
 ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
 
 RUN set -eux; \
-    apt-get update; \
+    apt-get update || (sleep 10 && apt-get update); \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends wget fontconfig ca-certificates p11-kit binutils tzdata locales curl bzip2 unzip xz-utils fakeroot rpm \
     ; \
     echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen; \
@@ -24,12 +24,12 @@ RUN set -eux; \
     ARCH="$(dpkg --print-architecture)"; \
     case "${ARCH}" in \
        amd64) \
-         ESUM='78832cb5ea4074f2215cde0d01d6192d09c87636fc24b36647aea61fb23b8272'; \
-         BINARY_URL='https://github.com/adoptium/temurin24-binaries/releases/download/jdk-24.0.1%2B9/OpenJDK24U-jdk_x64_linux_hotspot_24.0.1_9.tar.gz'; \
+         ESUM='aea1cc55e51cf651c85f2f00ad021603fe269c4bb6493fa97a321ad770c9b096'; \
+         BINARY_URL='https://github.com/adoptium/temurin24-binaries/releases/download/jdk-24.0.2%2B12/OpenJDK24U-jdk_x64_linux_hotspot_24.0.2_12.tar.gz'; \
          ;; \
        arm64) \
-         ESUM='a598260e340028d9b2383c23df16aa286769a661bd3bf28a52e8c1a5774b1110'; \
-         BINARY_URL='https://github.com/adoptium/temurin24-binaries/releases/download/jdk-24.0.1%2B9/OpenJDK24U-jdk_aarch64_linux_hotspot_24.0.1_9.tar.gz'; \
+         ESUM='6f8725d186d05c627176db9c46c732a6ef3ba41d9e9b3775c4727fc8ac642bb2'; \
+         BINARY_URL='https://github.com/adoptium/temurin24-binaries/releases/download/jdk-24.0.2%2B12/OpenJDK24U-jdk_aarch64_linux_hotspot_24.0.2_12.tar.gz'; \
          ;; \
        *) \
          echo "Unsupported arch: ${ARCH}"; \

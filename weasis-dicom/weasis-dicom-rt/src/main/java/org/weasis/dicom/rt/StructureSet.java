@@ -11,13 +11,7 @@ package org.weasis.dicom.rt;
 
 import java.awt.Color;
 import java.awt.geom.Path2D;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.CopyOnWriteArraySet;
 import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.Sequence;
@@ -30,12 +24,13 @@ import org.opencv.core.Mat;
 import org.opencv.core.MatOfPoint;
 import org.opencv.core.Scalar;
 import org.opencv.imgproc.Imgproc;
-import org.weasis.core.ui.model.graphic.imp.seg.SegContour;
+import org.weasis.core.api.media.data.TagW;
 import org.weasis.core.ui.model.graphic.imp.seg.SegMeasurableLayer;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.codec.DicomMediaIO;
 import org.weasis.dicom.codec.HiddenSeriesManager;
+import org.weasis.dicom.codec.LazyContourLoader;
 import org.weasis.dicom.codec.SpecialElementRegion;
 import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.geometry.GeometryOfSlice;
@@ -51,7 +46,7 @@ import org.weasis.opencv.seg.Segment;
  * @author Nicolas Roduit
  */
 public class StructureSet extends RtSpecialElement implements SpecialElementRegion {
-  private final Map<String, Map<String, Set<SegContour>>> refMap = new HashMap<>();
+  private final Map<String, Map<String, Set<LazyContourLoader>>> refMap = new HashMap<>();
   private final Map<Integer, StructRegion> segAttributes = new HashMap<>();
 
   private volatile float opacity = 1.0f;
@@ -61,12 +56,12 @@ public class StructureSet extends RtSpecialElement implements SpecialElementRegi
     super(mediaIO);
   }
 
-  public Map<String, Map<String, Set<SegContour>>> getRefMap() {
+  public Map<String, Map<String, Set<LazyContourLoader>>> getRefMap() {
     return refMap;
   }
 
   @Override
-  public Map<String, Set<SegContour>> getPositionMap() {
+  public Map<String, Set<LazyContourLoader>> getPositionMap() {
     return Map.of();
   }
 
@@ -92,6 +87,18 @@ public class StructureSet extends RtSpecialElement implements SpecialElementRegi
   }
 
   @Override
+  public String toString() {
+    String name = TagD.getTagValue(getMediaReader(), Tag.StructureSetName, String.class);
+    if (!StringUtil.hasText(label)) {
+      return StringUtil.hasText(name) ? name : TagW.NO_VALUE;
+    } else if (StringUtil.hasText(name) && !name.equals(label)) {
+      return label + " (" + name + ")";
+    } else {
+      return label;
+    }
+  }
+
+  @Override
   public void initReferences(String originSeriesUID) {
     refMap.clear();
     Attributes dcmItems = getMediaReader().getDicomObject();
@@ -114,14 +121,14 @@ public class StructureSet extends RtSpecialElement implements SpecialElementRegi
                         .computeIfAbsent(seriesUID, _ -> new CopyOnWriteArraySet<>())
                         .add(originSeriesUID);
 
-                    Map<String, Set<SegContour>> map =
+                    Map<String, Set<LazyContourLoader>> map =
                         refMap.computeIfAbsent(seriesUID, _ -> new HashMap<>());
                     Sequence instanceSeq = refSeries.getSequence(Tag.ContourImageSequence);
                     if (instanceSeq != null) {
                       for (Attributes instance : instanceSeq) {
                         String sopInstanceUID = instance.getString(Tag.ReferencedSOPInstanceUID);
                         if (StringUtil.hasText(sopInstanceUID)) {
-                          map.computeIfAbsent(sopInstanceUID, _ -> new LinkedHashSet<>());
+                          map.put(sopInstanceUID, null);
                         }
                       }
                     }
@@ -139,8 +146,9 @@ public class StructureSet extends RtSpecialElement implements SpecialElementRegi
     Attributes dcmItems = getMediaReader().getDicomObject();
     if (dcmItems != null) {
       String seriesUID = TagD.getTagValue(img, Tag.SeriesInstanceUID, String.class);
-      String label = dcmItems.getString(Tag.StructureSetLabel);
+      setTagNoNull(TagD.get(Tag.StructureSetName), dcmItems.getString(Tag.StructureSetName));
       Date datetime = dcmItems.getDate(Tag.StructureSetDateAndTime);
+      setTagNoNull(TagD.get(Tag.StructureSetDate), datetime);
 
       // Locate the name and number of each ROI
       Sequence structRoiSeq = dcmItems.getSequence(Tag.StructureSetROISequence);
@@ -213,24 +221,31 @@ public class StructureSet extends RtSpecialElement implements SpecialElementRegi
           if (contourSeq != null) {
             // Locate the contour sequence for each referenced ROI
             for (Attributes contour : contourSeq) {
+              PlaneContourLoader contours = new PlaneContourLoader();
               // For each plane, initialize a new plane dictionary
               StructContour plane = buildGraphic(img, contour, nb, region);
               if (plane == null) {
                 continue;
               }
+              contours.addContour(plane);
 
-              // Each plane which coincides with an image slice will have a unique ID
+              // Each plane that coincides with an image slice will have a unique ID
               // take the first one
               Sequence contImgSeq = contour.getSequence(Tag.ContourImageSequence);
               if (contImgSeq != null) {
+                double[] pts = contour.getDoubles(Tag.ContourData);
+                if (pts != null && pts.length % 3 == 0 && pts.length > 1) {
+                  plane.setPoints(pts);
+                } else {
+                  continue;
+                }
                 for (Attributes attributes : contImgSeq) {
                   String sopUID = attributes.getString(Tag.ReferencedSOPInstanceUID);
                   if (StringUtil.hasText(sopUID)) {
-                    plane.setPoints(contour.getDoubles(Tag.ContourData));
                     refMap
                         .get(seriesUID)
                         .computeIfAbsent(sopUID, _ -> new LinkedHashSet<>())
-                        .add(plane);
+                        .add(contours);
                   }
                 }
               }
@@ -238,7 +253,7 @@ public class StructureSet extends RtSpecialElement implements SpecialElementRegi
               // Add each plane to the planes' dictionary of the current ROI
               KeyDouble z = new KeyDouble(plane.getPositionZ());
 
-              // If there are no contour on specific z position
+              // If there is no contour on a specific z position
               if (!planes.containsKey(z)) {
                 List<StructContour> stack = new ArrayList<>();
                 stack.add(plane);

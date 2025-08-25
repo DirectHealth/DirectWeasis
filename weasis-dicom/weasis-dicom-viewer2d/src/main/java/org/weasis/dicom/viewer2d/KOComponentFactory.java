@@ -34,7 +34,7 @@ public final class KOComponentFactory {
 
   private KOComponentFactory() {}
 
-  public static ViewButton buildKoSelectionButton(final View2d view2d) {
+  public static ViewButton buildKoSelectionButton() {
 
     return new ViewButton(
         (invoker, x, y) -> {
@@ -79,7 +79,7 @@ public final class KOComponentFactory {
   public static KOViewButton buildKoStarButton(final View2d view2d) {
 
     return new KOViewButton(
-        (invoker, x, y) -> {
+        (_, x, y) -> {
           EventManager evtMgr = EventManager.getInstance();
           boolean currentSelectedState = view2d.koStarButton.state.equals(eState.SELECTED);
 

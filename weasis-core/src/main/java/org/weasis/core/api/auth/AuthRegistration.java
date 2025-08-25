@@ -15,12 +15,18 @@ public class AuthRegistration {
   private String clientId;
   private String clientSecret;
   private String scope;
+  private String audience;
   private String user;
 
-  public AuthRegistration(String clientId, String clientSecret, String scope) {
+  public AuthRegistration() {
+    this(null, null, null, null);
+  }
+
+  public AuthRegistration(String clientId, String clientSecret, String scope, String audience) {
     this.clientId = clientId;
     this.clientSecret = clientSecret;
     this.scope = scope;
+    this.audience = audience;
   }
 
   public String getClientId() {
@@ -53,6 +59,14 @@ public class AuthRegistration {
 
   public void setUser(String user) {
     this.user = user;
+  }
+
+  public String getAudience() {
+    return audience;
+  }
+
+  public void setAudience(String audience) {
+    this.audience = audience;
   }
 
   public String getAuthorizationGrantType() {

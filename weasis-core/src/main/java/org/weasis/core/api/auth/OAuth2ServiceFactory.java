@@ -18,6 +18,7 @@ import com.github.scribejava.core.oauth.OAuth20Service;
 import java.util.HashMap;
 import java.util.Map;
 import org.weasis.core.Messages;
+import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.util.SocketUtil;
 
 public class OAuth2ServiceFactory {
@@ -27,7 +28,7 @@ public class OAuth2ServiceFactory {
       new DefaultAuthMethod(
           NO,
           new AuthProvider(Messages.getString("no.authentication"), null, null, null, false),
-          new AuthRegistration(null, null, null)) {
+          new AuthRegistration()) {
         @Override
         public OAuth2AccessToken getToken() {
           return null;
@@ -47,21 +48,22 @@ public class OAuth2ServiceFactory {
           new AuthRegistration(
               null,
               null,
-              "https://www.googleapis.com/auth/cloud-healthcare https://www.googleapis.com/auth/cloudplatformprojects.readonly"));
-  public static final DefaultAuthMethod keycloackTemplate =
+              "https://www.googleapis.com/auth/cloud-healthcare https://www.googleapis.com/auth/cloudplatformprojects.readonly",
+              null));
+  public static final DefaultAuthMethod keycloakTemplate =
       new DefaultAuthMethod(
           "68c845fc-93c5-11eb-b2f8-0f5db063091d", // NON-NLS
-          buildKeycloackProvider(
-              "Default Keycloack", "http://localhost:8080/", "master"), // NON-NLS
-          new AuthRegistration(null, null, "openid")); // NON-NLS
+          buildKeycloakProvider(
+              "Default Keycloak 18+", "http://localhost:8080/", "master"), // NON-NLS
+          new AuthRegistration(null, null, "openid", null)); // NON-NLS
 
   private static final Map<String, OAuth20Service> services = new HashMap<>();
 
   private OAuth2ServiceFactory() {}
 
-  public static AuthProvider buildKeycloackProvider(String name, String baseUrl, String realm) {
+  public static AuthProvider buildKeycloakProvider(String name, String baseUrl, String realm) {
     String baseUrlWithRealm =
-        baseUrl + (baseUrl.endsWith("/") ? "" : "/") + "auth/realms/" + realm.trim(); // NON-NLS
+        baseUrl + (baseUrl.endsWith("/") ? "" : "/") + "realms/" + realm.trim(); // NON-NLS
     return new AuthProvider(
         name,
         baseUrlWithRealm + "/protocol/openid-connect/auth", // NON-NLS
@@ -71,6 +73,12 @@ public class OAuth2ServiceFactory {
   }
 
   public static OAuth20Service getService(AuthMethod authMethod) {
+    int port =
+        GuiUtils.getUICore().getSystemPreferences().getIntProperty("weasis.auth.back.port", 0);
+    return getService(authMethod, port);
+  }
+
+  public static OAuth20Service getService(AuthMethod authMethod, int port) {
     if (services.containsKey(authMethod.getUid())) {
       return services.get(authMethod.getUid());
     }
@@ -80,7 +88,9 @@ public class OAuth2ServiceFactory {
     if (registration == null || provider == null) {
       return null;
     }
-    int port = SocketUtil.findAvailablePort();
+    if (port <= 0) {
+      port = SocketUtil.findAvailablePort();
+    }
     OAuth20Service oAuth20Service =
         new ServiceBuilder(registration.getClientId())
             .apiSecret(registration.getClientSecret())

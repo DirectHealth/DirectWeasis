@@ -76,19 +76,18 @@ import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.OtherIcon;
 import org.weasis.core.api.util.ResourceUtil.ResourceIconPath;
 import org.weasis.core.ui.docking.PluginTool;
-import org.weasis.core.ui.editor.SeriesViewer;
 import org.weasis.core.ui.editor.SeriesViewerEvent;
 import org.weasis.core.ui.editor.SeriesViewerEvent.EVENT;
 import org.weasis.core.ui.editor.SeriesViewerListener;
 import org.weasis.core.ui.editor.image.ImageViewerPlugin;
 import org.weasis.core.ui.editor.image.SequenceHandler;
 import org.weasis.core.ui.editor.image.ViewCanvas;
-import org.weasis.core.ui.editor.image.ViewerPlugin;
 import org.weasis.core.ui.util.ArrayListComboBoxModel;
 import org.weasis.core.ui.util.DefaultAction;
 import org.weasis.core.ui.util.TitleMenuItem;
 import org.weasis.core.ui.util.WrapLayout;
 import org.weasis.dicom.codec.DicomImageElement;
+import org.weasis.dicom.codec.DicomSeries;
 import org.weasis.dicom.codec.DicomSpecialElement;
 import org.weasis.dicom.codec.HiddenSeriesManager;
 import org.weasis.dicom.codec.KOSpecialElement;
@@ -281,17 +280,17 @@ public class DicomExplorer extends PluginTool implements DataExplorerView, Serie
     StudyPane studyPane = getStudyPane(study);
     if (studyPane == null) {
       studyPane = new StudyPane(study);
-      List<StudyPane> studies = patient2study.get(model.getParent(study, DicomModel.patient));
-      if (studies != null) {
-        int index = Collections.binarySearch(studies, studyPane, DicomSorter.STUDY_COMPARATOR);
-        if (index < 0) {
-          index = -(index + 1);
-        }
-        if (position != null) {
-          position[0] = index;
-        }
-        studies.add(index, studyPane);
+      List<StudyPane> studies =
+          patient2study.computeIfAbsent(
+              model.getParent(study, DicomModel.patient), _ -> new ArrayList<>());
+      int index = Collections.binarySearch(studies, studyPane, DicomSorter.STUDY_COMPARATOR);
+      if (index < 0) {
+        index = -(index + 1);
       }
+      if (position != null) {
+        position[0] = index;
+      }
+      studies.add(index, studyPane);
     } else if (position != null) {
       position[0] = -1;
     }
@@ -572,17 +571,17 @@ public class DicomExplorer extends PluginTool implements DataExplorerView, Serie
     SeriesPane seriesPane = getSeriesPane(series);
     if (seriesPane == null) {
       seriesPane = new SeriesPane(series);
-      List<SeriesPane> seriesList = study2series.get(model.getParent(series, DicomModel.study));
-      if (seriesList != null) {
-        int index = Collections.binarySearch(seriesList, seriesPane, DicomSorter.SERIES_COMPARATOR);
-        if (index < 0) {
-          index = -(index + 1);
-        }
-        if (position != null) {
-          position[0] = index;
-        }
-        seriesList.add(index, seriesPane);
+      List<SeriesPane> seriesList =
+          study2series.computeIfAbsent(
+              model.getParent(series, DicomModel.study), _ -> new ArrayList<>());
+      int index = Collections.binarySearch(seriesList, seriesPane, DicomSorter.SERIES_COMPARATOR);
+      if (index < 0) {
+        index = -(index + 1);
       }
+      if (position != null) {
+        position[0] = index;
+      }
+      seriesList.add(index, seriesPane);
     } else if (position != null) {
       position[0] = -1;
     }
@@ -810,7 +809,7 @@ public class DicomExplorer extends PluginTool implements DataExplorerView, Serie
           thumb = createThumbnail(series, model, thumbnailSize);
           series.setTag(TagW.Thumbnail, thumb);
         }
-        Optional.ofNullable(thumb).ifPresent(this::add);
+        Optional.ofNullable(thumb).ifPresent(SeriesPane.this::add);
       }
       String desc = TagD.getTagValue(sequence, Tag.SeriesDescription, String.class);
       label = new JLabel(desc == null ? "" : desc, SwingConstants.CENTER);
@@ -995,6 +994,7 @@ public class DicomExplorer extends PluginTool implements DataExplorerView, Serie
 
   private void updateSplitSeries(Series<?> dcmSeries) {
     MediaSeriesGroup study = model.getParent(dcmSeries, DicomModel.study);
+    MediaSeriesGroup patient = model.getParent(dcmSeries, DicomModel.patient);
     // In case the Series has been replaced (split number = -1) and removed
     if (study == null) {
       return;
@@ -1003,6 +1003,15 @@ public class DicomExplorer extends PluginTool implements DataExplorerView, Serie
     List<Series<?>> list = getSplitSeries(dcmSeries);
 
     List<SeriesPane> seriesList = study2series.computeIfAbsent(study, k -> new ArrayList<>());
+    if (isSelectedPatient(patient)) {
+      if (modelStudy.getIndexOf(study) < 0) {
+        modelStudy.addElement(study);
+      }
+      if (!selectedPatient.isStudyVisible(study)) {
+        selectedPatient.addPane(studyPane);
+        selectedPatient.revalidate();
+      }
+    }
     boolean addSeries = selectedPatient.isStudyVisible(study);
     boolean repaintStudy = false;
     for (Series<?> dicomSeries : list) {
@@ -1101,12 +1110,10 @@ public class DicomExplorer extends PluginTool implements DataExplorerView, Serie
       }
     }
 
-    List<StudyPane> studies = patient2study.computeIfAbsent(patient, k -> new ArrayList<>());
     Object selectedStudy = modelStudy.getSelectedItem();
     int[] positionStudy = new int[1];
     StudyPane studyPane = createStudyPaneInstance(study, positionStudy);
 
-    List<SeriesPane> seriesList = study2series.computeIfAbsent(study, k -> new ArrayList<>());
     int[] positionSeries = new int[1];
     createSeriesPaneInstance(series, positionSeries);
     if (isSelectedPatient(patient) && positionSeries[0] != -1) {
@@ -1118,7 +1125,7 @@ public class DicomExplorer extends PluginTool implements DataExplorerView, Serie
         // if modelStudy has the value "All studies"
         if (ALL_STUDIES.equals(selectedStudy)) {
           selectedPatient.removeAll();
-          for (StudyPane s : studies) {
+          for (StudyPane s : patient2study.getOrDefault(patient, List.of())) {
             selectedPatient.addPane(s);
           }
           selectedPatient.revalidate();
@@ -1130,6 +1137,7 @@ public class DicomExplorer extends PluginTool implements DataExplorerView, Serie
                 .getSystemPreferences()
                 .getIntProperty(Thumbnail.KEY_SIZE, Thumbnail.DEFAULT_SIZE);
         studyPane.clearAllSeries();
+        List<SeriesPane> seriesList = study2series.getOrDefault(study, List.of());
         for (int i = 0; i < seriesList.size(); i++) {
           studyPane.addPane(seriesList.get(i), i, thumbnailSize);
         }
@@ -1182,20 +1190,11 @@ public class DicomExplorer extends PluginTool implements DataExplorerView, Serie
     if (evt instanceof ObservableEvent event) {
       ObservableEvent.BasicAction action = event.getActionCommand();
       Object newVal = event.getNewValue();
-      if (model.equals(evt.getSource())) {
-        if (ObservableEvent.BasicAction.SELECT.equals(action)) {
-          if (newVal instanceof Series dcm) {
-            MediaSeriesGroup patient = model.getParent(dcm, DicomModel.patient);
-            if (!isSelectedPatient(patient) && modelPatient.getIndexOf(patient) >= 0) {
-              modelPatient.setSelectedItem(patient);
-              GuiUtils.getUICore()
-                  .getDockingControl()
-                  .getController()
-                  .setFocusedDockable(
-                      new DefaultFocusRequest(dockable.intern(), this, false, true, false));
-            }
-          }
-        } else if (ObservableEvent.BasicAction.ADD.equals(action)) {
+
+      if (ObservableEvent.BasicAction.SELECT.equals(action)) {
+        handleSelectEvent(newVal);
+      } else if (model.equals(evt.getSource())) {
+        if (ObservableEvent.BasicAction.ADD.equals(action)) {
           if (newVal instanceof Series series) {
             addDicomSeries(series);
           }
@@ -1263,18 +1262,35 @@ public class DicomExplorer extends PluginTool implements DataExplorerView, Serie
             koOpen.setVisible(
                 HiddenSeriesManager.hasHiddenSpecialElements(KOSpecialElement.class, patient));
           }
-        }
-      } else if (evt.getSource() instanceof SeriesViewer
-          && ObservableEvent.BasicAction.SELECT.equals(action)
-          && newVal instanceof MediaSeriesGroup patient
-          && !isSelectedPatient(patient)
-          && modelPatient.getIndexOf(patient) >= 0) {
-        modelPatient.setSelectedItem(patient);
-        // focus get back to viewer
-        if (evt.getSource() instanceof ViewerPlugin viewerPlugin) {
-          viewerPlugin.requestFocusInWindow();
+        } else if (ObservableEvent.BasicAction.LOADING_GLOBAL_MSG.equals(action)) {
+          if (newVal instanceof String message) {
+            loadingPanel.setGlobalMessage(message);
+          }
         }
       }
+    }
+  }
+
+  private void handleSelectEvent(Object newVal) {
+    MediaSeriesGroup patient = null;
+    if (newVal instanceof DicomSeries dcm) {
+      patient = model.getParent(dcm, DicomModel.patient);
+    } else if (newVal instanceof MediaSeriesGroup group) {
+      TagW tagID = group.getTagID();
+      if (TagD.getUID(TagD.Level.PATIENT).equals(tagID)) {
+        patient = group;
+      }
+    }
+    if (patient != null && !isSelectedPatient(patient)) {
+      if (modelPatient.getIndexOf(patient) < 0) {
+        modelPatient.addElement(patient);
+      }
+
+      modelPatient.setSelectedItem(patient);
+      GuiUtils.getUICore()
+          .getDockingControl()
+          .getController()
+          .setFocusedDockable(new DefaultFocusRequest(dockable.intern(), this, false, true, false));
     }
   }
 

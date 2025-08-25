@@ -57,7 +57,7 @@ public class Thumbnail extends JLabel implements Thumbnailable {
       AppProperties.buildAccessibleTempDirectory(
           AppProperties.FILE_CACHE_DIR.getName(), "thumb"); // NON-NLS
   public static final ExecutorService THUMB_LOADER =
-      ThreadUtil.buildNewSingleThreadExecutor("Thumbnail Loader"); // NON-NLS
+      ThreadUtil.newManagedImageIOThreadPool("ThumbnailLoader");
 
   public static final String KEY_SIZE = "explorer.thumbnail.size";
   public static final int MIN_SIZE = 48;
@@ -264,7 +264,7 @@ public class Thumbnail extends JLabel implements Thumbnailable {
   }
 
   private void loadThumbnail(
-      final MediaElement media, final boolean keepMediaCache, final OpManager opManager) {
+      final MediaElement media, boolean keepMediaCache, OpManager opManager) {
     try {
       File file = thumbnailPath;
       boolean noPath = file == null || !file.canRead();
@@ -310,6 +310,7 @@ public class Thumbnail extends JLabel implements Thumbnailable {
               if (thumb == null || thumb.width() <= 0) {
                 readable = false;
                 ImageConversion.releasePlanarImage(thumb);
+                keepMediaCache = false;
               } else {
                 mCache.put(this, thumb);
               }

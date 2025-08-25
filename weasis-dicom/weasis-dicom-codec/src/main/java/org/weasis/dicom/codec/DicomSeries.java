@@ -177,6 +177,29 @@ public class DicomSeries extends Series<DicomImageElement> {
             }
           }
         }
+
+        manager
+            .reference2Series
+            .entrySet()
+            .removeIf(
+                entry -> {
+                  Set<String> referencingSeries = entry.getValue();
+                  referencingSeries.remove(seriesUID);
+                  return referencingSeries.isEmpty();
+                });
+
+        for (HiddenSpecialElement element : removed) {
+          String sopUID = TagD.getTagValue(element, Tag.SOPInstanceUID, String.class);
+          if (sopUID != null) {
+            Set<String> referencingSeries = manager.sopRef2Series.get(sopUID);
+            if (referencingSeries != null) {
+              referencingSeries.remove(seriesUID);
+              if (referencingSeries.isEmpty()) {
+                manager.sopRef2Series.remove(sopUID);
+              }
+            }
+          }
+        }
       }
     }
     super.dispose();
@@ -300,12 +323,13 @@ public class DicomSeries extends Series<DicomImageElement> {
 
   @Override
   public boolean isSuitableFor3d() {
+    int size = size(null);
     SeriesInstanceList seriesInstanceList =
         (SeriesInstanceList) getTagValue(TagW.WadoInstanceReferenceList);
     if (seriesInstanceList != null) {
-      return seriesInstanceList.size() >= DefaultView2d.MINIMAL_IMAGES_FOR_3D;
+      size = Math.max(size, seriesInstanceList.size());
     }
-    return size(null) >= DefaultView2d.MINIMAL_IMAGES_FOR_3D;
+    return size >= DefaultView2d.MINIMAL_IMAGES_FOR_3D;
   }
 
   public static synchronized void startPreloading(

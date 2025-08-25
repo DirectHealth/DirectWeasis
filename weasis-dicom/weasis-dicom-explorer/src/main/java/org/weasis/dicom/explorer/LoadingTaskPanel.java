@@ -12,9 +12,9 @@ package org.weasis.dicom.explorer;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import org.weasis.core.api.gui.task.CircularProgressBar;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.ActionIcon;
+import org.weasis.core.ui.tp.raven.spinner.SpinnerProgress;
 import org.weasis.dicom.explorer.wado.DownloadManager;
 
 public class LoadingTaskPanel extends JPanel {
@@ -39,12 +39,20 @@ public class LoadingTaskPanel extends JPanel {
     if (globalLoadingManager) {
       JButton globalResumeButton = new JButton(ResourceUtil.getIcon(ActionIcon.EXECUTE));
       globalResumeButton.setToolTipText(Messages.getString("DicomExplorer.resume_all"));
-      globalResumeButton.addActionListener(e -> DownloadManager.resume());
+      globalResumeButton.addActionListener(
+          _ -> {
+            DownloadManager.resume();
+            message.setText(Messages.getString("DicomExplorer.loading"));
+          });
       this.add(globalResumeButton);
 
       JButton globalStopButton = new JButton(ResourceUtil.getIcon(ActionIcon.SUSPEND));
       globalStopButton.setToolTipText(Messages.getString("DicomExplorer.stop_all"));
-      globalStopButton.addActionListener(e -> DownloadManager.stop());
+      globalStopButton.addActionListener(
+          _ -> {
+            DownloadManager.stop();
+            message.setText(Messages.getString("stopped"));
+          });
       this.add(globalStopButton);
     } else {
       JButton cancelButton = new JButton(ResourceUtil.getIcon(ActionIcon.SUSPEND));
@@ -58,7 +66,7 @@ public class LoadingTaskPanel extends JPanel {
           });
       this.add(cancelButton);
       if (task != null) {
-        CircularProgressBar globalProgress = task.getBar();
+        SpinnerProgress globalProgress = task.getBar();
         this.add(globalProgress);
         globalProgress.setIndeterminate(true);
       }

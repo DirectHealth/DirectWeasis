@@ -24,8 +24,8 @@ import org.dcm4che3.data.Tag;
 import org.weasis.core.api.media.data.MediaSeriesGroup;
 import org.weasis.core.api.media.data.TagW;
 import org.weasis.core.api.util.ResourceUtil.ResourceIconPath;
-import org.weasis.core.ui.model.graphic.imp.seg.SegContour;
 import org.weasis.core.util.StringUtil;
+import org.weasis.dicom.macro.SOPInstanceReference;
 
 public class HiddenSeriesManager {
   private static final HiddenSeriesManager instance = new HiddenSeriesManager();
@@ -39,26 +39,34 @@ public class HiddenSeriesManager {
     return instance;
   }
 
+  public void extractReferencedSeries(Attributes dicom, String originSeriesUID) {
+    extractReferencedSeries(dicom, originSeriesUID, null);
+  }
+
   public void extractReferencedSeries(
       Attributes dicom,
       String originSeriesUID,
-      Function<String, Map<String, Set<SegContour>>> addSeries) {
-    if (dicom != null && StringUtil.hasText(originSeriesUID) && addSeries != null) {
-      Sequence seriesRef = dicom.getSequence(Tag.ReferencedSeriesSequence);
-      if (seriesRef != null) {
-        for (Attributes ref : seriesRef) {
-          String seriesUID = ref.getString(Tag.SeriesInstanceUID);
-          if (StringUtil.hasText(seriesUID)) {
-            reference2Series
-                .computeIfAbsent(seriesUID, _ -> new CopyOnWriteArraySet<>())
-                .add(originSeriesUID);
-
-            Map<String, Set<SegContour>> refMap = addSeries.apply(seriesUID);
+      Function<String, Map<String, Set<LazyContourLoader>>> addSeries) {
+    if (dicom == null || !StringUtil.hasText(originSeriesUID)) {
+      return;
+    }
+    Sequence seriesRef = dicom.getSequence(Tag.ReferencedSeriesSequence);
+    if (seriesRef != null) {
+      for (Attributes ref : seriesRef) {
+        String seriesUID = ref.getString(Tag.SeriesInstanceUID);
+        if (StringUtil.hasText(seriesUID)) {
+          reference2Series
+              .computeIfAbsent(seriesUID, _ -> new CopyOnWriteArraySet<>())
+              .add(originSeriesUID);
+          if (addSeries != null) {
+            Map<String, Set<LazyContourLoader>> refMap = addSeries.apply(seriesUID);
             Sequence instanceSeq = ref.getSequence(Tag.ReferencedInstanceSequence);
             if (instanceSeq != null) {
               for (Attributes instance : instanceSeq) {
                 String sopInstanceUID = instance.getString(Tag.ReferencedSOPInstanceUID);
-                refMap.computeIfAbsent(sopInstanceUID, _ -> new LinkedHashSet<>());
+                if (StringUtil.hasText(sopInstanceUID)) {
+                  refMap.computeIfAbsent(sopInstanceUID, _ -> new LinkedHashSet<>());
+                }
               }
             }
           }
@@ -67,16 +75,36 @@ public class HiddenSeriesManager {
     }
   }
 
-  public static void addSourceImage(Attributes derivation, List<String> sopUIDList) {
-    if (derivation == null || sopUIDList == null) {
+  public static void addSourceImage(
+      Attributes derivation, Map<String, List<Integer>> sopUIDToFramesMap) {
+    if (derivation == null || sopUIDToFramesMap == null) {
       return;
     }
     Sequence srcSeq = derivation.getSequence(Tag.SourceImageSequence);
     if (srcSeq != null) {
       for (Attributes src : srcSeq) {
-        sopUIDList.add(src.getString(Tag.ReferencedSOPInstanceUID));
+        SOPInstanceReference sopRef = new SOPInstanceReference(src);
+        int[] frames = sopRef.getReferencedFrameNumber();
+        String sopInstanceUID = src.getString(Tag.ReferencedSOPInstanceUID);
+
+        if (sopInstanceUID != null) {
+          if (frames == null || frames.length == 0) {
+            // If no referenced frames are specified, assume all frames
+            sopUIDToFramesMap.put(sopInstanceUID, Collections.emptyList());
+          } else {
+            sopUIDToFramesMap.put(sopInstanceUID, toIntegerList(frames));
+          }
+        }
       }
     }
+  }
+
+  private static List<Integer> toIntegerList(int[] array) {
+    List<Integer> list = new ArrayList<>();
+    for (int value : array) {
+      list.add(value);
+    }
+    return list;
   }
 
   public static void addReferencedSOPInstanceUID(Attributes seriesRef, String originSeriesUID) {

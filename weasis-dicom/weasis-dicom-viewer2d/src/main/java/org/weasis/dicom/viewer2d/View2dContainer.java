@@ -505,7 +505,10 @@ public class View2dContainer extends DicomViewerPlugin implements PropertyChange
                               // (require at least one image)
                               view2DPane.setSeries(series, null);
                             }
-                            s.setSliderMinMaxValue(1, series.size(filter), imgIndex + 1);
+                            int max = series.size(filter);
+                            if (max > 0) {
+                              s.setSliderMinMaxValue(1, max, imgIndex + 1);
+                            }
                           });
                 }
               }
@@ -684,7 +687,9 @@ public class View2dContainer extends DicomViewerPlugin implements PropertyChange
           }
         }
 
-        if (updateAll) {
+        boolean koFilterActive =
+            LangUtil.getNULLtoFalse((Boolean) selectedView.getActionValue(ActionW.KO_FILTER.cmd()));
+        if (updateAll && koFilterActive) {
           List<ViewCanvas<DicomImageElement>> viewList = getImagePanels(true);
           for (ViewCanvas<DicomImageElement> view : viewList) {
             updateKoView(updatedKOSelection, enableFilter, forceUpdate, view);

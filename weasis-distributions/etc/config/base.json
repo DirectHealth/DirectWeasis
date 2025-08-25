@@ -109,7 +109,7 @@
     },
     {
       "code": "felix.auto.install.23",
-      "value": "${dollar}{weasis.codebase.url}/bundle/weasis-opencv-core-${dollar}{native.library.spec}-${weasis.opencv.native.version}.jar${xz.ext}",
+      "value": "${dollar}{weasis.codebase.url}/bundle/weasis-opencv-core-${dollar}{native.library.spec}-${weasis.opencv.pkg.version}.jar${xz.ext}",
       "description": "OpenCV native package",
       "type": "A",
       "category": "FELIX_INSTALL"
@@ -267,13 +267,6 @@
       "category": "LOCK"
     },
     {
-      "code": "felix.native.processor.alias.arm_le",
-      "value": "armv7a",
-      "description": "Processor alias for 32-bit arm native libraries",
-      "type": "A",
-      "category": "LAUNCH"
-    },
-    {
       "code": "weasis.clean.previous.version",
       "value": "false",
       "description": "If true, the bundle cache is cleared when the weasis version has changed from the previous launch",
@@ -416,6 +409,14 @@
       "value": "system",
       "description": "Uses the operating system's locale (on the client-side) with \"system\".\nFor other values refer to Java Locale: https://www.oracle.com/java/technologies/javase/jdk20-suported-locales.html",
       "type": "F",
+      "category": "GENERAL"
+    },
+    {
+      "code": "weasis.auth.back.port",
+      "value": "0",
+      "description": "Define the port for the authentication callback. 0 means random port",
+      "type": "A",
+      "javaType": "INT",
       "category": "GENERAL"
     },
     {

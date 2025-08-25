@@ -82,6 +82,16 @@
     </xsd:restriction>
   </xsd:simpleType>
 
+  <!-- Query Mode -->
+  <xsd:simpleType name="connectorType">
+    <xsd:restriction base="xsd:string">
+      <xsd:enumeration value="DB"/>
+      <xsd:enumeration value="DICOM"/>
+      <xsd:enumeration value="DICOM_WEB"/>
+    </xsd:restriction>
+  </xsd:simpleType>
+
+
   <!-- WEASIS SPECIFIC DATA ELEMENTS -->
 
   <xsd:simpleType name="dicomTagsList">
@@ -137,6 +147,7 @@
     <xsd:attribute name="requireOnlySOPInstanceUID" type="xsd:boolean"/>
     <xsd:attribute name="additionnalParameters" type="xsd:string"/>
     <xsd:attribute name="overrideDicomTagsList" type="dicomTagsList"/>
+    <xsd:attribute name="queryMode" type="connectorType"/>
   </xsd:complexType>
   <xsd:complexType name="Patient">
     <xsd:sequence>
@@ -174,6 +185,8 @@
     <xsd:attribute name="SeriesDescription" type="dicomVrLO"/>
     <xsd:attribute name="SeriesNumber" type="dicomVrIS"/>
     <xsd:attribute name="Modality" type="dicomVrCS"/>
+    <xsd:attribute name="SeriesDate" type="dicomVrDA"/>
+    <xsd:attribute name="SeriesTime" type="dicomVrTM"/>
     <xsd:attribute name="WadoTransferSyntaxUID" type="xsd:string"/>
     <xsd:attribute name="WadoCompressionRate" type="xsd:integer"/>
     <xsd:attribute name="DirectDownloadThumbnail" type="xsd:string"/>
@@ -181,6 +194,7 @@
   <xsd:complexType name="Instance">
     <xsd:attribute name="SOPInstanceUID" type="dicomVrUI"
       use="required"/>
+    <xsd:attribute name="SOPClassUID" type="dicomVrUI"/>
     <xsd:attribute name="InstanceNumber" type="dicomVrIS"/>
     <xsd:attribute name="DirectDownloadFile" type="xsd:string"/>
   </xsd:complexType>

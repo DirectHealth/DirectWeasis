@@ -17,23 +17,27 @@ import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.RecursiveAction;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import javax.swing.JProgressBar;
-import javax.swing.SwingUtilities;
 import org.dcm4che3.data.Tag;
 import org.joml.Matrix3d;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
 import org.joml.Vector3i;
 import org.opencv.core.CvType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.weasis.core.api.gui.util.AppProperties;
+import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.image.cv.CvUtil;
+import org.weasis.core.api.util.ThreadUtil;
 import org.weasis.core.ui.editor.image.ViewerPlugin;
 import org.weasis.core.util.FileUtil;
 import org.weasis.core.util.MathUtil;
+import org.weasis.core.util.Pair;
 import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.geometry.GeometryOfSlice;
@@ -41,6 +45,10 @@ import org.weasis.opencv.data.PlanarImage;
 import org.weasis.opencv.op.ImageProcessor;
 
 public abstract class Volume<T extends Number> {
+  private static final Logger LOGGER = LoggerFactory.getLogger(Volume.class);
+
+  private static final java.util.concurrent.ExecutorService VOLUME_BUILD_POOL =
+      ThreadUtil.newManagedImageProcessingThreadPool("mpr-volume-build");
 
   protected final Vector3d translation;
   protected final Quaterniond rotation;
@@ -160,22 +168,57 @@ public abstract class Volume<T extends Number> {
     createData(size.x, size.y, size.z);
     adaptPlaneOrientation();
 
-    double min = Double.MAX_VALUE;
-    double max = -Double.MAX_VALUE;
-    for (int z = 0; z < dicomImages.size(); z++) {
-      DicomImageElement dcm = dicomImages.get(z);
-      min = Math.min(dcm.getPixelMin(), min);
-      max = Math.max(dcm.getPixelMax(), max);
-      Matrix3d transform = getAffineTransform(dcm);
-      PlanarImage srcImage = dcm.getImage();
-      if (negativeDirRow || negativeDirCol) {
-        int flipType = negativeDirRow && negativeDirCol ? -1 : negativeDirCol ? 0 : 1;
-        srcImage = ImageProcessor.flip(srcImage.toImageCV(), flipType);
-      }
-      copyFrom(srcImage, z, transform);
+    final int n = dicomImages.size();
+    final boolean flipRow = negativeDirRow;
+    final boolean flipCol = negativeDirCol;
+
+    // Submit per-slice tasks with bounded concurrency
+    CompletionService<Pair<Double, Double>> ecs =
+        new ExecutorCompletionService<>(VOLUME_BUILD_POOL);
+
+    final AtomicInteger submitted = new AtomicInteger(0);
+    final AtomicInteger completed = new AtomicInteger(0);
+
+    for (int z = 0; z < n; z++) {
+      final int zi = z;
+      ecs.submit(
+          () -> {
+            DicomImageElement dcm = dicomImages.get(zi);
+            Matrix3d transform = getAffineTransform(dcm);
+            // Load source image (IO and decode may run concurrently with other slices)
+            PlanarImage src = dcm.getImage();
+            // Get min max after loading the image
+            Pair<Double, Double> minMax = new Pair<>(dcm.getPixelMin(), dcm.getPixelMax());
+
+            // Flip only if needed
+            if (src != null && (flipRow || flipCol)) {
+              int flipType = (flipRow && flipCol) ? -1 : (flipCol ? 0 : 1);
+              src = ImageProcessor.flip(src.toImageCV(), flipType);
+            }
+
+            if (src != null) {
+              copyFrom(src, zi, transform);
+            }
+            int done = completed.incrementAndGet();
+            updateProgressBar(done - 1);
+            return minMax;
+          });
+      submitted.incrementAndGet();
     }
-    this.minValue = min;
-    this.maxValue = max;
+
+    // Wait for processing all slices
+    try {
+      for (int i = 0; i < submitted.get(); i++) {
+        Future<Pair<Double, Double>> f = ecs.take();
+        var minMax = f.get(); // propagate exceptions if any
+        this.minValue = Math.min(minMax.first(), minValue);
+        this.maxValue = Math.max(minMax.second(), maxValue);
+      }
+    } catch (InterruptedException ie) {
+      Thread.currentThread().interrupt();
+    } catch (Exception e) {
+      LOGGER.error("Error while building volume", e);
+    }
   }
 
   protected void adaptPlaneOrientation() {
@@ -441,12 +484,13 @@ public abstract class Volume<T extends Number> {
   }
 
   protected void updateProgressBar(int sliceIndex) {
-    if (progressBar != null) {
-      SwingUtilities.invokeLater(
-          () -> {
-            progressBar.setValue(sliceIndex + 1);
-          });
+    final JProgressBar pb = this.progressBar;
+    if (pb == null) {
+      return;
     }
+
+    final int target = sliceIndex + 1;
+    GuiExecutor.execute(() -> pb.setValue(target));
   }
 
   public static Volume<?> createVolume(OriginalStack stack, JProgressBar progressBar) {
@@ -457,10 +501,14 @@ public abstract class Volume<T extends Number> {
     Volume<?> volume = getSharedVolume(stack);
     if (volume == null) {
       int type = CvType.depth(stack.getMiddleImage().getImage().type());
-      if (type <= CvType.CV_8S) {
-        volume = new VolumeByte(stack, progressBar);
-      } else if (type <= CvType.CV_16S) {
-        volume = new VolumeShort(stack, progressBar);
+      if (type == CvType.CV_8U) {
+        volume = new VolumeByte(stack, false, progressBar);
+      } else if (type == CvType.CV_8S) {
+        volume = new VolumeByte(stack, true, progressBar);
+      } else if (type == CvType.CV_16U) {
+        volume = new VolumeShort(stack, false, progressBar);
+      } else if (type == CvType.CV_16S) {
+        volume = new VolumeShort(stack, true, progressBar);
       } else if (type == CvType.CV_32S) {
         volume = new VolumeInt(stack, progressBar);
       } else if (type == CvType.CV_32F) {
@@ -541,22 +589,19 @@ public abstract class Volume<T extends Number> {
     T v111 = getValue(x1, y1, z1);
 
     // Trilinear interpolation
-    double c00 =
-        (v000 != null ? v000.doubleValue() : 0) * (1 - xd)
-            + (v100 != null ? v100.doubleValue() : 0) * xd;
-    double c01 =
-        (v001 != null ? v001.doubleValue() : 0) * (1 - xd)
-            + (v101 != null ? v101.doubleValue() : 0) * xd;
-    double c10 =
-        (v010 != null ? v010.doubleValue() : 0) * (1 - xd)
-            + (v110 != null ? v110.doubleValue() : 0) * xd;
-    double c11 =
-        (v011 != null ? v011.doubleValue() : 0) * (1 - xd)
-            + (v111 != null ? v111.doubleValue() : 0) * xd;
+    double c00 = interpolate(v000, v100, xd);
+    double c01 = interpolate(v001, v101, xd);
+    double c10 = interpolate(v010, v110, xd);
+    double c11 = interpolate(v011, v111, xd);
 
     double c0 = c00 * (1 - yd) + c10 * yd;
     double c1 = c01 * (1 - yd) + c11 * yd;
 
     return (c0 * (1 - zd) + c1 * zd);
+  }
+
+  protected double interpolate(T v0, T v1, double factor) {
+    return (v0 == null ? 0 : v0.doubleValue()) * (1 - factor)
+        + (v1 == null ? 0 : v1.doubleValue()) * factor;
   }
 }
