@@ -17,6 +17,7 @@ import java.util.Objects;
 import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.Tag;
 import org.dcm4che3.data.VR;
+import org.joml.Vector3d;
 import org.weasis.core.api.gui.util.Filter;
 import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.media.data.TagW;
@@ -119,12 +120,11 @@ public abstract class OriginalStack extends AbstractStack {
     return fistSliceGeometry;
   }
 
-  protected Attributes getCommonAttributes(
-      String frameOfReferenceUID, String seriesDescription, String[] imageType) {
+  protected Attributes getCommonAttributes(String frameOfReferenceUID, String seriesDescription) {
     final Attributes attributes = getMiddleImage().getMediaReader().getDicomObject();
     final Attributes cpTags = new Attributes(attributes, COPIED_ATTRS);
     cpTags.setString(Tag.SeriesDescription, VR.LO, seriesDescription);
-    cpTags.setString(Tag.ImageType, VR.CS, imageType);
+    cpTags.setString(Tag.ImageType, VR.CS, ObliqueMpr.imageTypes);
     cpTags.setString(Tag.FrameOfReferenceUID, VR.UI, frameOfReferenceUID);
     return cpTags;
   }
@@ -137,21 +137,56 @@ public abstract class OriginalStack extends AbstractStack {
     double totalSpace = 0.0;
     double lastSpace = 0.0;
     double[] firstPos = (double[]) sourceStack.getFirst().getTagValue(TagW.SlicePosition);
-    double lastPos = firstPos[0] + firstPos[1] + firstPos[2];
+    if (firstPos == null || firstPos.length != 3) {
+      return 0.0;
+    }
 
+    double gantryTilt = getGantryTilt();
+    Vector3d lastPosVector = new Vector3d(firstPos[0], firstPos[1], firstPos[2]);
     for (int i = 1; i < sourceStack.size(); i++) {
       double[] sp = (double[]) sourceStack.get(i).getTagValue(TagW.SlicePosition);
-      double pos = sp[0] + sp[1] + sp[2];
-      double space = Math.abs(pos - lastPos);
+      if (sp == null || sp.length != 3) {
+        continue;
+      }
+
+      Vector3d currentPosVector = new Vector3d(sp[0], sp[1], sp[2]);
+      double space = lastPosVector.distance(currentPosVector);
+      if (gantryTilt != 0) {
+        space = correctSpaceForGantryTilt(space, gantryTilt);
+      }
       if (i > 1 && Math.abs(lastSpace - space) > EPSILON) {
         this.variableSliceSpacing = true;
       }
       totalSpace += space;
       lastSpace = space;
-      lastPos = pos;
+      lastPosVector.set(currentPosVector);
     }
 
     return totalSpace / (sourceStack.size() - 1);
+  }
+
+  private double correctSpaceForGantryTilt(double measuredSpace, double gantryTilt) {
+    // The corrected spacing is the measured spacing divided by the cosine of the tilt angle
+    // This accounts for the fact that the actual slice thickness is larger when tilted
+    return measuredSpace / Math.cos(gantryTilt);
+  }
+
+  private double getGantryTilt() {
+    Vector3d col = new Vector3d(getStartingImage().getSliceGeometry().getColumn());
+    Vector3d row = new Vector3d(getStartingImage().getSliceGeometry().getRow());
+
+    // The tilt angle is the deviation from vertical in patient's Z axis
+    double tilt =
+        switch (plane) {
+          case AXIAL -> col.z();
+          case CORONAL -> col.y();
+          case SAGITTAL -> row.z();
+        };
+    if (Math.abs(tilt) <= EPSILON) {
+      return 0.0;
+    }
+    // Subtract the angle from pi/2 to get the angle with the vertical axis
+    return (Math.PI / 2.0) - Math.acos(tilt);
   }
 
   public double getSliceSpace() {

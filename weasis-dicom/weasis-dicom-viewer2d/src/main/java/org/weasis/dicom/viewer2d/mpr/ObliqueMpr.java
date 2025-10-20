@@ -42,7 +42,7 @@ public class ObliqueMpr extends OriginalStack {
       MprView view,
       Filter<DicomImageElement> filter) {
     super(plane, series, filter);
-    JProgressBar bar = createProgressBar(view, getSourceStack().size());
+    JProgressBar bar = createProgressBar(view, (int) Math.ceil(getSourceStack().size() * 1.2));
     GuiExecutor.invokeAndWait(
         () -> {
           bar.setValue(0);
@@ -55,7 +55,16 @@ public class ObliqueMpr extends OriginalStack {
           }
           view.repaint();
         });
-    volume = Volume.createVolume(this, bar);
+    Volume<?> v = Volume.createVolume(this, bar);
+    if (v.isTransformed()) {
+      volume = v;
+    } else {
+      Volume<?> transformVolume = v.transformVolume();
+      if (transformVolume != v) {
+        v.removeData();
+      }
+      volume = transformVolume;
+    }
   }
 
   public static JProgressBar createProgressBar(MprView view, int maxSize) {
@@ -210,6 +219,6 @@ public class ObliqueMpr extends OriginalStack {
     String desc = TagD.getTagValue(stack.series, Tag.SeriesDescription, String.class);
     String mprDesc = "MPR " + plane; // NON-NLS
     desc = desc == null ? mprDesc : desc + " [%s]".formatted(mprDesc); // NON-NLS
-    return stack.getCommonAttributes(frUID, desc, imageTypes);
+    return stack.getCommonAttributes(frUID, desc);
   }
 }
