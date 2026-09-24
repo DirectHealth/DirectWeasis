@@ -1,0 +1,131 @@
+name: Build DirectViewer MSI
+# DirectHealth-specific workflow, kept apart from build-installer.yml (upstream) to avoid merge
+# conflicts when syncing with nroduit/Weasis. It builds only the Windows x86-64 installer.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ env.WEASIS_VERSION }}
+      cleanversion: ${{ env.WEASIS_CLEAN_VERSION }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK for compilation
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
+        with:
+          distribution: 'temurin'
+          java-version: '26'
+          cache: 'maven'
+
+      - name: Build with Maven
+        shell: bash
+        run: |
+          mvn -B clean install
+          mvn -B -P compressXZ -f weasis-distributions clean package
+          file="weasis-distributions/target/native-dist/weasis-native.zip"
+          sha256sum "$file" >> "$file.sha256"
+
+      - name: Retrieve version
+        shell: bash
+        run: |
+          FVERSION=$(awk -F'[<>]' '/<revision>/{print $3}' weasis-parent/pom.xml)$(awk -F'[<>]' '/<changelist>/{print $3}' weasis-parent/pom.xml)
+          echo "WEASIS_VERSION=${FVERSION}" >> $GITHUB_ENV
+          CVERSION=$(echo $FVERSION | sed -e 's/"//g' -e 's/-.*//' -e 's/\(\([0-9]\+\.\)\{2\}[0-9]\+\)\.[0-9]\+/\1/')
+          echo "WEASIS_CLEAN_VERSION=${CVERSION}" >> $GITHUB_ENV
+
+      - name: Upload the native distribution
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: directviewer-native-${{ env.WEASIS_VERSION }}
+          path: weasis-distributions/target/native-dist/weasis-native.*
+
+  msi:
+    runs-on: windows-latest
+    needs: build
+    env:
+      NAME: "DirectViewer"
+      VENDOR: "DirectHealth"
+      COPYRIGHT: "© 2023 DirectHealth"
+      WEASIS_VERSION: ${{ needs.build.outputs.version }}
+      WEASIS_CLEAN_VERSION: ${{ needs.build.outputs.cleanversion }}
+      WEASIS_INPUT: "native-dist/weasis-native/bin-dist"
+      WEASIS_INPUT_BIN: "native-dist/weasis-native/bin-dist/weasis"
+      WEASIS_SCRIPT: "native-dist/weasis-native/build/script"
+      WEASIS_OUTPUT: "output-dist"
+      RES: "native-dist/weasis-native/build/script/resources/windows"
+      ARC_NAME: "x86-64"
+
+    steps:
+      - name: Set up JDK
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
+        with:
+          distribution: 'temurin'
+          java-version: '26'
+
+      - name: Download the native distribution
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: directviewer-native-${{ env.WEASIS_VERSION }}
+          path: native-dist
+
+      - name: Unzip the native distribution
+        shell: bash
+        run: unzip -o "native-dist/weasis-native.zip" -d "native-dist/weasis-native"
+
+      - name: Remove binaries not related to Windows x86-64
+        shell: bash
+        run: |
+          rm -f $WEASIS_INPUT_BIN/*.jar.pack.gz
+          find $WEASIS_INPUT_BIN/bundle/weasis-opencv-core-* -type f ! -name "*-windows-${ARC_NAME}-*" -exec rm -f {} \;
+          find $WEASIS_INPUT_BIN/bundle/jogamp-* -type f ! -name "*-windows-${ARC_NAME}-*" ! -name "jogamp-[0-9]*" -exec rm -f {} \;
+          ls $WEASIS_INPUT_BIN/bundle/
+
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version "5.*"
+          echo "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $WIX_VERSION = & "$env:USERPROFILE\.dotnet\tools\wix.exe" --version
+          Write-Host "Installed WiX version: $WIX_VERSION"
+          & "$env:USERPROFILE\.dotnet\tools\wix.exe" extension add --global WixToolset.UI.wixext/$WIX_VERSION
+          & "$env:USERPROFILE\.dotnet\tools\wix.exe" extension add --global WixToolset.Util.wixext/$WIX_VERSION
+
+      - name: Build app image with jpackage
+        shell: bash
+        run: |
+          # JDK_MODULES, customOptions and commonOptions are shared with package-weasis.sh
+          source "$WEASIS_SCRIPT/launch-options.sh" windows
+          jpackage --type app-image --input "$WEASIS_INPUT_BIN" --dest "$WEASIS_OUTPUT" --name "$NAME" \
+          --main-jar weasis-launcher.jar --main-class org.weasis.launcher.AppLauncher --add-modules "$JDK_MODULES" \
+          --resource-dir "$RES" --app-version "$WEASIS_CLEAN_VERSION" --add-launcher "Dicomizer=$RES/dicomizer-launcher.properties" \
+          "${customOptions[@]}" "${commonOptions[@]}"
+          ls -la "$WEASIS_OUTPUT/$NAME"
+
+      - name: Build MSI with jpackage
+        shell: bash
+        run: |
+          mkdir -p final-dist
+          # Same upgrade code as package-weasis.sh, so new MSIs upgrade existing DirectViewer installs
+          UPGRADE_UID="3aedc24e-48a8-4623-ab39-0c3c01c7383a"
+          jpackage --type "msi" --app-image "$WEASIS_OUTPUT/$NAME" --dest "$WEASIS_OUTPUT" --name "$NAME" --resource-dir "$RES/msi/${ARC_NAME}" \
+          --license-file "$WEASIS_INPUT/Licence.txt" --description "DirectViewer DICOM viewer" --win-upgrade-uuid "$UPGRADE_UID" \
+          --win-menu --win-menu-group "$NAME" --copyright "$COPYRIGHT" --app-version "$WEASIS_CLEAN_VERSION" \
+          --vendor "$VENDOR" --file-associations "$WEASIS_SCRIPT/file-associations.properties" --verbose
+          cp $WEASIS_OUTPUT/*.msi "final-dist/$NAME-$WEASIS_CLEAN_VERSION-$ARC_NAME.msi"
+          for file in final-dist/*.msi; do sha256sum "$file" >> "$file.sha256"; done
+
+      - name: Upload the MSI
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: directviewer-windows-x86-64-${{ env.WEASIS_VERSION }}
+          path: final-dist
+          if-no-files-found: error
