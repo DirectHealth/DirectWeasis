@@ -12,17 +12,19 @@ package org.weasis.core.api.image;
 import java.awt.Rectangle;
 import org.weasis.core.Messages;
 import org.weasis.opencv.data.PlanarImage;
-import org.weasis.opencv.op.ImageProcessor;
+import org.weasis.opencv.op.ImageTransformer;
 
-public class CropOp extends AbstractOp {
+/**
+ * Image crop operation.
+ *
+ * <p>Applies a rectangular crop area to the source image. If no crop area is defined or it covers
+ * the entire image, the source is returned unchanged.
+ */
+public final class CropOp extends AbstractOp {
 
   public static final String OP_NAME = Messages.getString("CropOperation.name");
 
-  /**
-   * Set the area to crop (Required parameter).
-   *
-   * <p>java.awt.Rectangle value.
-   */
+  /** Parameter key for crop area (Rectangle, required). */
   public static final String P_AREA = "area"; // NON-NLS
 
   public CropOp() {
@@ -40,13 +42,20 @@ public class CropOp extends AbstractOp {
 
   @Override
   public void process() throws Exception {
-    PlanarImage source = (PlanarImage) params.get(Param.INPUT_IMG);
-    PlanarImage result = source;
-    Rectangle area = (Rectangle) params.get(P_AREA);
+    PlanarImage source = getSourceImage();
+    Rectangle cropArea = (Rectangle) params.get(P_AREA);
 
-    if (area != null) {
-      result = ImageProcessor.crop(source.toMat(), area);
-    }
+    PlanarImage result =
+        needsCrop(cropArea, source) ? ImageTransformer.crop(source.toMat(), cropArea) : source;
     params.put(Param.OUTPUT_IMG, result);
+  }
+
+  private boolean needsCrop(Rectangle cropArea, PlanarImage source) {
+    if (cropArea == null || cropArea.isEmpty()) {
+      return false;
+    }
+
+    Rectangle imageArea = new Rectangle(0, 0, source.width(), source.height());
+    return !cropArea.equals(imageArea);
   }
 }

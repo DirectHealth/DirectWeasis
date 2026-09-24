@@ -13,6 +13,7 @@ import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.util.Map;
+import java.util.Optional;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.DecFormatter;
 import org.weasis.core.api.gui.util.Filter;
@@ -54,7 +55,8 @@ public class InfoLayer extends AbstractInfoLayer<ImageElement> {
   }
 
   @Override
-  public LayerAnnotation getLayerCopy(ViewCanvas view2dPane, boolean useGlobalPreferences) {
+  public LayerAnnotation<ImageElement> getLayerCopy(
+      ViewCanvas<ImageElement> view2dPane, boolean useGlobalPreferences) {
     InfoLayer layer = new InfoLayer(view2DPane, useGlobalPreferences);
     Map<LayerItem, Boolean> prefMap = layer.displayPreferences;
     setLayerValue(prefMap, LayerItem.ANNOTATIONS);
@@ -153,14 +155,16 @@ public class InfoLayer extends AbstractInfoLayer<ImageElement> {
     }
     if (getDisplayPreferences(LayerItem.WINDOW_LEVEL)) {
       StringBuilder sb = new StringBuilder();
-      Number window = (Number) disOp.getParamValue(WindowOp.OP_NAME, ActionW.WINDOW.cmd());
-      Number level = (Number) disOp.getParamValue(WindowOp.OP_NAME, ActionW.LEVEL.cmd());
-      if (window != null && level != null) {
+      Optional<Number> window =
+          disOp.getParamValue(WindowOp.OP_NAME, ActionW.WINDOW.cmd(), Number.class);
+      Optional<Number> level =
+          disOp.getParamValue(WindowOp.OP_NAME, ActionW.LEVEL.cmd(), Number.class);
+      if (window.isPresent() && level.isPresent()) {
         sb.append(ActionW.WINLEVEL.getTitle());
         sb.append(StringUtil.COLON_AND_SPACE);
-        sb.append(DecFormatter.allNumber(window));
+        sb.append(DecFormatter.allNumber(window.get()));
         sb.append("/");
-        sb.append(DecFormatter.allNumber(level));
+        sb.append(DecFormatter.allNumber(level.get()));
       }
       FontTools.paintFontOutline(g2, sb.toString(), border, drawY);
       drawY -= fontHeight;

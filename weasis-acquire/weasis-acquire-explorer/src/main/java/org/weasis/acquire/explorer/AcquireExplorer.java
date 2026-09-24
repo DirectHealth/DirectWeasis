@@ -104,7 +104,7 @@ public class AcquireExplorer extends PluginTool implements DataExplorerView {
 
   public void initImageGroupPane() {
     centralPane.getDockable().setCloseable(false);
-    centralPane.showDockable();
+    centralPane.showDockable(null);
     centralPane.setSelectedAndGetFocus();
   }
 
@@ -182,6 +182,7 @@ public class AcquireExplorer extends PluginTool implements DataExplorerView {
 
   @Override
   public void dispose() {
+    browsePanel.close();
     super.closeDockable();
   }
 

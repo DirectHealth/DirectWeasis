@@ -173,10 +173,11 @@ public class RectangleGraphic extends AbstractDragGraphicArea {
     Rectangle2D rectangle = null;
 
     if (pts.size() > 1) {
-      if (!getHandlePoint(eHandlePoint.NW.index).equals(getHandlePoint(eHandlePoint.SE.index))) {
+      Point2D nw = getHandlePoint(eHandlePoint.NW.index);
+      Point2D se = getHandlePoint(eHandlePoint.SE.index);
+      if (nw != null && !nw.equals(se)) {
         rectangle = new Rectangle2D.Double();
-        rectangle.setFrameFromDiagonal(
-            getHandlePoint(eHandlePoint.NW.index), getHandlePoint(eHandlePoint.SE.index));
+        rectangle.setFrameFromDiagonal(nw, se);
       }
     }
 
@@ -203,45 +204,45 @@ public class RectangleGraphic extends AbstractDragGraphicArea {
         rect.setFrameFromDiagonal(
             getHandlePoint(eHandlePoint.NW.index), getHandlePoint(eHandlePoint.SE.index));
 
-        double ratio = adapter.getCalibRatio();
+        double ratio = adapter.calibrationRatio();
 
         if (TOP_LEFT_POINT_X.getComputed()) {
           measVal.add(
               new MeasureItem(
-                  TOP_LEFT_POINT_X, adapter.getXCalibratedValue(rect.getX()), adapter.getUnit()));
+                  TOP_LEFT_POINT_X, adapter.getXCalibratedValue(rect.getX()), adapter.unit()));
         }
         if (TOP_LEFT_POINT_Y.getComputed()) {
           measVal.add(
               new MeasureItem(
-                  TOP_LEFT_POINT_Y, adapter.getYCalibratedValue(rect.getY()), adapter.getUnit()));
+                  TOP_LEFT_POINT_Y, adapter.getYCalibratedValue(rect.getY()), adapter.unit()));
         }
         if (CENTER_X.getComputed()) {
           measVal.add(
               new MeasureItem(
-                  CENTER_X, adapter.getXCalibratedValue(rect.getCenterX()), adapter.getUnit()));
+                  CENTER_X, adapter.getXCalibratedValue(rect.getCenterX()), adapter.unit()));
         }
         if (CENTER_Y.getComputed()) {
           measVal.add(
               new MeasureItem(
-                  CENTER_Y, adapter.getYCalibratedValue(rect.getCenterY()), adapter.getUnit()));
+                  CENTER_Y, adapter.getYCalibratedValue(rect.getCenterY()), adapter.unit()));
         }
         if (WIDTH.getComputed()) {
-          measVal.add(new MeasureItem(WIDTH, ratio * rect.getWidth(), adapter.getUnit()));
+          measVal.add(new MeasureItem(WIDTH, ratio * rect.getWidth(), adapter.unit()));
         }
         if (HEIGHT.getComputed()) {
-          measVal.add(new MeasureItem(HEIGHT, ratio * rect.getHeight(), adapter.getUnit()));
+          measVal.add(new MeasureItem(HEIGHT, ratio * rect.getHeight(), adapter.unit()));
         }
         if (AREA.getComputed()) {
           Double val = rect.getWidth() * rect.getHeight() * ratio * ratio;
           String unit =
-              "pix".equals(adapter.getUnit()) // NON-NLS
-                  ? adapter.getUnit()
-                  : adapter.getUnit() + "2";
+              "pix".equals(adapter.unit()) // NON-NLS
+                  ? adapter.unit()
+                  : adapter.unit() + "2";
           measVal.add(new MeasureItem(AREA, val, unit));
         }
         if (PERIMETER.getComputed()) {
           Double val = (rect.getWidth() + rect.getHeight()) * 2 * ratio;
-          measVal.add(new MeasureItem(PERIMETER, val, adapter.getUnit()));
+          measVal.add(new MeasureItem(PERIMETER, val, adapter.unit()));
         }
 
         List<MeasureItem> stats = getImageStatistics(layer, releaseEvent);

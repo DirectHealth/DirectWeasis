@@ -9,6 +9,8 @@
  */
 package org.weasis.dicom.wave;
 
+import static org.weasis.core.api.image.util.Unit.PIXEL;
+
 import java.util.Objects;
 import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.Tag;
@@ -38,11 +40,7 @@ public class ChannelDefinition {
     Double chSensisvity = DicomUtils.getDoubleFromDicomElement(dcm, Tag.ChannelSensitivity, null);
     if (chSensisvity == null) {
       this.baseline = 0.0;
-      this.amplitudeUnit =
-          new Unit(
-              org.weasis.core.api.image.util.Unit.PIXEL.getFullName(),
-              org.weasis.core.api.image.util.Unit.PIXEL.getAbbreviation(),
-              1.0);
+      this.amplitudeUnit = new Unit(PIXEL.getFullName(), PIXEL.getAbbreviation(), 1.0);
     } else {
       this.baseline = DicomUtils.getDoubleFromDicomElement(dcm, Tag.ChannelBaseline, 0.0);
       Double sCorrectionFactor =
@@ -51,10 +49,8 @@ public class ChannelDefinition {
           Objects.requireNonNull(
               dcm.getNestedDataset(Tag.ChannelSensitivityUnitsSequence),
               "no ChannelSensitivityUnitsSequence found");
-      String unit =
-          chs.getString(Tag.CodeValue, org.weasis.core.api.image.util.Unit.PIXEL.getAbbreviation());
-      String unitDesc =
-          chs.getString(Tag.CodeMeaning, org.weasis.core.api.image.util.Unit.PIXEL.getFullName());
+      String unit = chs.getString(Tag.CodeValue, PIXEL.getAbbreviation());
+      String unitDesc = chs.getString(Tag.CodeMeaning, PIXEL.getFullName());
       double factorUnit = "mV".equals(unit) ? 1000 : 1;
       this.amplitudeUnit = new Unit(unitDesc, unit, chSensisvity * sCorrectionFactor * factorUnit);
     }

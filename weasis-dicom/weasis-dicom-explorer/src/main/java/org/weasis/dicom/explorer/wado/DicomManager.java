@@ -15,8 +15,8 @@ import org.dcm4che3.data.Tag;
 import org.weasis.core.api.media.data.TagView;
 import org.weasis.core.api.media.data.TagW;
 import org.weasis.dicom.codec.TagD;
-import org.weasis.dicom.explorer.DicomFieldsView.DicomData;
 import org.weasis.dicom.explorer.Messages;
+import org.weasis.dicom.explorer.tag.DicomFieldsView.DicomData;
 
 public class DicomManager {
 

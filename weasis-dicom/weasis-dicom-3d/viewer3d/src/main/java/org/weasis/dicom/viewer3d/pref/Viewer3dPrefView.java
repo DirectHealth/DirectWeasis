@@ -24,10 +24,10 @@ import javax.swing.JSpinner;
 import javax.swing.SpinnerListModel;
 import javax.swing.SwingUtilities;
 import org.osgi.framework.Version;
+import org.weasis.core.api.gui.layout.MigLayoutModel;
 import org.weasis.core.api.gui.util.AbstractItemDialogPage;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.gui.util.GuiUtils.IconColor;
-import org.weasis.core.api.image.GridBagLayoutModel;
 import org.weasis.core.api.service.WProperties;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.ActionIcon;
@@ -47,8 +47,8 @@ public class Viewer3dPrefView extends AbstractItemDialogPage {
   private final JButton lightColor = new JButton(ResourceUtil.getIcon(ActionIcon.PIPETTE));
   private final JSlider sliderDynamic =
       new JSlider(0, 100, RenderingLayer.DEFAULT_DYNAMIC_QUALITY_RATE);
-  private final JComboBox<GridBagLayoutModel> comboBoxLayouts =
-      new JComboBox<>(View3DContainer.LAYOUT_LIST.toArray(new GridBagLayoutModel[0]));
+  private final JComboBox<MigLayoutModel> comboBoxLayouts =
+      new JComboBox<>(View3DContainer.LAYOUT_LIST.toArray(new MigLayoutModel[0]));
 
   private final JComboBox<CameraView> comboBoxOrientations = new JComboBox<>(CameraView.values());
   private final JSpinner spinnerMaxXY;
@@ -154,10 +154,11 @@ public class Viewer3dPrefView extends AbstractItemDialogPage {
       openglPanel.add(GuiUtils.getFlowLayoutPanel(texture));
 
       // This minimal version must match with the shader version
-      Version minimalVersion = new Version(4, 3, 0);
+      Version minimalVersion = new Version(3, 3, 0);
       boolean versionIssue = !info.isVersionCompliant();
       boolean software = info.looksSoftware();
-      if (versionIssue || software || info.max3dTextureSize() < RenderingLayer.MAX_QUALITY) {
+
+      if (versionIssue || software || info.max3dTextureSize() < RenderingLayer.MIN_TEXTURE_SIZE) {
         String alert =
             GuiUtils.HTML_COLOR_PATTERN.formatted(
                 IconColor.ACTIONS_RED.getHtmlCode(),
@@ -182,7 +183,7 @@ public class Viewer3dPrefView extends AbstractItemDialogPage {
           openglPanel.add(GuiUtils.getFlowLayoutPanel(new JLabel(alert)));
         }
 
-        if (info.max3dTextureSize() < RenderingLayer.MAX_QUALITY) {
+        if (info.max3dTextureSize() < RenderingLayer.MIN_TEXTURE_SIZE) {
           alert =
               GuiUtils.HTML_COLOR_PATTERN.formatted(
                   IconColor.ACTIONS_RED.getHtmlCode(),
@@ -264,7 +265,7 @@ public class Viewer3dPrefView extends AbstractItemDialogPage {
   }
 
   private void setDefaultLayout() {
-    comboBoxLayouts.setSelectedItem(View3DFactory.getDefaultGridBagLayoutModel());
+    comboBoxLayouts.setSelectedItem(View3DFactory.getDefaultMigLayoutModel());
     if (comboBoxLayouts.getSelectedIndex() < 0) {
       comboBoxLayouts.setSelectedItem(0);
     }
@@ -293,7 +294,7 @@ public class Viewer3dPrefView extends AbstractItemDialogPage {
     WProperties localPersistence = GuiUtils.getUICore().getLocalPersistence();
     preferences.put(
         View3DFactory.P_DEFAULT_LAYOUT,
-        ((GridBagLayoutModel) comboBoxLayouts.getSelectedItem()).getId());
+        ((MigLayoutModel) comboBoxLayouts.getSelectedItem()).getId());
     preferences.put(
         Camera.P_DEFAULT_ORIENTATION, ((CameraView) comboBoxOrientations.getSelectedItem()).name());
     localPersistence.putIntProperty(

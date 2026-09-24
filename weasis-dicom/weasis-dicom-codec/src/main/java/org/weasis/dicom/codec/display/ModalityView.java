@@ -26,8 +26,9 @@ import org.slf4j.LoggerFactory;
 import org.weasis.core.api.media.data.TagUtil;
 import org.weasis.core.api.media.data.TagView;
 import org.weasis.core.api.media.data.TagW;
+import org.weasis.core.api.media.data.XmlAttributeSource;
 import org.weasis.core.api.util.ResourceUtil;
-import org.weasis.core.util.FileUtil;
+import org.weasis.core.util.StreamUtil;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.Messages;
 import org.weasis.dicom.codec.TagD;
@@ -203,7 +204,7 @@ public class ModalityView {
     } catch (Exception e) {
       LOGGER.error("Cannot read attributes-view.xml! ", e);
     } finally {
-      FileUtil.safeClose(xmler);
+      StreamUtil.safeClose(xmler);
     }
   }
 
@@ -275,7 +276,9 @@ public class ModalityView {
         case XMLStreamConstants.START_ELEMENT:
           if ("p".equals(xmler.getName().getLocalPart()) // NON-NLS
               && xmler.getAttributeCount() >= 1) {
-            index = TagUtil.getIntegerTagAttribute(xmler, "index", -1); // NON-NLS
+            index =
+                TagUtil.getIntegerTagAttribute(
+                    new XmlAttributeSource(xmler), "index", -1); // NON-NLS
             format = xmler.getAttributeValue(null, "format"); // NON-NLS
           }
           break;

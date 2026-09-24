@@ -66,4 +66,24 @@ struct LightParameters {
 };
 uniform LightParameters lights[4];
 
-const vec3 sliceOffset = vec3(0.5, 0.5, 0.0);
+const vec3 sliceOffset = vec3(0.5, 0.5, 0.5);
+
+// MPR crosshair
+uniform vec3  crosshairPos;
+uniform mat3  crosshairRot;
+uniform bool  crosshairVisible;
+uniform int   crosshairCutMode;
+
+// Ratio of the ray-cast resolution to the on-screen one, so pixel-sized overlays keep a constant
+// apparent size when the pass is rendered at reduced resolution. Always 1.0 on the compute path.
+uniform float overlayScale = 1.0;
+
+// Segmentation overlay
+uniform bool segOverlayEnabled = false;
+// When true, only the segmentation is rendered; the anatomy volume raymarch is skipped.
+uniform bool segOnly = false;
+uniform int  segSegmentCount = 0;
+// Segmentation voxel mask: 0 = none, 1 = include (render only the real voxels inside visible
+// segments), 2 = exclude (remove those voxels from the rendering). No colour overlay is drawn.
+uniform int  segMaskMode = 0;
+

@@ -9,20 +9,23 @@
  */
 package org.weasis.core.api.media.data;
 
-import java.io.File;
-import java.nio.file.Paths;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.Objects;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.weasis.core.api.net.URIUtils;
 import org.weasis.core.util.FileUtil;
 
 public class FileCache {
   private static final Logger LOGGER = LoggerFactory.getLogger(FileCache.class);
 
   private final MediaReader reader;
-  private File originalTempFile;
-  private File transformedFile;
+  private Path originalTempFile;
+  private Path transformedFile;
   private boolean requireTransformation;
 
   public FileCache(MediaReader reader) {
@@ -31,20 +34,20 @@ public class FileCache {
   }
 
   public boolean isLocalFile() {
-    return reader.getUri().getScheme().startsWith("file"); // NON-NLS
+    return URIUtils.isFileURI(reader.getUri());
   }
 
   public boolean isElementInMemory() {
-    return reader.getUri().getScheme().startsWith("data"); // NON-NLS
+    return "data".equals(reader.getUri().getScheme()); // NON-NLS
   }
 
-  public Optional<File> getOriginalFile() {
-    File originalFile = null;
+  public Optional<Path> getOriginalFile() {
+    Path originalFile = null;
     if (originalTempFile != null) {
       originalFile = originalTempFile;
     } else if (isLocalFile()) {
       try {
-        originalFile = Paths.get(reader.getUri()).toFile();
+        originalFile = URIUtils.toPath(reader.getUri());
       } catch (Exception e) {
         LOGGER.error("Cannot convert uri to file: {}", reader.getUri(), e);
       }
@@ -52,26 +55,26 @@ public class FileCache {
     return Optional.ofNullable(originalFile);
   }
 
-  public File getFinalFile() {
+  public Path getFinalFile() {
     if (transformedFile != null) {
       return transformedFile;
     }
     return getOriginalFile().orElse(null);
   }
 
-  public synchronized File getOriginalTempFile() {
+  public synchronized Path getOriginalTempFile() {
     return originalTempFile;
   }
 
-  public synchronized void setOriginalTempFile(File downloadedFile) {
+  public synchronized void setOriginalTempFile(Path downloadedFile) {
     this.originalTempFile = downloadedFile;
   }
 
-  public synchronized File getTransformedFile() {
+  public synchronized Path getTransformedFile() {
     return transformedFile;
   }
 
-  public synchronized void setTransformedFile(File transformedFile) {
+  public synchronized void setTransformedFile(Path transformedFile) {
     this.transformedFile = transformedFile;
   }
 
@@ -84,13 +87,31 @@ public class FileCache {
   }
 
   public long getLength() {
-    Optional<File> f = getOriginalFile();
-    return f.map(File::length).orElse(0L);
+    Optional<Path> f = getOriginalFile();
+    return f.map(
+            path -> {
+              try {
+                return Files.size(path);
+              } catch (IOException e) {
+                LOGGER.error("Cannot get file size: {}", path, e);
+                return 0L;
+              }
+            })
+        .orElse(0L);
   }
 
-  public long getLastModified() {
-    Optional<File> f = getOriginalFile();
-    return f.map(File::lastModified).orElse(0L);
+  public FileTime getLastModified() {
+    Optional<Path> f = getOriginalFile();
+    return f.map(
+            path -> {
+              try {
+                return Files.getLastModifiedTime(path);
+              } catch (IOException e) {
+                LOGGER.error("Cannot get last modified time: {}", path, e);
+                return null;
+              }
+            })
+        .orElse(FileTime.fromMillis(0L));
   }
 
   public void dispose() {

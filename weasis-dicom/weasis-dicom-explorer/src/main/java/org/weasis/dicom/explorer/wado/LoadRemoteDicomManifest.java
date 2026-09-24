@@ -10,7 +10,6 @@
 package org.weasis.dicom.explorer.wado;
 
 import java.beans.PropertyChangeListener;
-import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
@@ -28,14 +27,14 @@ import org.weasis.core.api.explorer.ObservableEvent.BasicAction;
 import org.weasis.core.api.explorer.model.DataExplorerModel;
 import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
-import org.weasis.core.api.util.NetworkUtil;
+import org.weasis.core.api.net.URIUtils;
 import org.weasis.core.util.StreamIOException;
 import org.weasis.core.util.StringUtil;
 import org.weasis.core.util.StringUtil.Suffix;
 import org.weasis.dicom.explorer.DicomModel;
-import org.weasis.dicom.explorer.ExplorerTask;
 import org.weasis.dicom.explorer.Messages;
 import org.weasis.dicom.explorer.PluginOpeningStrategy;
+import org.weasis.dicom.explorer.exp.ExplorerTask;
 import org.weasis.dicom.explorer.pref.download.DicomExplorerPrefView;
 import org.weasis.dicom.explorer.wado.DownloadManager.PriorityTaskComparator;
 
@@ -169,8 +168,8 @@ public class LoadRemoteDicomManifest extends ExplorerTask<Boolean, String> {
 
   private void downloadManifest(String path) throws DownloadException {
     try {
-      URI uri = NetworkUtil.getURI(path);
-      Collection<LoadSeries> wadoTasks = DownloadManager.buildDicomSeriesFromXml(uri, dicomModel);
+      URI uri = URIUtils.getURI(path);
+      Collection<LoadSeries> wadoTasks = DownloadManager.buildDicomSeries(uri, dicomModel);
 
       loadSeriesList.addAll(wadoTasks);
       boolean downloadImmediately =
@@ -181,7 +180,7 @@ public class LoadRemoteDicomManifest extends ExplorerTask<Boolean, String> {
       if (!downloadImmediately) {
         LoadSeries.notifyDownloadCompletion(dicomModel);
       }
-    } catch (URISyntaxException | MalformedURLException e) {
+    } catch (URISyntaxException e) {
       LOGGER.error("Loading manifest", e);
     }
   }

@@ -63,7 +63,7 @@ public abstract class GraphicsPane extends JComponent implements Canvas {
   protected final PropertyChangeListener graphicsChangeHandler;
 
   public GraphicsPane(ViewModel viewModel) {
-    setOpaque(false);
+    setOpaque(true);
 
     this.layerModelHandler = new LayerModelHandler();
 
@@ -297,7 +297,7 @@ public abstract class GraphicsPane extends JComponent implements Canvas {
     double rWidth = modelArea.getWidth();
     double rHeight = modelArea.getHeight();
 
-    boolean flip = LangUtil.getNULLtoFalse((Boolean) view2d.getActionValue((ActionW.FLIP.cmd())));
+    boolean flip = LangUtil.nullToFalse((Boolean) view2d.getActionValue((ActionW.FLIP.cmd())));
     Integer rotationAngle = (Integer) view2d.getActionValue(ActionW.ROTATION.cmd());
 
     affineTransform.setToScale(flip ? -viewScale : viewScale, viewScale);

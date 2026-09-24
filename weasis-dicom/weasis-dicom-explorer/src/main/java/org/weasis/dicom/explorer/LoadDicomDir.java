@@ -12,6 +12,7 @@ package org.weasis.dicom.explorer;
 import java.util.List;
 import org.weasis.core.api.explorer.model.DataExplorerModel;
 import org.weasis.dicom.explorer.HangingProtocols.OpeningViewer;
+import org.weasis.dicom.explorer.exp.ExplorerTask;
 import org.weasis.dicom.explorer.wado.DownloadManager;
 import org.weasis.dicom.explorer.wado.LoadSeries;
 

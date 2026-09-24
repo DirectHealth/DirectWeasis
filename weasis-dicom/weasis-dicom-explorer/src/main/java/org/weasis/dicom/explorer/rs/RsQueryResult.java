@@ -17,8 +17,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.Tag;
@@ -28,15 +30,15 @@ import org.dcm4che3.json.JSONReader;
 import org.dcm4che3.json.JSONReader.Callback;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.weasis.core.api.auth.AuthMethod;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.media.data.MediaSeriesGroup;
 import org.weasis.core.api.media.data.MediaSeriesGroupNode;
 import org.weasis.core.api.media.data.Series;
 import org.weasis.core.api.media.data.TagW;
-import org.weasis.core.api.util.HttpResponse;
-import org.weasis.core.api.util.NetworkUtil;
-import org.weasis.core.api.util.URLParameters;
+import org.weasis.core.api.net.HttpStream;
+import org.weasis.core.api.net.HttpUtils;
+import org.weasis.core.api.net.URLParameters;
+import org.weasis.core.api.net.auth.AuthMethod;
 import org.weasis.core.util.LangUtil;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.DicomSeries;
@@ -51,18 +53,19 @@ import org.weasis.dicom.explorer.wado.LoadSeries;
 import org.weasis.dicom.mf.AbstractQueryResult;
 import org.weasis.dicom.mf.SopInstance;
 import org.weasis.dicom.mf.WadoParameters;
-import org.weasis.dicom.web.Multipart;
+import org.weasis.dicom.web.MultipartConstants;
+import org.weasis.dicom.web.MultipartConstants.DicomContentType;
 
 public class RsQueryResult extends AbstractQueryResult {
   private static final Logger LOGGER = LoggerFactory.getLogger(RsQueryResult.class);
 
   private static final boolean MULTIPLE_PARAMS =
-      LangUtil.getEmptytoFalse(System.getProperty("dicom.qido.query.multi.params"));
+      LangUtil.emptyToFalse(System.getProperty("dicom.qido.query.multi.params"));
   public static final String STUDY_QUERY =
       multiParams(
-          "&includefield=00080020,00080030,00080050,00080061,00080090,00081030,00100010,00100020,00100021,00100030,00100040,0020000D,00200010"); // NON-NLS
+          "&includefield=00080020,00080030,00080050,00080061,00080090,00081030,00100010,00100020,00100021,00100030,00100040,0020000D,00200010");
   public static final String SERIES_QUERY =
-      multiParams("0008103E,00080060,0020000E,00200011,00081190"); // NON-NLS
+      multiParams("0008103E,00080060,0020000E,00200011,00081190,00201209");
   public static final String INSTANCE_QUERY = multiParams("00080018,00200013,00081190");
   public static final String QIDO_REQUEST = "QIDO-RS request: {}"; // NON-NLS
 
@@ -79,9 +82,9 @@ public class RsQueryResult extends AbstractQueryResult {
     // Accept only multipart/related and retrieve dicom at the stored syntax
     wadoParameters.addHttpTag(
         "Accept", // NON-NLS
-        Multipart.MULTIPART_RELATED
+        MultipartConstants.MULTIPART_RELATED
             + ";type=\"" // NON-NLS
-            + Multipart.ContentType.DICOM
+            + DicomContentType.DICOM
             + "\";"
             + rsQueryParams.getProperties().getProperty(RsQueryParams.P_ACCEPT_EXT));
     defaultStartDownloading =
@@ -134,10 +137,36 @@ public class RsQueryResult extends AbstractQueryResult {
     }
   }
 
+  /** QIDO-RS query listing the series of a study with the fields the explorer needs. */
+  public static String seriesQueryUrl(String baseUrl, String studyUid, String queryExtension) {
+    return baseUrl
+        + "/studies/" // NON-NLS
+        + studyUid
+        + "/series?includefield=" // NON-NLS
+        + SERIES_QUERY
+        + StringUtil.getEmptyStringIfNull(queryExtension);
+  }
+
+  /**
+   * The given headers, with the DICOM JSON media type {@link #parseJSON} reads. A node configured
+   * for the retrieve carries the multipart Accept of a WADO-RS request, which a query must not
+   * send.
+   */
+  public static URLParameters jsonQueryParameters(Map<String, String> headers) {
+    return jsonQueryParameters(new URLParameters(headers));
+  }
+
+  /** Same as {@link #jsonQueryParameters(Map)}, keeping the timeouts of {@code parameters}. */
+  public static URLParameters jsonQueryParameters(URLParameters parameters) {
+    Map<String, String> jsonHeaders = new HashMap<>(parameters.headers());
+    jsonHeaders.put("Accept", "application/dicom+json"); // NON-NLS
+    return parameters.toBuilder().headers(jsonHeaders).build();
+  }
+
   public static List<Attributes> parseJSON(
       String url, AuthMethod authMethod, URLParameters urlParameters) throws Exception {
     List<Attributes> items = new ArrayList<>();
-    try (HttpResponse response = NetworkUtil.getHttpResponse(url, urlParameters, authMethod);
+    try (HttpStream response = HttpUtils.getHttpResponse(url, urlParameters, authMethod);
         InputStreamReader instream =
             new InputStreamReader(response.getInputStream(), StandardCharsets.UTF_8)) {
       int code = response.getResponseCode();
@@ -155,6 +184,33 @@ public class RsQueryResult extends AbstractQueryResult {
       }
     }
     return items;
+  }
+
+  /**
+   * Number of instances in the series ({@code NumberOfSeriesRelatedInstances}) from a single QIDO
+   * count query, or {@code 0} when the server does not report it.
+   */
+  public static int seriesInstanceCount(
+      String dicomWebBaseUrl,
+      String studyUID,
+      String seriesUID,
+      URLParameters urlParameters,
+      AuthMethod authMethod) {
+    String url =
+        "%s/studies/%s/series?0020000E=%s&includefield=00201209" // NON-NLS
+            .formatted(dicomWebBaseUrl, studyUID, seriesUID);
+    try {
+      for (Attributes series : parseJSON(url, authMethod, jsonQueryParameters(urlParameters))) {
+        // Match the exact series in case the server ignores the query filter.
+        if (seriesUID.equals(series.getString(Tag.SeriesInstanceUID))) {
+          return DicomUtils.getIntegerFromDicomElement(
+              series, Tag.NumberOfSeriesRelatedInstances, 0);
+        }
+      }
+    } catch (Exception e) {
+      LOGGER.debug("Cannot fetch instance count for series {}", seriesUID, e);
+    }
+    return 0;
   }
 
   private void applyAllFilters(List<Attributes> studies) {
@@ -341,7 +397,7 @@ public class RsQueryResult extends AbstractQueryResult {
 
   public void buildFromSeriesInstanceUID(List<String> seriesInstanceUIDs) {
     boolean wholeStudy =
-        LangUtil.getEmptytoFalse(
+        LangUtil.emptyToFalse(
             rsQueryParams.getProperties().getProperty(RsQueryParams.P_SHOW_WHOLE_STUDY));
     Set<String> studyHashSet = new LinkedHashSet<>();
 
@@ -368,7 +424,7 @@ public class RsQueryResult extends AbstractQueryResult {
           MediaSeriesGroup study = getStudy(patient, dataset, rsQueryParams.getDicomModel());
           for (Attributes seriesDataset : series) {
             Series<?> dicomSeries = getSeries(study, seriesDataset, defaultStartDownloading);
-            fillInstance(seriesDataset, dicomSeries);
+            fillSeriesContent(dicomSeries);
           }
           studyHashSet.add(dataset.getString(Tag.StudyInstanceUID));
         }
@@ -424,25 +480,25 @@ public class RsQueryResult extends AbstractQueryResult {
   private void fillSeries(Attributes studyDataSet, boolean startDownloading) {
     String studyInstanceUID = studyDataSet.getString(Tag.StudyInstanceUID);
     if (StringUtil.hasText(studyInstanceUID)) {
-      StringBuilder buf = new StringBuilder(rsQueryParams.getBaseUrl());
-      buf.append("/studies/"); // NON-NLS
-      buf.append(studyInstanceUID);
-      buf.append("/series?includefield="); // NON-NLS
-      buf.append(SERIES_QUERY);
-      buf.append(rsQueryParams.getProperties().getProperty(RsQueryParams.P_QUERY_EXT, ""));
+      String url =
+          seriesQueryUrl(
+              rsQueryParams.getBaseUrl(),
+              studyInstanceUID,
+              rsQueryParams.getProperties().getProperty(RsQueryParams.P_QUERY_EXT));
 
       try {
-        LOGGER.debug(QIDO_REQUEST, buf);
+        LOGGER.debug(QIDO_REQUEST, url);
+        // Headers configured for the query are used as they are, unlike the retrieve headers the
+        // explorer reuses elsewhere
         List<Attributes> series =
-            parseJSON(
-                buf.toString(), authMethod, new URLParameters(rsQueryParams.getQueryHeaders()));
+            parseJSON(url, authMethod, new URLParameters(rsQueryParams.getQueryHeaders()));
         if (!series.isEmpty()) {
           // Get patient from each study in case IssuerOfPatientID is different
           MediaSeriesGroup patient = getPatient(studyDataSet, rsQueryParams.getDicomModel());
           MediaSeriesGroup study = getStudy(patient, studyDataSet, rsQueryParams.getDicomModel());
           for (Attributes seriesDataset : series) {
             Series<?> dicomSeries = getSeries(study, seriesDataset, startDownloading);
-            fillInstance(seriesDataset, dicomSeries);
+            fillSeriesContent(dicomSeries);
           }
         }
       } catch (Exception e) {
@@ -451,48 +507,10 @@ public class RsQueryResult extends AbstractQueryResult {
     }
   }
 
-  private void fillInstance(Attributes seriesDataset, Series<?> dicomSeries) {
-    String seriesUID = seriesDataset.getString(Tag.SeriesInstanceUID);
-    if (StringUtil.hasText(seriesUID)) {
-      String seriesRetrieveURL = TagD.getTagValue(dicomSeries, Tag.RetrieveURL, String.class);
-      StringBuilder baseQuery = new StringBuilder(seriesRetrieveURL);
-      baseQuery.append("/instances?includefield="); // NON-NLS
-      baseQuery.append(INSTANCE_QUERY);
-      baseQuery.append(rsQueryParams.getProperties().getProperty(RsQueryParams.P_QUERY_EXT, ""));
-
-      int offset = 0;
-      int limit = 1000; // Maximum number of instances to fetch per query
-      try {
-        while (true) {
-          StringBuilder paginatedQuery = new StringBuilder(baseQuery);
-          paginatedQuery.append("&offset=").append(offset); // NON-NLS
-          paginatedQuery.append("&limit=").append(limit); // NON-NLS
-          LOGGER.debug(QIDO_REQUEST, paginatedQuery);
-          List<Attributes> instances =
-              parseJSON(
-                  paginatedQuery.toString(),
-                  authMethod,
-                  new URLParameters(rsQueryParams.getQueryHeaders()));
-          if (instances.isEmpty()) {
-            break;
-          }
-
-          SeriesInstanceList seriesInstanceList =
-              (SeriesInstanceList) dicomSeries.getTagValue(TagW.WadoInstanceReferenceList);
-          if (seriesInstanceList != null) {
-            for (Attributes instanceDataSet : instances) {
-              addSopInstance(instanceDataSet, seriesInstanceList, seriesRetrieveURL);
-            }
-          }
-          offset += instances.size();
-          if (instances.size() < limit) {
-            break;
-          }
-        }
-      } catch (Exception e) {
-        LOGGER.error("QIDO-RS all instances with seriesUID {}", seriesUID, e);
-      }
-    }
+  private void fillSeriesContent(Series<?> dicomSeries) {
+    // A series queried at the series level is always retrieved with a single series-level WADO-RS
+    // multipart request; per-instance enumeration is the archive connector's responsibility.
+    dicomSeries.setTag(LoadSeries.SERIES_BULK_RETRIEVE, Boolean.TRUE);
   }
 
   public static void addSopInstance(
@@ -587,7 +605,11 @@ public class RsQueryResult extends AbstractQueryResult {
 
       TagW[] tags =
           TagD.getTagFromIDs(
-              Tag.Modality, Tag.SeriesNumber, Tag.SeriesDescription, Tag.RetrieveURL);
+              Tag.Modality,
+              Tag.SeriesNumber,
+              Tag.SeriesDescription,
+              Tag.RetrieveURL,
+              Tag.NumberOfSeriesRelatedInstances);
       for (TagW tag : tags) {
         tag.readValue(seriesDataset, dicomSeries);
       }

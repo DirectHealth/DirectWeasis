@@ -11,6 +11,7 @@ package org.weasis.core.ui.pref;
 
 import java.awt.FlowLayout;
 import java.text.NumberFormat;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
@@ -36,6 +37,7 @@ public class LanguageSetting extends AbstractItemDialogPage {
       new JLabel(Messages.getString("GeneralSetting.language") + StringUtil.COLON);
   private final JLabel labelLocale2 =
       new JLabel(Messages.getString("GeneralSetting.language.data") + StringUtil.COLON);
+
   private final JLocaleFormat comboBoxFormat =
       new JLocaleFormat() {
         @Override
@@ -92,7 +94,7 @@ public class LanguageSetting extends AbstractItemDialogPage {
   }
 
   private String getText() {
-    ZonedDateTime now = ZonedDateTime.now();
+    ZonedDateTime now = ZonedDateTime.now(ZoneId.systemDefault());
 
     int translationPercentage = 100;
     if (comboBoxLang.getSelectedItem() instanceof JLocalePercentage jLocalePercentage) {
@@ -154,6 +156,7 @@ public class LanguageSetting extends AbstractItemDialogPage {
     WProperties preferences = GuiUtils.getUICore().getSystemPreferences();
     comboBoxLang.selectLocale(preferences.getProperty("locale.lang.code"));
     comboBoxFormat.selectLocale();
+    textPane.setText(getText());
   }
 
   @Override

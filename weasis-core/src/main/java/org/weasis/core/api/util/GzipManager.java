@@ -23,6 +23,7 @@ import java.util.zip.GZIPOutputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.util.FileUtil;
+import org.weasis.core.util.StreamUtil;
 
 public class GzipManager {
   private static final Logger LOGGER = LoggerFactory.getLogger(GzipManager.class);
@@ -38,7 +39,7 @@ public class GzipManager {
       LOGGER.error("Cannot gzip compress", e);
       return false;
     } finally {
-      FileUtil.safeClose(in);
+      StreamUtil.safeClose(in);
     }
   }
 
@@ -57,7 +58,7 @@ public class GzipManager {
       LOGGER.error("Cannot gzip compress", e);
       return false;
     } finally {
-      FileUtil.safeClose(in);
+      StreamUtil.safeClose(in);
     }
   }
 
@@ -143,7 +144,7 @@ public class GzipManager {
           return gzipUncompress(inputStream, outputStream);
         }
       }
-      return FileUtil.writeStream(inputStream, outFilename) == -1;
+      return FileUtil.writeStream(inputStream, outFilename.toPath()) == -1;
     } catch (IOException e) {
       LOGGER.error(ERROR_CTX, e);
       return false;

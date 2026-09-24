@@ -9,6 +9,8 @@
  */
 package org.weasis.dicom.isowriter;
 
+import com.formdev.flatlaf.util.SystemFileChooser;
+import com.formdev.flatlaf.util.SystemFileChooser.FileNameExtensionFilter;
 import com.formdev.flatlaf.util.SystemInfo;
 import com.github.stephenc.javaisotools.iso9660.ConfigException;
 import com.github.stephenc.javaisotools.iso9660.ISO9660RootDirectory;
@@ -35,21 +37,20 @@ import java.util.Properties;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
-import javax.swing.JFileChooser;
 import javax.swing.JProgressBar;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.gui.util.AppProperties;
-import org.weasis.core.api.gui.util.FileFormatFilter;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.util.FileUtil;
+import org.weasis.core.util.StreamUtil;
 import org.weasis.core.util.StringUtil;
-import org.weasis.dicom.explorer.CheckTreeModel;
 import org.weasis.dicom.explorer.DicomModel;
-import org.weasis.dicom.explorer.ExplorerTask;
-import org.weasis.dicom.explorer.LocalExport;
+import org.weasis.dicom.explorer.exp.CheckTreeModel;
+import org.weasis.dicom.explorer.exp.ExplorerTask;
+import org.weasis.dicom.explorer.exp.LocalExport;
 
 public class IsoImageExport extends LocalExport {
 
@@ -133,14 +134,14 @@ public class IsoImageExport extends LocalExport {
                   new ObservableEvent(
                       ObservableEvent.BasicAction.LOADING_START, dicomModel, null, this));
               File exportDir =
-                  FileUtil.createTempDir(
-                      AppProperties.buildAccessibleTempDirectory("tmp", "burn")); // NON-NLS
+                  FileUtil.createTempDir(AppProperties.buildAccessibleTempDirectory("tmp", "burn"))
+                      .toFile(); // NON-NLS
               Properties pref = getPreferences();
               pref.setProperty(INC_DICOMDIR, Boolean.TRUE.toString());
               pref.setProperty(CD_COMPATIBLE, Boolean.TRUE.toString());
               writeDicom(this, exportDir, model, pref);
               File readmeFile = ResourceUtil.getResource("isowriter/README.htm"); // NON-NLS
-              FileUtil.nioCopyFile(readmeFile, new File(exportDir, "README.HTM"));
+              StreamUtil.copyFile(readmeFile.toPath(), new File(exportDir, "README.HTM").toPath());
 
               if (checkBoxAddJpeg.isSelected()) {
                 writeOther(this, new File(exportDir, "JPEG"), model, Format.JPEG, new Properties());
@@ -157,9 +158,10 @@ public class IsoImageExport extends LocalExport {
                   Path in = appPath.getParent();
                   copyFolder(in, out, StandardCopyOption.COPY_ATTRIBUTES);
                   File autorun = ResourceUtil.getResource("isowriter/Autorun.inf"); // NON-NLS
-                  FileUtil.nioCopyFile(autorun, new File(exportDir, "AUTORUN.INF"));
+                  StreamUtil.copyFile(
+                      autorun.toPath(), new File(exportDir, "AUTORUN.INF").toPath());
                   File run = ResourceUtil.getResource("isowriter/RUN.bat"); // NON-NLS
-                  FileUtil.nioCopyFile(run, new File(exportDir, "RUN.BAT"));
+                  StreamUtil.copyFile(run.toPath(), new File(exportDir, "RUN.BAT").toPath());
                 }
               }
 
@@ -211,10 +213,10 @@ public class IsoImageExport extends LocalExport {
     }
     outputFile = new File(lastFolder, "cdrom-DICOM.iso");
 
-    JFileChooser fileChooser = new JFileChooser(outputFile);
-    fileChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+    SystemFileChooser fileChooser = new SystemFileChooser(outputFile);
+    fileChooser.setFileSelectionMode(SystemFileChooser.FILES_ONLY);
     fileChooser.setMultiSelectionEnabled(false);
-    FileFormatFilter filter = new FileFormatFilter("iso", "ISO"); // NON-NLS
+    FileNameExtensionFilter filter = new FileNameExtensionFilter("ISO image", "iso"); // NON-NLS
     fileChooser.addChoosableFileFilter(filter);
     fileChooser.setFileFilter(filter);
 
@@ -290,7 +292,7 @@ public class IsoImageExport extends LocalExport {
     } catch (ConfigException | HandlerException | FileNotFoundException e) {
       LOGGER.error("Error when building ISO", e);
     } finally {
-      FileUtil.recursiveDelete(exportDir);
+      FileUtil.recursiveDelete(exportDir.toPath());
     }
     return null;
   }

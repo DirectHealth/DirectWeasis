@@ -9,67 +9,62 @@
  */
 package org.weasis.core.api.image.util;
 
-import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.weasis.core.Messages;
 
+/** Units are organized by measurement system and provide conversion utilities. */
 public enum Unit {
-  PIXEL(-5, Messages.getString("Unit.pix"), Messages.getString("Unit.pix_s"), 1.0),
-  /*
-   * The prefix "nano" means 1 x 10-9, so one nanometer = 0.000000001 meters. Alternatively, 1 meter contains
-   * 1,000,000,000 nanometers. Visible light contains wavelengths from roughly 300 to 800 nm. To convert this
-   * wavelength to energy.
-   */
-  NANOMETER(-2, Messages.getString("Unit.nano"), Messages.getString("Unit.nano_S"), 1.0E-09),
-  /*
-   * Also known a micron. The prefix "micro" means 1 x 10-6, so one micrometer = 0.000001 meters. Alternatively, 1
-   * meter contains 1,000,000 micrometers. 1 micrometer = 10,000 Angstroms = 0.001 millimeters = 0.0009843 inches.
-   */
-  MICROMETER(-1, Messages.getString("Unit.micro"), Messages.getString("Unit.micro_S"), 1.0E-06),
-  /*
-   * The prefix "milli" means 1/1000, so one millimeter = 0.001 meters. Alternatively, 1 meter contains 1000
-   * millimeters. 1 millimeter = 0.1 cm = 0.0394 inches.
-   */
-  MILLIMETER(0, Messages.getString("Unit.milli"), Messages.getString("Unit.milli_s"), 1.0E-03),
-  /*
-   * The prefix "centi" means 1/100, so one centimeter = 0.01 meters. Alternatively, 1 meter contains 100 cm. 1 cm =
-   * 10 mm = 0.3937 inches.
-   */
-  CENTIMETER(1, Messages.getString("Unit.cent"), Messages.getString("Unit.cent_s"), 1.0E-02),
-  /*
-   * Defined as the length of 1,650,763.73 wavelengths of the orange-red radiation of 86Kr in a vacuum, one meter
-   * contains 100 cm = 1000 mm. There are 1000 m in a kilometer. One meter = 39.37 inches = 3.28 feet = 1.09 yards.
-   */
-  METER(2, Messages.getString("Unit.meter"), Messages.getString("Unit.meter_s"), 1.0),
-  /*
-   * The prefix "kilo" means 1000, so one kilometer = 1,000 meters. 1 kilometer = 3,280.84 feet = 1,093.6 yards =
-   * 0.6214 miles.
-   */
-  KILOMETER(3, Messages.getString("Unit.kilo"), Messages.getString("Unit.kilo_s"), 1.0E+03),
 
-  // micro and mili iches are not official units because micro and mili comes from metric unit
-  MICROINCH(9, Messages.getString("Unit.minch"), Messages.getString("Unit.minch_s"), 2.54E-08),
+  // === Special Units ===
+  PIXEL(-5, "Unit.pix", "Unit.pix_s", 1.0, UnitSystem.DIGITAL),
 
-  MILLIINCH(10, Messages.getString("Unit.mil_inch"), Messages.getString("Unit.mil"), 2.54E-05),
+  // === Metric Units (SI) ===
+  NANOMETER(-2, "Unit.nano", "Unit.nano_S", 1.0E-09, UnitSystem.METRIC),
+  MICROMETER(-1, "Unit.micro", "Unit.micro_S", 1.0E-06, UnitSystem.METRIC),
+  MILLIMETER(0, "Unit.milli", "Unit.milli_s", 1.0E-03, UnitSystem.METRIC),
+  CENTIMETER(1, "Unit.cent", "Unit.cent_s", 1.0E-02, UnitSystem.METRIC),
+  METER(2, "Unit.meter", "Unit.meter_s", 1.0, UnitSystem.METRIC),
+  KILOMETER(3, "Unit.kilo", "Unit.kilo_s", 1.0E+03, UnitSystem.METRIC),
 
-  INCH(11, Messages.getString("Unit.inch"), Messages.getString("Unit.inch_s"), 2.54E-02),
+  // === Imperial Units ===
+  MICROINCH(9, "Unit.minch", "Unit.minch_s", 2.54E-08, UnitSystem.IMPERIAL),
+  MILLIINCH(10, "Unit.mil_inch", "Unit.mil", 2.54E-05, UnitSystem.IMPERIAL),
+  INCH(11, "Unit.inch", "Unit.inch_s", 2.54E-02, UnitSystem.IMPERIAL),
+  FEET(12, "Unit.feet", "Unit.feet_s", 3.048E-01, UnitSystem.IMPERIAL),
+  YARD(13, "Unit.yard", "Unit.yard_s", 9.144E-01, UnitSystem.IMPERIAL),
+  MILE(14, "Unit.mile", "Unit.mile_s", 1.609344E+03, UnitSystem.IMPERIAL);
 
-  FEET(12, Messages.getString("Unit.feet"), Messages.getString("Unit.feet_s"), 3.048E-01),
-
-  YARD(13, Messages.getString("Unit.yard"), Messages.getString("Unit.yard_s"), 9.144E-01),
-
-  MILE(14, Messages.getString("Unit.mile"), Messages.getString("Unit.mile_s"), 1.609344E+03);
+  private static final Map<Integer, Unit> ID_TO_UNIT =
+      Arrays.stream(values()).collect(Collectors.toMap(Unit::getId, u -> u));
+  private static final Map<String, Unit> NAME_TO_UNIT =
+      Arrays.stream(values()).collect(Collectors.toMap(Unit::getFullName, u -> u));
+  private static final Map<String, Unit> ABBREV_TO_UNIT =
+      Arrays.stream(values()).collect(Collectors.toMap(Unit::getAbbreviation, u -> u));
 
   private final int id;
   private final String fullName;
   private final String abbreviation;
-  private final double convFactor;
+  private final double factorToMeters;
+  private final UnitSystem system;
 
-  Unit(int id, String fullName, String abbreviation, double convFactor) {
+  Unit(
+      int id,
+      String fullNameKey,
+      String abbreviationKey,
+      double factorToMeters,
+      UnitSystem system) {
     this.id = id;
-    this.fullName = fullName;
-    this.abbreviation = abbreviation;
-    this.convFactor = convFactor;
+    this.fullName = Messages.getString(fullNameKey);
+    this.abbreviation = Messages.getString(abbreviationKey);
+    this.factorToMeters = factorToMeters;
+    this.system = system;
   }
 
   public int getId() {
@@ -80,12 +75,16 @@ public enum Unit {
     return fullName;
   }
 
-  public double getConvFactor() {
-    return convFactor;
-  }
-
   public String getAbbreviation() {
     return abbreviation;
+  }
+
+  public double getFactorToMeters() {
+    return factorToMeters;
+  }
+
+  public UnitSystem getSystem() {
+    return system;
   }
 
   @Override
@@ -93,62 +92,134 @@ public enum Unit {
     return fullName;
   }
 
-  public double getConversionRatio(double calibRatio) {
-    return calibRatio / convFactor;
+  // === Conversion Methods ===
+
+  /** Gets the conversion ratio for calibration. */
+  public double getConversionRatio(double calibrationRatio) {
+    return calibrationRatio / factorToMeters;
   }
 
-  public static List<AbbreviationUnit> getAbbreviationUnits() {
-    ArrayList<AbbreviationUnit> units = new ArrayList<>();
-    for (Unit u : Unit.values()) {
-      if (u.getId() != Unit.PIXEL.getId()) {
-        units.add(new AbbreviationUnit(u));
-      }
+  /**
+   * Converts a value from this unit to another unit.
+   *
+   * @throws IllegalArgumentException if PIXEL conversion is attempted without calibration
+   */
+  public double convertTo(double value, Unit targetUnit) {
+    if (this == targetUnit) return value;
+
+    if (this == PIXEL || targetUnit == PIXEL) {
+      throw new IllegalArgumentException(
+          "Cannot convert between pixel and physical units without calibration");
     }
-    return units;
+
+    return toMeters(value) / targetUnit.factorToMeters;
   }
 
-  public static Unit getCurrentIdUnit(int id) {
-    for (Unit u : Unit.values()) {
-      if (id == u.getId()) {
-        return u;
-      }
-    }
-    return Unit.PIXEL;
+  public double toMeters(double value) {
+    return value * factorToMeters;
   }
 
-  public static List<String> getUnitsName() {
-    ArrayList<String> list = new ArrayList<>();
-    for (Unit u : Unit.values()) {
-      list.add(u.getFullName());
-    }
-    return list;
+  public double fromMeters(double meters) {
+    return meters / factorToMeters;
   }
 
-  public Unit getUpUnit() {
-    for (Unit u : Unit.values()) {
-      if (u.getId() - getId() == 1) {
-        return u;
-      }
-    }
-    return null;
+  // === Navigation Methods ===
+
+  /** Gets the next larger unit in the same system. */
+  public Optional<Unit> getNextLargerUnit() {
+    return findAdjacentUnit(id + 1);
   }
 
-  public Unit getDownUnit() {
-    for (Unit u : Unit.values()) {
-      if (getId() - u.getId() == 1) {
-        return u;
-      }
-    }
-    return null;
+  /** Gets the next smaller unit in the same system. */
+  public Optional<Unit> getNextSmallerUnit() {
+    return findAdjacentUnit(id - 1);
   }
 
-  public static List<Unit> getUnitExceptPixel() {
-    ArrayList<Unit> list = new ArrayList<>();
-    for (Unit u : Unit.values()) {
-      if (u.getId() != Unit.PIXEL.getId()) {
-        list.add(u);
-      }
+  private Optional<Unit> findAdjacentUnit(int targetId) {
+    return streamSameSystem().filter(u -> u.id == targetId).findFirst();
+  }
+
+  /** Gets all units in the same system, ordered by size. */
+  public List<Unit> getUnitsInSameSystem() {
+    return streamSameSystem().sorted(Comparator.comparingInt(Unit::getId)).toList();
+  }
+
+  private Stream<Unit> streamSameSystem() {
+    return Arrays.stream(values()).filter(u -> u.system == this.system);
+  }
+
+  // === Static Utility Methods ===
+
+  public static Unit getById(int id) {
+    return ID_TO_UNIT.getOrDefault(id, PIXEL);
+  }
+
+  public static Optional<Unit> getByName(String name) {
+    return Optional.ofNullable(NAME_TO_UNIT.get(name));
+  }
+
+  public static Optional<Unit> getByAbbreviation(String abbreviation) {
+    return Optional.ofNullable(ABBREV_TO_UNIT.get(abbreviation));
+  }
+
+  /** Gets all physical units (excluding PIXEL), ordered by size. */
+  public static List<Unit> getPhysicalUnits() {
+    return streamFiltered(u -> u != PIXEL);
+  }
+
+  public static List<Unit> getMetricUnits() {
+    return getUnitsBySystem(UnitSystem.METRIC);
+  }
+
+  public static List<Unit> getImperialUnits() {
+    return getUnitsBySystem(UnitSystem.IMPERIAL);
+  }
+
+  public static List<Unit> getUnitsBySystem(UnitSystem system) {
+    return streamFiltered(u -> u.system == system);
+  }
+
+  private static List<Unit> streamFiltered(Predicate<Unit> filter) {
+    return Arrays.stream(values())
+        .filter(filter)
+        .sorted(Comparator.comparingInt(Unit::getId))
+        .toList();
+  }
+
+  /**
+   * Finds the most appropriate unit for a given value in meters. Prefers units that display values
+   * between 0.1 and 1000.
+   */
+  public static Unit findBestUnit(double valueInMeters, UnitSystem preferredSystem) {
+    return getUnitsBySystem(preferredSystem).stream()
+        .filter(u -> u != PIXEL)
+        .min(Comparator.comparingDouble(u -> calculateScore(u.fromMeters(valueInMeters))))
+        .orElse(METER);
+  }
+
+  private static double calculateScore(double value) {
+    double logValue = Math.abs(Math.log10(Math.abs(value)));
+    return (value >= 0.1 && value <= 1000) ? logValue : logValue + 10;
+  }
+
+  public enum UnitSystem {
+    METRIC("Metric System"),
+    IMPERIAL("Imperial System"),
+    DIGITAL("Digital Units");
+
+    private final String displayName;
+
+    UnitSystem(String displayName) {
+      this.displayName = displayName;
     }
-    return list;
+
+    public String getDisplayName() {
+      return displayName;
+    }
+
+    @Override
+    public String toString() {
+      return displayName;
+    }
   }
 }

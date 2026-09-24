@@ -10,19 +10,28 @@
 package org.weasis.core.api.image;
 
 import org.weasis.core.Messages;
+import org.weasis.core.util.LangUtil;
 import org.weasis.opencv.data.PlanarImage;
-import org.weasis.opencv.op.ImageProcessor;
+import org.weasis.opencv.op.ImageTransformer;
 
-public class FlipOp extends AbstractOp {
+/**
+ * Image flip operation that supports horizontal flipping around the y-axis.
+ *
+ * <p>This operation applies a horizontal flip transformation to the source image when enabled. The
+ * flip behavior is controlled by the {@link #P_FLIP} parameter.
+ */
+public final class FlipOp extends AbstractOp {
 
   public static final String OP_NAME = Messages.getString("FlipOperation.title");
 
   /**
-   * Set whether the image is flip horizontally (Required parameter).
+   * Parameter key for horizontal flip control.
    *
-   * <p>Boolean value.
+   * <p>Type: {@link Boolean} (required) Default: {@code false}
    */
   public static final String P_FLIP = "flip"; // NON-NLS
+
+  private static final int HORIZONTAL_FLIP_CODE = 1;
 
   public FlipOp() {
     setName(OP_NAME);
@@ -39,14 +48,11 @@ public class FlipOp extends AbstractOp {
 
   @Override
   public void process() throws Exception {
-    PlanarImage source = (PlanarImage) params.get(Param.INPUT_IMG);
-    PlanarImage result = source;
-    Boolean flip = (Boolean) params.get(P_FLIP);
-
-    if (flip != null && flip) {
-      result = ImageProcessor.flip(source.toMat(), 1); // 1) means flipping around y-axis
-    }
-
+    PlanarImage source = getSourceImage();
+    PlanarImage result =
+        LangUtil.nullToFalse((Boolean) params.get(P_FLIP))
+            ? ImageTransformer.flip(source.toMat(), HORIZONTAL_FLIP_CODE)
+            : source;
     params.put(Param.OUTPUT_IMG, result);
   }
 }

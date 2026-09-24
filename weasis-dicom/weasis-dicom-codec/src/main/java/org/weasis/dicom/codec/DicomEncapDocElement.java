@@ -20,7 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.media.MimeInspector;
-import org.weasis.core.util.FileUtil;
+import org.weasis.core.util.StreamUtil;
 import org.weasis.core.util.StringUtil;
 
 public class DicomEncapDocElement extends DicomImageElement implements FileExtractor {
@@ -61,7 +61,7 @@ public class DicomEncapDocElement extends DicomImageElement implements FileExtra
       BufferedInputStream in = null;
       FileOutputStream out = null;
       try {
-        File file = File.createTempFile("encap_", extension, AppProperties.FILE_CACHE_DIR);
+        File file = File.createTempFile("encap_", extension, AppProperties.FILE_CACHE_DIR.toFile());
         in = new BufferedInputStream(bulkData.openStream());
         out = new FileOutputStream(file);
         StreamUtils.copy(in, out, bulkData.length());
@@ -69,8 +69,8 @@ public class DicomEncapDocElement extends DicomImageElement implements FileExtra
       } catch (Exception e) {
         LOGGER.error("Cannot extract encapsulated document", e);
       } finally {
-        FileUtil.safeClose(out);
-        FileUtil.safeClose(in);
+        StreamUtil.safeClose(out);
+        StreamUtil.safeClose(in);
       }
     }
   }

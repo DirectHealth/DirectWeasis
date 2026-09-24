@@ -11,6 +11,8 @@ package org.weasis.dicom.viewer2d;
 
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.FontMetrics;
+import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -22,6 +24,7 @@ import java.awt.event.MouseEvent;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
+import java.awt.image.BufferedImage;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.util.ArrayList;
@@ -39,6 +42,7 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPopupMenu;
 import javax.swing.JSeparator;
+import javax.swing.SwingUtilities;
 import org.dcm4che3.data.Tag;
 import org.dcm4che3.img.lut.PresetWindowLevel;
 import org.joml.Vector3d;
@@ -60,9 +64,12 @@ import org.weasis.core.api.image.PseudoColorOp;
 import org.weasis.core.api.image.SimpleOpManager;
 import org.weasis.core.api.image.WindowOp;
 import org.weasis.core.api.image.util.ImageLayer;
+import org.weasis.core.api.image.util.MeasurableLayer;
+import org.weasis.core.api.image.util.Unit;
 import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.media.data.TagW;
 import org.weasis.core.api.service.AuditLog;
+import org.weasis.core.api.util.FontTools;
 import org.weasis.core.ui.dialog.MeasureDialog;
 import org.weasis.core.ui.editor.image.CalibrationView;
 import org.weasis.core.ui.editor.image.ContextMenuHandler;
@@ -72,10 +79,11 @@ import org.weasis.core.ui.editor.image.ImageViewerPlugin;
 import org.weasis.core.ui.editor.image.MouseActions;
 import org.weasis.core.ui.editor.image.PixelInfo;
 import org.weasis.core.ui.editor.image.SynchData;
-import org.weasis.core.ui.editor.image.SynchData.Mode;
+import org.weasis.core.ui.editor.image.SynchData.SyncState;
 import org.weasis.core.ui.editor.image.SynchEvent;
 import org.weasis.core.ui.editor.image.ViewButton;
 import org.weasis.core.ui.editor.image.ViewCanvas;
+import org.weasis.core.ui.editor.image.ViewSynchData;
 import org.weasis.core.ui.model.AbstractGraphicModel;
 import org.weasis.core.ui.model.graphic.DragGraphic;
 import org.weasis.core.ui.model.graphic.Graphic;
@@ -98,7 +106,6 @@ import org.weasis.core.util.MathUtil;
 import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.codec.HiddenSeriesManager;
 import org.weasis.dicom.codec.KOSpecialElement;
-import org.weasis.dicom.codec.LazyContourLoader;
 import org.weasis.dicom.codec.PRSpecialElement;
 import org.weasis.dicom.codec.PresentationStateReader;
 import org.weasis.dicom.codec.SortSeriesStack;
@@ -107,18 +114,18 @@ import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.display.OverlayOp;
 import org.weasis.dicom.codec.display.ShutterOp;
 import org.weasis.dicom.codec.display.WindowAndPresetsOp;
-import org.weasis.dicom.codec.geometry.GeometryOfSlice;
-import org.weasis.dicom.codec.geometry.ImageOrientation;
+import org.weasis.dicom.codec.geometry.*;
 import org.weasis.dicom.codec.geometry.ImageOrientation.Plan;
-import org.weasis.dicom.codec.geometry.IntersectSlice;
-import org.weasis.dicom.codec.geometry.IntersectVolume;
-import org.weasis.dicom.codec.geometry.LocalizerPoster;
 import org.weasis.dicom.codec.geometry.PatientOrientation.Biped;
+import org.weasis.dicom.codec.geometry.VectorUtils;
+import org.weasis.dicom.codec.seg.LazyContourLoader;
 import org.weasis.dicom.explorer.DicomModel;
 import org.weasis.dicom.explorer.DicomSeriesHandler;
 import org.weasis.dicom.explorer.pr.PrGraphicUtil;
 import org.weasis.dicom.viewer2d.KOComponentFactory.KOViewButton;
 import org.weasis.dicom.viewer2d.KOComponentFactory.KOViewButton.eState;
+import org.weasis.dicom.viewer2d.fusion.FusionController;
+import org.weasis.dicom.viewer2d.fusion.FusionOp;
 import org.weasis.dicom.viewer2d.mpr.MprView.Plane;
 import org.weasis.opencv.data.PlanarImage;
 import org.weasis.opencv.op.lut.WlPresentation;
@@ -131,6 +138,15 @@ public class View2d extends DefaultView2d<DicomImageElement> {
   public static final String P_CROSSHAIR_MODE = "mpr.crosshair.mode";
   private final Dimension oldSize;
   private final ContextMenuHandler contextMenuHandler;
+  private volatile BufferedImage segOverlayImage; // NOSONAR visibility reference
+
+  /** Segmentations whose canonical volume was still building at the last update pass. */
+  private volatile List<SpecialElementRegion> loadingSegs = List.of(); // NOSONAR visibility ref
+
+  /** Set between a {@link #requestSegmentationUpdate()} call and the refresh it posts. EDT only. */
+  private boolean segUpdatePending;
+
+  protected Vector3d lastCrosshairPosition;
 
   protected final KOViewButton koStarButton;
 
@@ -143,6 +159,10 @@ public class View2d extends DefaultView2d<DicomImageElement> {
     manager.addImageOperationAction(new PseudoColorOp());
     manager.addImageOperationAction(new ShutterOp());
     manager.addImageOperationAction(new OverlayOp());
+    // Fusion must be after W/L and LUT but before zoom/rotation
+    manager.addImageOperationAction(new FusionOp());
+    // Report PET SUV statistics for area measurements drawn on the fused CT image.
+    imageLayer.setSecondaryLayersSupplier(this::getFusionStatsLayers);
     // Zoom and Rotation must be the last operations for the lens
     manager.addImageOperationAction(new AffineTransformOp());
 
@@ -155,6 +175,17 @@ public class View2d extends DefaultView2d<DicomImageElement> {
     this.koStarButton = KOComponentFactory.buildKoStarButton(this);
     koStarButton.setPosition(GridBagConstraints.NORTHEAST);
     getViewButtons().add(koStarButton);
+  }
+
+  private List<MeasurableLayer> getFusionStatsLayers() {
+    Optional<ImageOpNode> node = imageLayer.getDisplayOpManager().getNode(FusionOp.OP_NAME);
+    if (node.isPresent() && node.get() instanceof FusionOp fusionOp) {
+      return fusionOp
+          .getStatsLayer(getImage(), imageLayer.getSourceRenderedImage())
+          .map(List::of)
+          .orElseGet(List::of);
+    }
+    return List.of();
   }
 
   @Override
@@ -243,13 +274,23 @@ public class View2d extends DefaultView2d<DicomImageElement> {
       SynchEvent synch = (SynchEvent) evt.getNewValue();
       SynchData synchData = (SynchData) actionsInView.get(ActionW.SYNCH_LINK.cmd());
       boolean tile = synchData != null && SynchData.Mode.TILE.equals(synchData.getMode());
-      if (synchData != null && Mode.NONE.equals(synchData.getMode())) {
+      if (synchData != null && !synchData.isSynchActivated() && this != synch.getView()) {
         return;
       }
       for (Entry<String, Object> entry : synch.getEvents().entrySet()) {
         final String command = entry.getKey();
         final Object val = entry.getValue();
-        if (synchData != null && !synchData.isActionEnable(command)) {
+        if (this != synch.getView()
+            && synchData != null
+            && !synchData.isActionEnable(command)
+            && !(command.equals(ActionW.CROSSHAIR.cmd())
+                && this == eventManager.getSelectedViewPane())) {
+          continue;
+        }
+        // In MANUAL mode, only allow SCROLL_SERIES action
+        if (synchData != null
+            && synchData.getManualSyncState() == SyncState.ON
+            && !ActionW.SCROLL_SERIES.cmd().equals(command)) {
           continue;
         }
 
@@ -258,12 +299,13 @@ public class View2d extends DefaultView2d<DicomImageElement> {
 
           if (val instanceof PresetWindowLevel preset) {
             DicomImageElement img = getImage();
-            ImageOpNode node = disOp.getNode(WindowOp.OP_NAME);
+            Optional<ImageOpNode> node = disOp.getNode(WindowOp.OP_NAME);
 
-            if (node != null) {
-              node.setParam(ActionW.WINDOW.cmd(), preset.getWindow());
-              node.setParam(ActionW.LEVEL.cmd(), preset.getLevel());
-              node.setParam(ActionW.LUT_SHAPE.cmd(), preset.getLutShape());
+            if (node.isPresent()) {
+              ImageOpNode n = node.get();
+              n.setParam(ActionW.WINDOW.cmd(), preset.getWindow());
+              n.setParam(ActionW.LEVEL.cmd(), preset.getLevel());
+              n.setParam(ActionW.LUT_SHAPE.cmd(), preset.getLutShape());
               // When series synchronization, do not synch preset from other series
               if (img == null || !img.containsPreset(preset)) {
                 List<PresetWindowLevel> presets =
@@ -272,17 +314,15 @@ public class View2d extends DefaultView2d<DicomImageElement> {
                   preset = null;
                 }
               }
-              node.setParam(ActionW.PRESET.cmd(), preset);
+              n.setParam(ActionW.PRESET.cmd(), preset);
             }
             imageLayer.updateDisplayOperations();
           }
         } else if (command.equals(ActionW.DEFAULT_PRESET.cmd())) {
           disOp.setParamValue(WindowOp.OP_NAME, ActionW.DEFAULT_PRESET.cmd(), val);
         } else if (command.equals(ActionW.LUT_SHAPE.cmd())) {
-          ImageOpNode node = disOp.getNode(WindowOp.OP_NAME);
-          if (node != null) {
-            node.setParam(ActionW.LUT_SHAPE.cmd(), val);
-          }
+          Optional<ImageOpNode> node = disOp.getNode(WindowOp.OP_NAME);
+          node.ifPresent(imageOpNode -> imageOpNode.setParam(ActionW.LUT_SHAPE.cmd(), val));
           imageLayer.updateDisplayOperations();
         } else if (command.equals(ActionW.SORT_STACK.cmd())) {
           actionsInView.put(ActionW.SORT_STACK.cmd(), val);
@@ -293,7 +333,7 @@ public class View2d extends DefaultView2d<DicomImageElement> {
         } else if (command.equals(ActionW.KO_SELECTION.cmd())) {
           int frameIndex =
               tile
-                  ? LangUtil.getNULLtoFalse(
+                  ? LangUtil.nullToFalse(
                           (Boolean) synch.getView().getActionValue(ActionW.KO_FILTER.cmd()))
                       ? 0
                       : synch.getView().getFrameIndex() - synch.getView().getTileOffset()
@@ -306,7 +346,7 @@ public class View2d extends DefaultView2d<DicomImageElement> {
         } else if (command.equals(ActionW.KO_FILTER.cmd())) {
           int frameIndex =
               tile
-                  ? LangUtil.getNULLtoFalse((Boolean) val)
+                  ? LangUtil.nullToFalse((Boolean) val)
                       ? 0
                       : synch.getView().getFrameIndex() - synch.getView().getTileOffset()
                   : -1;
@@ -316,6 +356,7 @@ public class View2d extends DefaultView2d<DicomImageElement> {
               (Boolean) val,
               frameIndex);
         } else if (command.equals(ActionW.CROSSHAIR.cmd())
+            && !tile
             && series != null
             && val instanceof PanPoint p) {
           GeometryOfSlice sliceGeometry = this.getImage().getSliceGeometry();
@@ -323,7 +364,9 @@ public class View2d extends DefaultView2d<DicomImageElement> {
           ImageViewerPlugin<DicomImageElement> container =
               eventManager.getSelectedView2dContainer();
           if (container != null) {
-            crosshairAction(sliceGeometry, container.getView2ds(), this, fruid, p);
+            // Tiled viewports are isolated from cross-view synchronization: exclude their
+            // canvases from the crosshair fan-out
+            crosshairAction(sliceGeometry, container.getSynchableImagePanels(), this, fruid, p);
           }
         }
       }
@@ -358,19 +401,21 @@ public class View2d extends DefaultView2d<DicomImageElement> {
         Map<String, Object> actionsInView = selectedView.getActionsInView();
         for (ViewCanvas<DicomImageElement> v : view2ds) {
           MediaSeries<DicomImageElement> s = v.getSeries();
+          ViewSynchData synchData = (ViewSynchData) v.getActionValue(ActionW.SYNCH_LINK.cmd());
           if (s == null) {
             continue;
           }
           if (v instanceof View2d view2d
               && fruid.equals(TagD.getTagValue(s, Tag.FrameOfReferenceUID))
-              && v != selectedView) {
+              && v != selectedView
+              && synchData != null
+              && synchData.isAutoSynchActivated()) {
             DicomImageElement imgToUpdate = v.getImage();
             if (imgToUpdate != null) {
               GeometryOfSlice geometry = imgToUpdate.getSliceGeometry();
               if (geometry != null) {
-                Vector3d vn = geometry.getNormal();
-                // vn.absolute();
-                double location = p3.x * vn.x + p3.y * vn.y + p3.z * vn.z;
+                Vector3d vn = VectorUtils.orientNormalToDominantPositiveAxis(geometry.getNormal());
+                double location = vn.dot(p3);
                 DicomImageElement img =
                     s.getNearestImage(
                         location,
@@ -393,9 +438,12 @@ public class View2d extends DefaultView2d<DicomImageElement> {
           if (s == null) {
             continue;
           }
+          ViewSynchData synchData = (ViewSynchData) v.getActionValue(ActionW.SYNCH_LINK.cmd());
           if (v instanceof View2d view2d
               && fruid.equals(TagD.getTagValue(s, Tag.FrameOfReferenceUID))
-              && LangUtil.getNULLtoTrue((Boolean) actionsInView.get(LayerType.CROSSLINES.name()))) {
+              && LangUtil.nullToTrue((Boolean) actionsInView.get(LayerType.CROSSLINES.name()))
+              && synchData != null
+              && synchData.isAutoSynchActivated()) {
             view2d.computeCrosshair(p3, p);
             view2d.repaint();
           }
@@ -426,14 +474,27 @@ public class View2d extends DefaultView2d<DicomImageElement> {
     imageLayer.fireOpEvent(new ImageOpEvent(ImageOpEvent.OpEvent.RESET_DISPLAY, series, m, null));
 
     boolean changePixConfig =
-        LangUtil.getNULLtoFalse((Boolean) actionsInView.get(PRManager.TAG_CHANGE_PIX_CONFIG));
+        LangUtil.nullToFalse((Boolean) actionsInView.get(PRManager.TAG_CHANGE_PIX_CONFIG));
     if (m != null) {
       // Restore the original image pixel size
       if (changePixConfig) {
+        Unit oldUnit = m.getPixelSpacingUnit();
         m.initPixelConfiguration();
-        eventManager
-            .getAction(ActionW.SPATIAL_UNIT)
-            .ifPresent(s -> s.setSelectedItem(m.getPixelSpacingUnit()));
+        Unit newUnit = m.getPixelSpacingUnit();
+        if (oldUnit != null && newUnit != null) {
+          if (oldUnit.equals(newUnit)) {
+            // When calibration changes but the unit remains the same, the labels and measures are
+            // not updated
+            // We set the unit to null so that the refresh is done automatically and a change is
+            // detected
+            eventManager
+                .getAction(ActionW.SPATIAL_UNIT)
+                .ifPresent(s -> s.setSelectedItemWithoutTriggerAction(null));
+          }
+          eventManager
+              .getAction(ActionW.SPATIAL_UNIT)
+              .ifPresent(s -> s.setSelectedItem(m.getPixelSpacingUnit()));
+        }
       }
       deletePrLayers();
 
@@ -455,7 +516,7 @@ public class View2d extends DefaultView2d<DicomImageElement> {
       Object ko = actionsInView.get(ActionW.KO_SELECTION.cmd());
       Object filter = actionsInView.get(ActionW.FILTERED_SERIES.cmd());
       OpManager disOp = getDisplayOpManager();
-      Object preset = disOp.getParamValue(WindowOp.OP_NAME, ActionW.PRESET.cmd());
+      Object preset = disOp.getParamValue(WindowOp.OP_NAME, ActionW.PRESET.cmd()).orElse(null);
       initActionWState();
       setActionsInView(ActionW.KO_SELECTION.cmd(), ko);
       setActionsInView(ActionW.FILTERED_SERIES.cmd(), filter);
@@ -690,8 +751,32 @@ public class View2d extends DefaultView2d<DicomImageElement> {
     updateSegmentation(imageLayer.getSourceImage());
   }
 
+  /**
+   * Requests a segmentation refresh and repaint, collapsing bursts into a single pass. Each SEG
+   * file of a study notifies twice while it loads (contours parsed, then canonical volume built)
+   * and every pass re-slices <em>all</em> the segmentations that apply to the displayed image, so
+   * on a study holding dozens of SEG files the naive one-refresh-per-notification behaviour is
+   * quadratic and floods the Java2D pipeline with overlay surfaces. Must be called on the EDT.
+   */
+  public void requestSegmentationUpdate() {
+    if (segUpdatePending) {
+      return;
+    }
+    segUpdatePending = true;
+    // Deliberately not GuiExecutor.execute(): the notifications are already delivered on the EDT,
+    // and running inline would refresh once per notification instead of once per burst.
+    SwingUtilities.invokeLater(
+        () -> {
+          segUpdatePending = false;
+          updateSegmentation();
+          repaint();
+        });
+  }
+
   private void updateSegmentation(DicomImageElement img) {
     graphicManager.deleteByLayerType(LayerType.DICOM_SEG);
+    segOverlayImage = null;
+    List<SpecialElementRegion> building = new ArrayList<>();
     if (series != null && img != null) {
       String patientPseudoUID = DicomModel.getPatientPseudoUID(series);
       List<SpecialElementRegion> segList =
@@ -701,7 +786,11 @@ public class View2d extends DefaultView2d<DicomImageElement> {
         Set<SegContour> contours = new LinkedHashSet<>();
         for (SpecialElementRegion seg : segList) {
           if (seg.isVisible() && seg.containsSopInstanceUIDReference(img)) {
+            // Checked after getContours(): that call may itself schedule the volume build
             Set<LazyContourLoader> loaders = seg.getContours(img);
+            if (seg.isSegmentationVolumeBuilding()) {
+              building.add(seg);
+            }
             if (loaders != null && !loaders.isEmpty()) {
               for (LazyContourLoader lazyLoader : loaders) {
                 try {
@@ -717,17 +806,101 @@ public class View2d extends DefaultView2d<DicomImageElement> {
           }
         }
 
+        // Separate fractional (raster overlay) and binary (vector contour) segmentations
+        List<SegContour> fractionalContours = new ArrayList<>();
         for (SegContour c : contours) {
-          // Structure graphics
-          Graphic graphic = c.getSegGraphic();
-          if (graphic != null) {
-            for (PropertyChangeListener listener : graphicManager.getGraphicsListeners()) {
-              graphic.addPropertyChangeListener(listener);
+          if (c.isFractional()) {
+            fractionalContours.add(c);
+          } else {
+            // Binary contours: render as vector graphics (existing path)
+            Graphic graphic = c.getSegGraphic();
+            if (graphic != null) {
+              for (PropertyChangeListener listener : graphicManager.getGraphicsListeners()) {
+                graphic.addPropertyChangeListener(listener);
+              }
+              graphicManager.addGraphic(graphic);
             }
-            graphicManager.addGraphic(graphic);
+          }
+        }
+
+        // Fractional contours: composite into a single RGBA overlay image
+        if (!fractionalContours.isEmpty()) {
+          PlanarImage sourceImg = img.getImage();
+          if (sourceImg != null) {
+            segOverlayImage =
+                org.weasis.core.ui.model.graphic.imp.seg.FractionalOverlay.compositeOverlays(
+                    fractionalContours, sourceImg.width(), sourceImg.height());
           }
         }
       }
+    }
+    this.loadingSegs = List.copyOf(building);
+  }
+
+  /**
+   * {@code true} while at least one tracked segmentation is still building its canonical volume.
+   * Evaluated live at paint time so the message disappears on the next repaint even if the build
+   * ended without notifying this view.
+   */
+  protected boolean isSegLoading() {
+    return loadingSegs.stream().anyMatch(SpecialElementRegion::isSegmentationVolumeBuilding);
+  }
+
+  /** {@code true} when a segmentation build was pending at the last update pass. */
+  boolean hasPendingSegLoading() {
+    return !loadingSegs.isEmpty();
+  }
+
+  /**
+   * {@code true} while the rectified volume of the fusion overlay displayed by this view is still
+   * being built. Like {@link #isSegLoading()} it is evaluated at paint time, so the message
+   * disappears on the repaint that follows the build.
+   */
+  protected boolean isFusionLoading() {
+    OpManager disOp = getDisplayOpManager();
+    if (!disOp
+        .getParamValue(FusionOp.OP_NAME, FusionOp.P_FUSION_ENABLED, Boolean.class)
+        .orElse(Boolean.FALSE)) {
+      return false;
+    }
+    return FusionController.isVolumeBuilding(
+        disOp.getParamValue(FusionOp.OP_NAME, FusionOp.P_FUSION_SERIES).orElse(null));
+  }
+
+  @Override
+  protected void drawOnTop(Graphics2D g2d) {
+    super.drawOnTop(g2d);
+    BufferedImage overlay = segOverlayImage;
+    if (overlay != null) {
+      // Re-enter the image coordinate space (translate + affineTransform) to draw the overlay
+      // aligned with the source image pixels.
+      java.awt.geom.Point2D p = getClipViewCoordinatesOffset();
+      g2d.translate(p.getX(), p.getY());
+      g2d.drawImage(overlay, affineTransform, null);
+      g2d.translate(-p.getX(), -p.getY());
+    }
+    drawLoadingMessages(g2d);
+  }
+
+  /** Paints the pending background builds, stacked at the bottom of the view. */
+  private void drawLoadingMessages(Graphics2D g2d) {
+    List<String> messages = new ArrayList<>(2);
+    if (isSegLoading()) {
+      messages.add(Messages.getString("seg.loading"));
+    }
+    if (isFusionLoading()) {
+      messages.add(Messages.getString("fusion.loading"));
+    }
+    if (messages.isEmpty()) {
+      return;
+    }
+    g2d.setFont(getLayerFont());
+    FontMetrics fm = g2d.getFontMetrics();
+    float y = getHeight() - fm.getHeight() * (messages.size() + 1f);
+    for (String msg : messages) {
+      float x = (getWidth() - fm.stringWidth(msg)) / 2f;
+      FontTools.paintColorFontOutline(g2d, msg, x, y, Color.ORANGE);
+      y += fm.getHeight();
     }
   }
 
@@ -763,15 +936,14 @@ public class View2d extends DefaultView2d<DicomImageElement> {
                   getCurrentSortComparator());
           synchronized (selSeries) {
             for (DicomImageElement dcm : list) {
-              double[] loc = (double[]) dcm.getTagValue(TagW.SlicePosition);
+              Double loc = (Double) dcm.getTagValue(TagW.SlicePosition);
               if (loc != null) {
-                double position = loc[0] + loc[1] + loc[2];
-                if (min > position) {
-                  min = position;
+                if (min > loc) {
+                  min = loc;
                   firstImage = dcm;
                 }
-                if (max < position) {
-                  max = position;
+                if (max < loc) {
+                  max = loc;
                   lastImage = dcm;
                 }
               }
@@ -881,7 +1053,7 @@ public class View2d extends DefaultView2d<DicomImageElement> {
     if (path instanceof Path2D path2D) {
       return !path2D.contains(p);
     }
-    return !bounds.contains(p);
+    return !bounds.contains(p); // NOSONAR false positive
   }
 
   public void computeCrosshair(Vector3d p3, PanPoint panPoint) {
@@ -922,6 +1094,10 @@ public class View2d extends DefaultView2d<DicomImageElement> {
               pts2.add(new Point2D.Double(-50.0, p.getY()));
               pts2.add(new Point2D.Double(dim.y + 50, p.getY()));
               addCrosshairLine(layer, pts2, color2, centerPt, centerGap);
+
+              // Remember the position so the crosshair can be redrawn after an asynchronous
+              // image change swaps the graphic model and discards these graphics.
+              lastCrosshairPosition = p3;
 
               //            PlanarImage dispImg = image.getImage();
               //            if (dispImg != null) {
@@ -1017,9 +1193,9 @@ public class View2d extends DefaultView2d<DicomImageElement> {
       final PixelInfo pixelInfo, final DicomImageElement imageElement, final double[] c) {
     if (c != null && c.length >= 1) {
       WlPresentation wlp = null;
-      WindowOp wlOp = (WindowOp) getDisplayOpManager().getNode(WindowOp.OP_NAME);
-      if (wlOp != null) {
-        wlp = wlOp.getWlPresentation();
+      Optional<ImageOpNode> wlOp = getDisplayOpManager().getNode(WindowOp.OP_NAME);
+      if (wlOp.isPresent() && wlOp.get() instanceof WindowOp windowOp) {
+        wlp = windowOp.getWlPresentation();
       }
       for (int i = 0; i < c.length; i++) {
         c[i] = imageElement.pixelToRealValue(c[i], wlp).doubleValue();
@@ -1055,7 +1231,7 @@ public class View2d extends DefaultView2d<DicomImageElement> {
       popupMenu.addSeparator();
       boolean graphicComplete = true;
       if (selected.size() == 1) {
-        final Graphic graph = selected.get(0);
+        final Graphic graph = selected.getFirst();
         if (graph instanceof final DragGraphic dragGraphic) {
           if (!dragGraphic.isGraphicComplete()) {
             graphicComplete = false;
@@ -1229,13 +1405,17 @@ public class View2d extends DefaultView2d<DicomImageElement> {
           popupMenu, manager.getOrientationMenu("weasis.contextmenu.orientation"));
       GuiUtils.addItemToMenu(popupMenu, manager.getCineMenu("weasis.contextmenu.cine"));
       GuiUtils.addItemToMenu(popupMenu, manager.getSortStackMenu("weasis.contextmenu.sortstack"));
+      count = addSeparatorToPopupMenu(popupMenu, count);
+
+      GuiUtils.addItemToMenu(
+          popupMenu, manager.getViewportLayoutMenu("weasis.contextmenu.viewport"));
       addSeparatorToPopupMenu(popupMenu, count);
 
       GuiUtils.addItemToMenu(popupMenu, manager.getResetMenu("weasis.contextmenu.reset"));
     }
 
     String pClose = "weasis.contextmenu.close";
-    if (LangUtil.getNULLtoTrue((Boolean) actionsInView.get(pClose))
+    if (LangUtil.nullToTrue((Boolean) actionsInView.get(pClose))
         && GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(pClose, true)) {
       JMenuItem close = new JMenuItem(Messages.getString("View2d.close"));
       close.addActionListener(e -> View2d.this.setSeries(null, null));

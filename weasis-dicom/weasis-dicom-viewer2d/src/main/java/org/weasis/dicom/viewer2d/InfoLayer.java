@@ -13,13 +13,10 @@ import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
-import java.awt.GridBagConstraints;
 import java.awt.Rectangle;
 import java.awt.font.TextAttribute;
-import java.awt.geom.Point2D;
 import java.util.Arrays;
 import java.util.Map;
-import javax.swing.Icon;
 import org.dcm4che3.data.Tag;
 import org.dcm4che3.img.data.PrDicomObject;
 import org.joml.Vector3d;
@@ -38,9 +35,8 @@ import org.weasis.core.api.media.data.Series;
 import org.weasis.core.api.media.data.TagReadable;
 import org.weasis.core.api.media.data.TagView;
 import org.weasis.core.api.media.data.TagW;
+import org.weasis.core.api.util.FontItem;
 import org.weasis.core.api.util.FontTools;
-import org.weasis.core.ui.editor.image.SynchData;
-import org.weasis.core.ui.editor.image.ViewButton;
 import org.weasis.core.ui.editor.image.ViewCanvas;
 import org.weasis.core.ui.model.layer.AbstractInfoLayer;
 import org.weasis.core.ui.model.layer.LayerAnnotation;
@@ -62,6 +58,7 @@ import org.weasis.dicom.codec.geometry.ImageOrientation.Plan;
 import org.weasis.dicom.codec.geometry.PatientOrientation.Biped;
 import org.weasis.dicom.codec.geometry.VectorUtils;
 import org.weasis.dicom.explorer.DicomModel;
+import org.weasis.dicom.viewer2d.fusion.FusionColorBar;
 import org.weasis.dicom.viewer2d.mpr.MprController;
 import org.weasis.dicom.viewer2d.mpr.MprView;
 import org.weasis.opencv.data.PlanarImage;
@@ -89,6 +86,7 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
     displayPreferences.put(LayerItem.ANONYM_ANNOTATIONS, false);
     displayPreferences.put(LayerItem.SCALE, true);
     displayPreferences.put(LayerItem.LUT, false);
+    displayPreferences.put(LayerItem.FUSION_LUT, true);
     displayPreferences.put(LayerItem.IMAGE_ORIENTATION, true);
     displayPreferences.put(LayerItem.WINDOW_LEVEL, true);
     displayPreferences.put(LayerItem.ZOOM, true);
@@ -99,7 +97,8 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
   }
 
   @Override
-  public LayerAnnotation getLayerCopy(ViewCanvas view2DPane, boolean useGlobalPreferences) {
+  public LayerAnnotation<DicomImageElement> getLayerCopy(
+      ViewCanvas<DicomImageElement> view2DPane, boolean useGlobalPreferences) {
     InfoLayer layer = new InfoLayer(view2DPane, useGlobalPreferences);
     copyLayerValues(layer.displayPreferences);
     return layer;
@@ -111,6 +110,7 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
     setLayerValue(prefMap, LayerItem.IMAGE_ORIENTATION);
     setLayerValue(prefMap, LayerItem.SCALE);
     setLayerValue(prefMap, LayerItem.LUT);
+    setLayerValue(prefMap, LayerItem.FUSION_LUT);
     setLayerValue(prefMap, LayerItem.PIXEL);
     setLayerValue(prefMap, LayerItem.WINDOW_LEVEL);
     setLayerValue(prefMap, LayerItem.ZOOM);
@@ -123,7 +123,9 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
   @Override
   public void paint(Graphics2D g2) {
     DicomImageElement image = view2DPane.getImage();
-    FontMetrics fontMetrics = g2.getFontMetrics();
+    // Get the smallest font for better size calculations
+    FontMetrics fontMetrics =
+        view2DPane.getJComponent().getFontMetrics(FontItem.MICRO_SEMIBOLD.getFont());
     Rectangle bound = view2DPane.getJComponent().getBounds();
 
     if (!shouldPaint(image, fontMetrics, bound)) {
@@ -139,7 +141,7 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
         GuiUtils.setRenderingHints(g2, true, false, view2DPane.requiredTextAntialiasing());
 
     try {
-      paintContent(g2, image, fontMetrics, bound);
+      paintContent(g2, image, bound);
     } finally {
       GuiUtils.resetRenderingHints(g2, oldRenderingHints);
     }
@@ -147,16 +149,16 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
 
   private boolean shouldPaint(DicomImageElement image, FontMetrics fontMetrics, Rectangle bound) {
     int minSize = fontMetrics.stringWidth(Messages.getString("InfoLayer.msg_outside_levels")) * 2;
-    return visible && image != null && minSize <= bound.width && minSize <= bound.height;
+    return visible && image != null && minSize <= bound.width && minSize / 2 <= bound.height;
   }
 
-  private void paintContent(
-      Graphics2D g2, DicomImageElement image, FontMetrics fontMetrics, Rectangle bound) {
+  private void paintContent(Graphics2D g2, DicomImageElement image, Rectangle bound) {
     OpManager disOp = view2DPane.getDisplayOpManager();
     Modality mod =
         Modality.getModality(TagD.getTagValue(view2DPane.getSeries(), Tag.Modality, String.class));
     ModalityInfoData modality = ModalityView.getModlatityInfos(mod);
 
+    FontMetrics fontMetrics = g2.getFontMetrics();
     float midX = bound.width / 2f;
     float midY = bound.height / 2f;
     int fontHeight = fontMetrics.getHeight();
@@ -225,8 +227,12 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
         drawScale(g2, bound, fontHeight, props);
       }
     }
-    if (getDisplayPreferences(LayerItem.LUT) && hideMin) {
+    boolean baseLut = getDisplayPreferences(LayerItem.LUT) && hideMin;
+    if (baseLut) {
       drawLUT(g2, bound, midFontHeight);
+    }
+    if (getDisplayPreferences(LayerItem.FUSION_LUT) && hideMin) {
+      FusionColorBar.paint(g2, view2DPane, bound, midFontHeight, baseLut);
     }
   }
 
@@ -277,10 +283,18 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
   private float paintMprTransformationMessage(
       Graphics2D g2, MprView mprView, float drawY, int fontHeight) {
     MprController controller = mprView.getMprController();
-    if (controller != null
-        && controller.getVolume() != null
-        && controller.getVolume().isTransformed()) {
-      drawY = drawGeometricTransformationMessage(g2, drawY, fontHeight, border);
+    if (controller != null && controller.getVolume() != null) {
+      if (controller.getVolume().isTransformed()) {
+        String message = Messages.getString("geometric.transformation.msg");
+        FontTools.paintColorFontOutline(
+            g2, message, border, drawY, IconColor.ACTIONS_RED.getColor());
+        drawY -= fontHeight;
+      } else if (controller.getVolume().isSkipRectification()) {
+        String message = Messages.getString("skip.rectification.msg");
+        FontTools.paintColorFontOutline(
+            g2, message, border, drawY, IconColor.ACTIONS_RED.getColor());
+        drawY -= fontHeight;
+      }
     }
     return drawY;
   }
@@ -311,8 +325,10 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
 
   private float paintWindowLevel(
       Graphics2D g2, DicomImageElement image, OpManager disOp, float drawY, int fontHeight) {
-    Number window = (Number) disOp.getParamValue(WindowOp.OP_NAME, ActionW.WINDOW.cmd());
-    Number level = (Number) disOp.getParamValue(WindowOp.OP_NAME, ActionW.LEVEL.cmd());
+    Number window =
+        disOp.getParamValue(WindowOp.OP_NAME, ActionW.WINDOW.cmd(), Number.class).orElse(null);
+    Number level =
+        disOp.getParamValue(WindowOp.OP_NAME, ActionW.LEVEL.cmd(), Number.class).orElse(null);
 
     if (window != null && level != null) {
       boolean outside = isWindowLevelOutside(image, disOp, window, level);
@@ -332,7 +348,9 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
     PrDicomObject prDicomObject =
         PRManager.getPrDicomObject(view2DPane.getActionValue(ActionW.PR_STATE.cmd()));
     boolean pixelPadding =
-        (Boolean) disOp.getParamValue(WindowOp.OP_NAME, ActionW.IMAGE_PIX_PADDING.cmd());
+        disOp
+            .getParamValue(WindowOp.OP_NAME, ActionW.IMAGE_PIX_PADDING.cmd(), Boolean.class)
+            .orElse(true);
     DefaultWlPresentation wlp = new DefaultWlPresentation(prDicomObject, pixelPadding);
 
     double minModLUT = image.getMinValue(wlp);
@@ -646,13 +664,13 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
     Integer rotationAngle = (Integer) view2DPane.getActionValue(ActionW.ROTATION.cmd());
 
     if (rotationAngle != null && rotationAngle != 0) {
-      applyRotation(vr, vc, -rotationAngle);
+      applyRotation(vr, vc, rotationAngle);
     } else {
       vr.negate();
       vc.negate();
     }
 
-    if (LangUtil.getNULLtoFalse((Boolean) view2DPane.getActionValue(ActionW.FLIP.cmd()))) {
+    if (LangUtil.nullToFalse((Boolean) view2DPane.getActionValue(ActionW.FLIP.cmd()))) {
       vr.negate();
     }
 
@@ -685,7 +703,7 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
   }
 
   private String getColumnLeftOrientation(String orientation, boolean quadruped) {
-    if (LangUtil.getNULLtoFalse((Boolean) view2DPane.getActionValue(ActionW.FLIP.cmd()))) {
+    if (LangUtil.nullToFalse((Boolean) view2DPane.getActionValue(ActionW.FLIP.cmd()))) {
       return orientation;
     }
     StringBuilder buf = new StringBuilder();
@@ -790,20 +808,6 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
       int shiftY = bound.height - border - size;
       g2.fillRect(border + shiftX, shiftY, size - 1, size - 1);
     }
-  }
-
-  private void setDefaultCornerPositions(Rectangle bound) {
-    setPosition(Position.TopLeft, border, border);
-    setPosition(Position.TopRight, (double) bound.width - border, border);
-    setPosition(
-        Position.BottomRight, (double) bound.width - border, (double) bound.height - border);
-  }
-
-  public static float drawGeometricTransformationMessage(
-      Graphics2D g2d, float drawY, int fontHeight, int border) {
-    String message = Messages.getString("geometric.transformation.msg");
-    FontTools.paintColorFontOutline(g2d, message, border, drawY, IconColor.ACTIONS_RED.getColor());
-    return drawY - fontHeight;
   }
 
   public static MediaSeriesGroup getParent(
@@ -944,79 +948,6 @@ public class InfoLayer extends AbstractInfoLayer<DicomImageElement> {
       return patient.getTagValue(tag);
     }
     return null;
-  }
-
-  protected void drawExtendedActions(Graphics2D g2d) {
-    if (view2DPane.getViewButtons().isEmpty()) {
-      return;
-    }
-
-    int space = GuiUtils.getScaleLength(10);
-    Point2D topRight = getPosition(Position.TopRight);
-    Point2D.Double midy = calculateMiddleYPosition(space, topRight);
-
-    SynchData synchData = (SynchData) view2DPane.getActionValue(ActionW.SYNCH_LINK.cmd());
-    boolean tile = synchData != null && SynchData.Mode.TILE.equals(synchData.getMode());
-
-    for (ViewButton b : view2DPane.getViewButtons()) {
-      if (shouldDrawButton(b, tile)) {
-        positionAndDrawButton(g2d, b, space, topRight, midy);
-      }
-    }
-  }
-
-  private Point2D.Double calculateMiddleYPosition(int space, Point2D topRight) {
-    int height = 0;
-    for (ViewButton b : view2DPane.getViewButtons()) {
-      if (b.isVisible() && b.getPosition() == GridBagConstraints.EAST) {
-        height += b.getIcon().getIconHeight() + space;
-      }
-    }
-    return new Point2D.Double(
-        topRight.getX(), view2DPane.getJComponent().getHeight() * 0.5 - (height - space) * 0.5);
-  }
-
-  private boolean shouldDrawButton(ViewButton b, boolean tile) {
-    return b.isVisible() && !(tile && ActionW.KO_SELECTION.getTitle().equals(b.getName()));
-  }
-
-  private void positionAndDrawButton(
-      Graphics2D g2d, ViewButton b, int space, Point2D topRight, Point2D.Double midy) {
-    Icon icon = b.getIcon();
-    int position = b.getPosition();
-
-    switch (position) {
-      case GridBagConstraints.EAST -> {
-        b.x = midy.x - icon.getIconWidth();
-        b.y = midy.y;
-        midy.y += icon.getIconHeight() + space;
-      }
-      case GridBagConstraints.NORTHEAST -> {
-        b.x = topRight.getX() - icon.getIconWidth();
-        b.y = topRight.getY();
-        topRight.setLocation(topRight.getX() - icon.getIconWidth() + space, topRight.getY());
-      }
-      case GridBagConstraints.SOUTHEAST -> {
-        Point2D bottomRight = getPosition(Position.BottomRight);
-        b.x = bottomRight.getX() - icon.getIconWidth();
-        b.y = bottomRight.getY() - icon.getIconHeight();
-        bottomRight.setLocation(
-            bottomRight.getX() - icon.getIconWidth() + space, bottomRight.getY());
-      }
-      case GridBagConstraints.NORTHWEST -> {
-        Point2D topLeft = getPosition(Position.TopLeft);
-        b.x = topLeft.getX();
-        b.y = topLeft.getY();
-        topLeft.setLocation(topLeft.getX() + icon.getIconWidth() + space, topLeft.getY());
-      }
-      case GridBagConstraints.SOUTHWEST -> {
-        Point2D bottomLeft = getPosition(Position.BottomLeft);
-        b.x = bottomLeft.getX();
-        b.y = bottomLeft.getY() - icon.getIconHeight();
-        bottomLeft.setLocation(bottomLeft.getX() + icon.getIconWidth() + space, bottomLeft.getY());
-      }
-    }
-    ViewButton.drawButtonBackground(g2d, view2DPane.getJComponent(), b, icon);
   }
 
   private record OrientationInfo(Plan plan, String colLeft, String rowTop) {}

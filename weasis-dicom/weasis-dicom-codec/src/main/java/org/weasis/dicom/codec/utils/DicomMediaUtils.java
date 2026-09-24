@@ -23,7 +23,6 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
-import java.util.TimeZone;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 import javax.xml.stream.XMLInputFactory;
@@ -50,12 +49,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.media.data.ImageElement;
 import org.weasis.core.api.media.data.MediaSeriesGroup;
+import org.weasis.core.api.media.data.TagReadable;
 import org.weasis.core.api.media.data.TagUtil;
 import org.weasis.core.api.media.data.TagW;
 import org.weasis.core.api.media.data.TagW.TagType;
 import org.weasis.core.api.media.data.Taggable;
-import org.weasis.core.util.FileUtil;
 import org.weasis.core.util.MathUtil;
+import org.weasis.core.util.StreamUtil;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.DicomMediaIO;
 import org.weasis.dicom.codec.TagD;
@@ -296,19 +296,77 @@ public class DicomMediaUtils {
     }
   }
 
-  public static void computeSlicePositionVector(Taggable taggable) {
+  /**
+   * Computes the sign-normalized unit normal of the image plane described by the
+   * ImageOrientationPatient tags in {@code taggable}. The dominant axis of the cross product (row ×
+   * column) is forced to be positive (LPS+) so the result is directly comparable across images and
+   * segmentations regardless of the cross-product sign convention.
+   *
+   * @param taggable source with ImageOrientationPatient tags
+   * @return sign-normalized unit normal, or {@code null} when IOP is absent
+   */
+  public static Vector3d computeImageNormal(TagReadable taggable) {
+    Vector3d vr = ImageOrientation.getRowImagePosition(taggable);
+    Vector3d vc = ImageOrientation.getColumnImagePosition(taggable);
+    if (vr == null || vc == null) {
+      return null;
+    }
+    Vector3d normal = VectorUtils.computeNormalOfSurface(vr, vc);
+    // Ensure the normal points in the positive direction of its dominant axis to sort
+    // slices in the anatomical direction. The cross product (row × column) can point in
+    // either direction for the same anatomical plane (e.g., +X or -X for sagittal), which
+    // would reverse the sort order. This normalization must match the DICOM LPS+ coordinate
+    // system (Left +X, Posterior +Y, Superior +Z) because the Slice Location tag is not
+    // always correct.
+    return VectorUtils.orientNormalToDominantPositiveAxis(normal);
+  }
+
+  /**
+   * Computes the signed scalar slice position, caches it as {@link TagW#SlicePosition}, and returns
+   * it.
+   *
+   * <p>The value equals {@code dot(normal, IPP)} and is used for sorting slices, finding the
+   * nearest image, and synchronizing scroll positions as Slice Location is not always available and
+   * sometimes not reliable.
+   *
+   * @return the signed scalar distance along the normal, or {@code null} if IPP/IOP are missing
+   */
+  public static Double computeSlicePosition(Taggable taggable) {
     if (taggable != null) {
       Vector3d pPos = PatientOrientation.getPatientPosition(taggable);
       if (pPos != null) {
-        Vector3d vr = ImageOrientation.getRowImagePosition(taggable);
-        Vector3d vc = ImageOrientation.getColumnImagePosition(taggable);
-        if (vr != null && vc != null) {
-          Vector3d normal = VectorUtils.computeNormalOfSurface(vr, vc);
-          normal.mul(pPos);
-          taggable.setTag(TagW.SlicePosition, new double[] {normal.x, normal.y, normal.z});
+        Vector3d normal = computeImageNormal(taggable);
+        if (normal != null) {
+          double dot = normal.dot(pPos);
+          taggable.setTag(TagW.SlicePosition, dot);
+          return dot;
         }
       }
+      // Fallback to SliceLocation when ImageOrientationPatient is absent (e.g., NM images).
+      // SliceLocation (0020,1041) provides a scalar position that is sufficient for
+      // matching segmentation frames to source images when IOP is unavailable.
+      Double sliceLoc = TagD.getTagValue(taggable, Tag.SliceLocation, Double.class);
+      if (sliceLoc != null) {
+        taggable.setTag(TagW.SlicePosition, sliceLoc);
+        return sliceLoc;
+      }
     }
+    return null;
+  }
+
+  /**
+   * Returns the signed scalar slice position cached by {@link #computeSlicePosition}, or {@code 0}
+   * if not available.
+   *
+   * @param taggable source with a {@link TagW#SlicePosition} tag
+   * @return the signed scalar distance along the normal, or 0 if the tag is missing
+   */
+  public static double getSlicePositionValue(TagReadable taggable) {
+    if (taggable == null) {
+      return 0;
+    }
+    Double loc = (Double) taggable.getTagValue(TagW.SlicePosition);
+    return loc == null ? 0 : loc;
   }
 
   /**
@@ -379,14 +437,7 @@ public class DicomMediaUtils {
       Attributes mLutItems = dcm.getNestedDataset(Tag.PixelValueTransformationSequence);
       if (mLutItems != null) {
         ModalityLutModule mlut = new ModalityLutModule(mLutItems);
-        if (frameIndex < 0) {
-          // If the frame index is not defined, we set the modality LUT for all frames
-          taggable.setTag(TagW.ModalityLUTData, mlut);
-        } else {
-          // Otherwise, we set the modality LUT for the specific frame
-          md.getImageDescriptor().setModalityLutForFrame(frameIndex, mlut);
-        }
-        taggable.setTag(TagW.ModalityLUTData, mlut);
+        md.getImageDescriptor().setModalityLutForFrame(Math.max(frameIndex, 0), mlut);
       }
 
       // C.7.6.16.2.10 Frame VOI LUT Macro:
@@ -394,13 +445,7 @@ public class DicomMediaUtils {
       Attributes vLutItems = dcm.getNestedDataset(Tag.FrameVOILUTSequence);
       if (vLutItems != null) {
         VoiLutModule vlut = new VoiLutModule(vLutItems);
-        if (frameIndex < 0) {
-          // If the frame index is not defined, we set the VOI LUT for all frames
-          taggable.setTag(TagW.VOILUTsData, vlut);
-        } else {
-          // Otherwise, we set the VOI LUT for the specific frame
-          md.getImageDescriptor().setVoiLutForFrame(frameIndex, vlut);
-        }
+        md.getImageDescriptor().setVoiLutForFrame(Math.max(frameIndex, 0), vlut);
       }
 
       // C.7.6.16.2.15 Patient Orientation in Frame Macro:
@@ -427,6 +472,18 @@ public class DicomMediaUtils {
     }
   }
 
+  /**
+   * Writes per-frame geometry from the Per-frame Functional Groups Sequence, falling back to NM
+   * tomographic detector geometry when the former is absent.
+   *
+   * @param index zero-based frame index
+   * @return {@code true} when frame geometry was written
+   */
+  public static boolean writeFrameGeometry(Taggable taggable, DicomMetaData md, int index) {
+    return writePerFrameFunctionalGroupsSequence(taggable, md, index)
+        || writeNmTomoGeometry(taggable, md, index);
+  }
+
   public static boolean writePerFrameFunctionalGroupsSequence(
       Taggable taggable, DicomMetaData md, int index) {
     Attributes header = md.getDicomObject();
@@ -443,110 +500,201 @@ public class DicomMediaUtils {
     return false;
   }
 
+  /**
+   * Derives the per-frame Image Position/Orientation (Patient) of an NM tomographic (SPECT)
+   * multi-frame image. NM stores plane geometry in the Detector Information Sequence (0054,0022).
+   *
+   * @param frameIndex zero-based frame index
+   * @return {@code true} when NM tomographic geometry was found and written
+   */
+  public static boolean writeNmTomoGeometry(Taggable taggable, DicomMetaData md, int frameIndex) {
+    Attributes header = md == null ? null : md.getDicomObject();
+    if (header == null || taggable == null || !"NM".equals(header.getString(Tag.Modality))) {
+      return false;
+    }
+    Attributes detector = header.getNestedDataset(Tag.DetectorInformationSequence);
+    if (detector == null) {
+      return false;
+    }
+    double[] iop = detector.getDoubles(Tag.ImageOrientationPatient);
+    double[] ipp = detector.getDoubles(Tag.ImagePositionPatient);
+    double spacing = header.getDouble(Tag.SpacingBetweenSlices, 0.0);
+    if (iop == null || iop.length != 6 || ipp == null || ipp.length != 3 || spacing == 0.0) {
+      return false;
+    }
+
+    Vector3d normal = new Vector3d();
+    new Vector3d(iop[0], iop[1], iop[2]).cross(new Vector3d(iop[3], iop[4], iop[5]), normal);
+    if (normal.lengthSquared() == 0.0) {
+      return false;
+    }
+    normal.normalize();
+
+    int sliceOffset = frameIndex;
+    int[] sliceVector = header.getInts(Tag.SliceVector);
+    if (sliceVector != null && frameIndex >= 0 && frameIndex < sliceVector.length) {
+      sliceOffset = sliceVector[frameIndex] - 1;
+    }
+    double step = spacing * sliceOffset;
+    double[] framePos = {
+      ipp[0] + normal.x * step, ipp[1] + normal.y * step, ipp[2] + normal.z * step
+    };
+
+    taggable.setTag(TagD.get(Tag.ImageOrientationPatient), iop);
+    taggable.setTag(TagD.get(Tag.ImagePositionPatient), framePos);
+    return true;
+  }
+
+  /**
+   * Sets {@link TagW#SuvFactor} on a PET image when its values can be converted to SUVbw. Otherwise
+   * the attribute that prevents it is logged, so a series displayed in raw units can be traced back
+   * to the missing element instead of looking like a viewer limitation.
+   */
   public static void computeSUVFactor(Attributes dicomObject, Taggable taggable, int index) {
     // From vendor neutral code at
     // http://qibawiki.rsna.org/index.php?title=Standardized_Uptake_Value_%28SUV%29
     String modality = TagD.getTagValue(taggable, Tag.Modality, String.class);
-    if ("PT".equals(modality)) {
-      String correctedImage = DicomUtils.getStringFromDicomElement(dicomObject, Tag.CorrectedImage);
-      if (correctedImage != null
-          && correctedImage.contains("ATTN")
-          && correctedImage.contains("DECY")) { // NON-NLS
-        double suvFactor = 0.0;
-        String units = dicomObject.getString(Tag.Units);
-        // DICOM $C.8.9.1.1.3 Units
-        // The units of the pixel values obtained after conversion from the stored pixel values (SV)
-        // (Pixel Data (7FE0,0010)) to pixel value units (U), as defined by Rescale Intercept
-        // (0028,1052) and Rescale Slope (0028,1053). Defined Terms:
-        // CNTS = counts
-        // NONE = unitless
-        // CM2 = centimeter**2
-        // PCNT = percent
-        // CPS = counts/second
-        // BQML = Becquerels/milliliter
-        // MGMINML = milligram/minute/milliliter
-        // UMOLMINML = micromole/minute/milliliter
-        // MLMING = milliliter/minute/gram
-        // MLG = milliliter/gram
-        // 1CM = 1/centimeter
-        // UMOLML = micromole/milliliter
-        // PROPCNTS = proportional to counts
-        // PROPCPS = proportional to counts/sec
-        // MLMINML = milliliter/minute/milliliter
-        // MLML = milliliter/milliliter
-        // GML = grams/milliliter
-        // STDDEV = standard deviations
-        if ("BQML".equals(units)) {
-          Float weight =
-              DicomUtils.getFloatFromDicomElement(dicomObject, Tag.PatientWeight, 0.0f); // in Kg
-          if (MathUtil.isDifferentFromZero(weight)) {
-            Attributes dcm =
-                dicomObject.getNestedDataset(Tag.RadiopharmaceuticalInformationSequence, index);
-            if (dcm != null) {
-              Float totalDose =
-                  DicomUtils.getFloatFromDicomElement(dcm, Tag.RadionuclideTotalDose, null);
-              Float halfLife =
-                  DicomUtils.getFloatFromDicomElement(dcm, Tag.RadionuclideHalfLife, null);
-              Date injectTime =
-                  DicomUtils.getDateFromDicomElement(dcm, Tag.RadiopharmaceuticalStartTime, null);
-              Date injectDateTime =
-                  DicomUtils.getDateFromDicomElement(
-                      dcm, Tag.RadiopharmaceuticalStartDateTime, null);
-              Date acquisitionDateTime = dicomObject.getDate(Tag.AcquisitionDateAndTime);
-              Date scanDate = dicomObject.getDate(Tag.SeriesDateAndTime);
-              if ("START".equals(dicomObject.getString(Tag.DecayCorrection))
-                  && totalDose != null
-                  && halfLife != null
-                  && acquisitionDateTime != null
-                  && (injectDateTime != null || (scanDate != null && injectTime != null))) {
-                double time = 0.0;
-                long scanDateTime = scanDate.getTime();
-                if (injectDateTime == null) {
-                  if (scanDateTime > acquisitionDateTime.getTime()) {
-                    // per GE docs, may have been updated during post-processing into new series
-                    String privateCreator = dicomObject.getString(0x00090010);
-                    Date privateScanDateTime =
-                        DicomUtils.getDateFromDicomElement(dcm, 0x0009100d, null);
-                    if ("GEMS_PETD_01".equals(privateCreator) // NON-NLS
-                        && privateScanDateTime != null) {
-                      scanDate = privateScanDateTime;
-                    } else {
-                      scanDate = null;
-                    }
-                  }
-                  if (scanDate != null) {
-                    TimeZone tz = dicomObject.getTimeZone();
-                    injectDateTime = DateTimeUtils.dateTime(tz, scanDate, injectTime, false);
-                    time = (double) scanDateTime - injectDateTime.getTime();
-                  }
-
-                } else {
-                  time = (double) scanDateTime - injectDateTime.getTime();
-                }
-                // Exclude negative value (case over midnight)
-                if (time > 0) {
-                  double correctedDose = totalDose * Math.pow(2, -time / (1000.0 * halfLife));
-                  // Weight converts in kg to g
-                  suvFactor = weight * 1000.0 / correctedDose;
-                }
-              }
-            }
-          }
-        } else if ("CNTS".equals(units)) {
-          String privateTagCreator = dicomObject.getString(0x70530010);
-          double privateSUVFactor = dicomObject.getDouble(0x70531000, 0.0);
-          if ("Philips PET Private Group".equals(privateTagCreator) // NON-NLS
-              && MathUtil.isDifferentFromZero(privateSUVFactor)) {
-            suvFactor = privateSUVFactor; // units => "g/ml"
-          }
-        } else if ("GML".equals(units)) {
-          suvFactor = 1.0;
-        }
-        if (MathUtil.isDifferentFromZero(suvFactor)) {
-          taggable.setTag(TagW.SuvFactor, suvFactor);
-        }
-      }
+    if (!"PT".equals(modality)) {
+      return;
     }
+    double suvFactor = suvFactor(dicomObject, index);
+    if (MathUtil.isDifferentFromZero(suvFactor)) {
+      taggable.setTag(TagW.SuvFactor, suvFactor);
+    }
+  }
+
+  /**
+   * Logs the attribute that makes the SUVbw conversion impossible and returns no factor. Debug
+   * level: it is one line per image, and a PET without SUV is a data property, not an error.
+   */
+  private static double noSuvFactor(int tag) {
+    LOGGER.debug(
+        "No SUV factor: {} is missing or not supported", ElementDictionary.keywordOf(tag, null));
+    return 0.0;
+  }
+
+  private static double suvFactor(Attributes dicomObject, int index) {
+    String correctedImage = DicomUtils.getStringFromDicomElement(dicomObject, Tag.CorrectedImage);
+    if (correctedImage == null
+        || !correctedImage.contains("ATTN")
+        || !correctedImage.contains("DECY")) { // NON-NLS
+      return noSuvFactor(Tag.CorrectedImage);
+    }
+    // DICOM $C.8.9.1.1.3 Units
+    // The units of the pixel values obtained after conversion from the stored pixel values (SV)
+    // (Pixel Data (7FE0,0010)) to pixel value units (U), as defined by Rescale Intercept
+    // (0028,1052) and Rescale Slope (0028,1053). Defined Terms:
+    // CNTS = counts
+    // NONE = unitless
+    // CM2 = centimeter**2
+    // PCNT = percent
+    // CPS = counts/second
+    // BQML = Becquerels/milliliter
+    // MGMINML = milligram/minute/milliliter
+    // UMOLMINML = micromole/minute/milliliter
+    // MLMING = milliliter/minute/gram
+    // MLG = milliliter/gram
+    // 1CM = 1/centimeter
+    // UMOLML = micromole/milliliter
+    // PROPCNTS = proportional to counts
+    // PROPCPS = proportional to counts/sec
+    // MLMINML = milliliter/minute/milliliter
+    // MLML = milliliter/milliliter
+    // GML = grams/milliliter
+    // STDDEV = standard deviations
+    String units = dicomObject.getString(Tag.Units);
+    return switch (units == null ? StringUtil.EMPTY_STRING : units) {
+      case "BQML" -> bqmlSuvFactor(dicomObject, index);
+      case "CNTS" -> philipsSuvFactor(dicomObject);
+      // Already grams/milliliter, which is SUVbw.
+      case "GML" -> 1.0;
+      default -> noSuvFactor(Tag.Units);
+    };
+  }
+
+  /** SUVbw factor from the injected dose decayed to the series time. */
+  private static double bqmlSuvFactor(Attributes dicomObject, int index) {
+    Float weight =
+        DicomUtils.getFloatFromDicomElement(dicomObject, Tag.PatientWeight, 0.0f); // in Kg
+    if (!MathUtil.isDifferentFromZero(weight)) {
+      return noSuvFactor(Tag.PatientWeight);
+    }
+    Attributes dcm =
+        dicomObject.getNestedDataset(Tag.RadiopharmaceuticalInformationSequence, index);
+    if (dcm == null) {
+      return noSuvFactor(Tag.RadiopharmaceuticalInformationSequence);
+    }
+    Float totalDose = DicomUtils.getFloatFromDicomElement(dcm, Tag.RadionuclideTotalDose, null);
+    if (totalDose == null) {
+      return noSuvFactor(Tag.RadionuclideTotalDose);
+    }
+    Float halfLife = DicomUtils.getFloatFromDicomElement(dcm, Tag.RadionuclideHalfLife, null);
+    if (halfLife == null || halfLife <= 0.0f) {
+      return noSuvFactor(Tag.RadionuclideHalfLife);
+    }
+    if (!"START".equals(dicomObject.getString(Tag.DecayCorrection))) {
+      return noSuvFactor(Tag.DecayCorrection);
+    }
+    double time = uptakeTime(dicomObject, dcm);
+    if (time <= 0.0) {
+      return noSuvFactor(Tag.RadiopharmaceuticalStartDateTime);
+    }
+    double correctedDose = totalDose * Math.pow(2, -time / (1000.0 * halfLife));
+    if (correctedDose <= 0.0) {
+      return noSuvFactor(Tag.RadionuclideTotalDose);
+    }
+    // Weight converts in kg to g
+    return weight * 1000.0 / correctedDose;
+  }
+
+  /** Philips writes the factor directly when the values are counts. */
+  private static double philipsSuvFactor(Attributes dicomObject) {
+    String privateTagCreator = dicomObject.getString(0x70530010);
+    double privateSUVFactor = dicomObject.getDouble(0x70531000, 0.0);
+    if ("Philips PET Private Group".equals(privateTagCreator) // NON-NLS
+        && MathUtil.isDifferentFromZero(privateSUVFactor)) {
+      return privateSUVFactor; // units => "g/ml"
+    }
+    return noSuvFactor(Tag.Units);
+  }
+
+  /**
+   * Milliseconds elapsed between the injection and the series time, {@code 0} when the two cannot
+   * be related: times missing, or an injection recorded after the scan (case over midnight).
+   */
+  private static double uptakeTime(Attributes dicomObject, Attributes radiopharmaceutical) {
+    Date acquisitionDateTime = dicomObject.getDate(Tag.AcquisitionDateAndTime);
+    Date scanDate = dicomObject.getDate(Tag.SeriesDateAndTime);
+    if (acquisitionDateTime == null || scanDate == null) {
+      return 0.0;
+    }
+    long scanDateTime = scanDate.getTime();
+    Date injectDateTime =
+        DicomUtils.getDateFromDicomElement(
+            radiopharmaceutical, Tag.RadiopharmaceuticalStartDateTime, null);
+    if (injectDateTime == null) {
+      Date injectTime =
+          DicomUtils.getDateFromDicomElement(
+              radiopharmaceutical, Tag.RadiopharmaceuticalStartTime, null);
+      if (injectTime == null) {
+        return 0.0;
+      }
+      if (scanDateTime > acquisitionDateTime.getTime()) {
+        // per GE docs, may have been updated during post-processing into new series
+        String privateCreator = dicomObject.getString(0x00090010);
+        Date privateScanDateTime =
+            DicomUtils.getDateFromDicomElement(radiopharmaceutical, 0x0009100d, null);
+        if (!"GEMS_PETD_01".equals(privateCreator) || privateScanDateTime == null) { // NON-NLS
+          return 0.0;
+        }
+        scanDate = privateScanDateTime;
+      }
+      // The injection time carries no date: it is dated with the (corrected) scan day, while the
+      // uptake stays measured from the original series time.
+      injectDateTime =
+          DateTimeUtils.dateTime(dicomObject.getTimeZone(), scanDate, injectTime, false);
+    }
+    return (double) scanDateTime - injectDateTime.getTime();
   }
 
   public static double[] getFrameTime(Attributes attributes) {
@@ -784,8 +932,8 @@ public class DicomMediaUtils {
       LOGGER.error("Reading KO Codes", e);
       codeByValue = null;
     } finally {
-      FileUtil.safeClose(xmler);
-      FileUtil.safeClose(stream);
+      StreamUtil.safeClose(xmler);
+      StreamUtil.safeClose(stream);
     }
     return codeByValue;
   }
@@ -1054,10 +1202,10 @@ public class DicomMediaUtils {
   }
 
   public static double getThickness(ImageElement firstDcm, ImageElement lastDcm) {
-    double[] p1 = (double[]) firstDcm.getTagValue(TagW.SlicePosition);
-    double[] p2 = (double[]) lastDcm.getTagValue(TagW.SlicePosition);
-    if (p1 != null && p2 != null) {
-      double diff = Math.abs((p2[0] + p2[1] + p2[2]) - (p1[0] + p1[1] + p1[2]));
+    double p1Val = getSlicePositionValue(firstDcm);
+    double p2Val = getSlicePositionValue(lastDcm);
+    if (p1Val != 0 || p2Val != 0) {
+      double diff = Math.abs(p2Val - p1Val);
 
       Double t1 = TagD.getTagValue(firstDcm, Tag.SliceThickness, Double.class);
       if (t1 != null) {

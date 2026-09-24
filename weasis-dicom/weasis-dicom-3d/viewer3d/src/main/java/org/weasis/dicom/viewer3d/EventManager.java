@@ -9,7 +9,6 @@
  */
 package org.weasis.dicom.viewer3d;
 
-import java.awt.Component;
 import java.awt.Point;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
@@ -22,16 +21,16 @@ import java.util.List;
 import java.util.Optional;
 import javax.swing.BoundedRangeModel;
 import javax.swing.ButtonGroup;
-import javax.swing.DefaultComboBoxModel;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JRadioButtonMenuItem;
-import javax.swing.JSeparator;
 import javax.swing.KeyStroke;
 import org.dcm4che3.img.lut.PresetWindowLevel;
+import org.joml.Quaterniond;
 import org.osgi.framework.BundleContext;
 import org.osgi.service.prefs.Preferences;
+import org.weasis.core.api.gui.layout.MigLayoutModel;
 import org.weasis.core.api.gui.util.ActionState;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.AppProperties;
@@ -39,13 +38,10 @@ import org.weasis.core.api.gui.util.BasicActionState;
 import org.weasis.core.api.gui.util.ComboItemListener;
 import org.weasis.core.api.gui.util.DecFormatter;
 import org.weasis.core.api.gui.util.GuiUtils;
-import org.weasis.core.api.gui.util.RadioMenuItem;
+import org.weasis.core.api.gui.util.ShortcutManager;
 import org.weasis.core.api.gui.util.SliderChangeListener;
 import org.weasis.core.api.gui.util.ToggleButtonListener;
-import org.weasis.core.api.image.GridBagLayoutModel;
-import org.weasis.core.api.image.util.Unit;
 import org.weasis.core.api.media.data.MediaSeries;
-import org.weasis.core.api.media.data.SeriesComparator;
 import org.weasis.core.api.service.AuditLog;
 import org.weasis.core.api.service.BundlePreferences;
 import org.weasis.core.api.util.ResourceUtil;
@@ -56,43 +52,36 @@ import org.weasis.core.ui.editor.image.ImageViewerEventManager;
 import org.weasis.core.ui.editor.image.ImageViewerPlugin;
 import org.weasis.core.ui.editor.image.PannerListener;
 import org.weasis.core.ui.editor.image.SynchData;
-import org.weasis.core.ui.editor.image.SynchData.Mode;
 import org.weasis.core.ui.editor.image.SynchEvent;
 import org.weasis.core.ui.editor.image.SynchView;
 import org.weasis.core.ui.editor.image.ViewCanvas;
+import org.weasis.core.ui.editor.image.ViewSynchData;
 import org.weasis.core.ui.editor.image.ZoomToolBar;
 import org.weasis.core.ui.model.layer.LayerType;
 import org.weasis.core.ui.model.utils.bean.PanPoint;
 import org.weasis.dicom.codec.DicomImageElement;
-import org.weasis.dicom.codec.SortSeriesStack;
 import org.weasis.dicom.codec.display.Modality;
-import org.weasis.dicom.explorer.DicomExportAction;
+import org.weasis.dicom.explorer.exp.DicomExportAction;
 import org.weasis.dicom.viewer2d.Messages;
 import org.weasis.dicom.viewer2d.ResetTools;
 import org.weasis.dicom.viewer2d.View2dContainer;
-import org.weasis.dicom.viewer2d.mip.MipView;
 import org.weasis.dicom.viewer3d.dockable.SegmentationTool;
-import org.weasis.dicom.viewer3d.dockable.SegmentationTool.Type;
 import org.weasis.dicom.viewer3d.geometry.ArcballMouseListener;
 import org.weasis.dicom.viewer3d.geometry.Axis;
 import org.weasis.dicom.viewer3d.geometry.Camera;
 import org.weasis.dicom.viewer3d.geometry.CameraView;
 import org.weasis.dicom.viewer3d.geometry.View;
 import org.weasis.dicom.viewer3d.geometry.ViewData;
+import org.weasis.dicom.viewer3d.vr.CrosshairCutMode;
 import org.weasis.dicom.viewer3d.vr.DicomVolTexture;
 import org.weasis.dicom.viewer3d.vr.Preset;
 import org.weasis.dicom.viewer3d.vr.PresetRadioMenu;
 import org.weasis.dicom.viewer3d.vr.RenderingLayer;
 import org.weasis.dicom.viewer3d.vr.RenderingType;
 import org.weasis.dicom.viewer3d.vr.View3d;
-import org.weasis.dicom.viewer3d.vr.View3d.ViewType;
 import org.weasis.opencv.op.lut.LutShape;
 
 public class EventManager extends ImageViewerEventManager<DicomImageElement> {
-
-  private static final int MIP_DEPTH_DEFAULT = 5;
-  private static final int MIP_DEPTH_MAX = 100;
-
   private static EventManager instance;
 
   public static synchronized EventManager getInstance() {
@@ -107,46 +96,32 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
     setAction(new BasicActionState(ActionW.WINLEVEL));
     setAction(new BasicActionState(ActionW.CONTEXTMENU));
     setAction(new BasicActionState(ActionW.NO_ACTION));
-    //    setAction(new BasicActionState(ActionW.DRAW));
-    //    setAction(new BasicActionState(ActionW.MEASURE));
 
-    setAction(newScrollSeriesAction());
     setAction(newVolumeQualityAction());
     setAction(newWindowAction());
     setAction(newLevelAction());
     setAction(newRotateAction());
     setAction(newZoomAction());
-    setAction(newMipTypeOption());
-    setAction(newMipDepthAction());
     setAction(newOpacityAction());
 
-    setAction(newFlipAction());
-    // setAction(newDrawOnlyOnceAction());
-    // setAction(newVolumeSlicingAction());
     setAction(newVolumeShadingAction());
     setAction(newVolumeProjection());
     setAction(newAxisRotationAction());
 
-    setAction(newPresetAction());
     setAction(newLutShapeAction());
     setAction(newPreset3DAction());
     setAction(newInverseLutAction());
     setAction(newSegmentationMode());
-    setAction(newSortStackAction());
-    setAction(newInverseStackAction());
-    setAction(
-        newLayoutAction(View2dContainer.DEFAULT_LAYOUT_LIST.toArray(new GridBagLayoutModel[0])));
-    setAction(newSynchAction(View2dContainer.DEFAULT_SYNCH_LIST.toArray(new SynchView[0])));
-    getAction(ActionW.SYNCH)
-        .ifPresent(a -> a.setSelectedItemWithoutTriggerAction(SynchView.DEFAULT_STACK));
-    //    setAction(newMeasurementAction(MeasureToolBar.measureGraphicList.toArray(new
-    // Graphic[0])));
-    //    setAction(newDrawAction(MeasureToolBar.drawGraphicList.toArray(new Graphic[0])));
-    setAction(newSpatialUnit(Unit.values()));
+    setAction(newLayoutAction(View2dContainer.DEFAULT_LAYOUT_LIST.toArray(new MigLayoutModel[0])));
+    setAction(newSynchAction(View3DContainer.SYNCH_VOLUME));
+    // Register SYNCH_MODE so the toolbar Synchronize checkbox is actually bound to something.
+    // The 2D EventManager does the same; the 3D class previously omitted it, leaving the
+    // toolbar item inert.
+    setAction(newSynchModeAction());
     setAction(newRenderingTypeOption());
 
     setAction(buildPanAction());
-    setAction(newCrosshairAction());
+    setAction(newCrosshairCutModeAction());
     setAction(new BasicActionState(ActionW.RESET));
 
     final BundleContext context = AppProperties.getBundleContext(this.getClass());
@@ -191,11 +166,19 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
           pickPoint = e.getPoint();
           View3d view3d = getView3d(e);
           if (view3d != null) {
-            if (view3d.getViewType() == ViewType.VOLUME3D) {
-              view3d.getCamera().setAdjusting(true);
-            }
+            view3d.getCamera().setAdjusting(true);
             view3d.getCamera().init(e.getPoint());
           }
+          // Anchor every synced view's pan reference at the press point. Without this, target
+          // views compute their first DRAGGING delta against a stale Camera.prevMousePos and
+          // jump visibly before the actual drag begins.
+          firePropertyChange(
+              ActionW.SYNCH.cmd(),
+              null,
+              new SynchEvent(
+                  getSelectedViewPane(),
+                  getActionW().cmd(),
+                  new PanPoint(PanPoint.State.DRAGSTART, e.getX(), e.getY())));
         }
       }
 
@@ -205,9 +188,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
         if (!e.isConsumed() && (e.getModifiers() & buttonMask) != 0) {
           View3d view3d = getView3d(e);
           if (view3d != null) {
-            if (view3d.getViewType() == ViewType.VOLUME3D) {
-              view3d.getCamera().setAdjusting(false);
-            }
+            view3d.getCamera().setAdjusting(false);
             view3d.getCamera().init(e.getPoint());
             view3d.resetPointerType(ViewCanvas.CENTER_POINTER);
             view3d.getJComponent().repaint();
@@ -232,23 +213,6 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
             }
           }
         }
-      }
-    };
-  }
-
-  private SliderChangeListener newScrollSeriesAction() {
-    return new SliderChangeListener(ActionVol.SCROLLING, 1, 100, 1, true, 0.1) {
-      @Override
-      public void stateChanged(BoundedRangeModel model) {
-        firePropertyChange(
-            ActionW.SYNCH.cmd(),
-            null,
-            new SynchEvent(getSelectedViewPane(), getActionW().cmd(), model.getValue()));
-      }
-
-      @Override
-      public void mouseWheelMoved(MouseWheelEvent e) {
-        setSliderValue(getSliderValue() + e.getWheelRotation());
       }
     };
   }
@@ -392,16 +356,6 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
     firePropertyChange(ActionW.SYNCH.cmd(), null, evt);
   }
 
-  private ComboItemListener<PresetWindowLevel> newPresetAction() {
-    return new ComboItemListener<>(ActionW.PRESET, null) {
-
-      @Override
-      public void itemStateChanged(Object object) {
-        updatePreset(getActionW().cmd(), object, false);
-      }
-    };
-  }
-
   private ComboItemListener<LutShape> newLutShapeAction() {
     return new ComboItemListener<>(
         ActionW.LUT_SHAPE, DicomImageElement.DEFAULT_LUT_FUNCTIONS.toArray(new LutShape[0])) {
@@ -415,7 +369,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
   private ComboItemListener<Preset> newPreset3DAction() {
     return new ComboItemListener<>(
-        ActionVol.VOL_PRESET, Preset.basicPresets.toArray(new Preset[0])) {
+        ActionVol.VOL_PRESET, Preset.getAllPresets().toArray(new Preset[0])) {
 
       @Override
       public void itemStateChanged(Object object) {
@@ -433,40 +387,8 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
       @Override
       public void itemStateChanged(Object object) {
-        ImageViewerPlugin<DicomImageElement> container = getSelectedView2dContainer();
-        if (container instanceof View3DContainer view3DContainer) {
-          view3DContainer.setSegmentationType((SegmentationTool.Type) object);
-          view3DContainer.reload();
-        }
-      }
-    };
-  }
-
-  private ComboItemListener<SeriesComparator<DicomImageElement>> newSortStackAction() {
-    return new ComboItemListener<>(ActionW.SORT_STACK, SortSeriesStack.getValues()) {
-
-      @Override
-      public void itemStateChanged(Object object) {
-        ImageViewerPlugin<DicomImageElement> container =
-            EventManager.getInstance().getSelectedView2dContainer();
-        if (container != null) {
-          container.addSeries(EventManager.getInstance().getSelectedSeries());
-        }
-      }
-    };
-  }
-
-  @Override
-  protected ToggleButtonListener newInverseStackAction() {
-    return new ToggleButtonListener(ActionW.INVERSE_STACK, false) {
-
-      @Override
-      public void actionPerformed(boolean selected) {
-        ImageViewerPlugin<DicomImageElement> container =
-            EventManager.getInstance().getSelectedView2dContainer();
-        if (container != null) {
-          container.addSeries(EventManager.getInstance().getSelectedSeries());
-        }
+        firePropertyChange(
+            ActionW.SYNCH.cmd(), null, new SynchEvent(getSelectedViewPane(), action.cmd(), object));
       }
     };
   }
@@ -475,9 +397,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
     return new ComboItemListener<>(
         ActionVol.RENDERING_TYPE,
-        Arrays.stream(RenderingType.values())
-            .limit(RenderingType.values().length - 1L)
-            .toArray(RenderingType[]::new)) {
+        Arrays.stream(RenderingType.values()).toArray(RenderingType[]::new)) {
 
       @Override
       public void itemStateChanged(Object object) {
@@ -485,32 +405,6 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
         firePropertyChange(ActionW.SYNCH.cmd(), null, new SynchEvent(pane, action.cmd(), object));
         // Need to synch the listeners and the components
         updateComponentsListener(pane);
-      }
-    };
-  }
-
-  private ComboItemListener<MipView.Type> newMipTypeOption() {
-
-    return new ComboItemListener<>(ActionVol.MIP_TYPE, MipView.Type.values()) {
-
-      @Override
-      public void itemStateChanged(Object object) {
-        firePropertyChange(
-            ActionW.SYNCH.cmd(), null, new SynchEvent(getSelectedViewPane(), action.cmd(), object));
-      }
-    };
-  }
-
-  private SliderChangeListener newMipDepthAction() {
-    return new SliderChangeListener(
-        ActionVol.MIP_DEPTH, 2, MIP_DEPTH_MAX, MIP_DEPTH_DEFAULT, true) {
-
-      @Override
-      public void stateChanged(BoundedRangeModel model) {
-        firePropertyChange(
-            ActionW.SYNCH.cmd(),
-            null,
-            new SynchEvent(getSelectedViewPane(), getActionW().cmd(), model.getValue()));
       }
     };
   }
@@ -561,14 +455,12 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
     };
   }
 
-  private ToggleButtonListener newVolumeSlicingAction() {
-    return new ToggleButtonListener(ActionVol.VOL_SLICING, false) {
+  private ComboItemListener<CrosshairCutMode> newCrosshairCutModeAction() {
+    return new ComboItemListener<>(ActionVol.CROSSHAIR_CUT_MODE, CrosshairCutMode.values()) {
       @Override
-      public void actionPerformed(boolean selected) {
-        firePropertyChange(
-            ActionW.SYNCH.cmd(),
-            null,
-            new SynchEvent(getSelectedViewPane(), action.cmd(), selected));
+      public void itemStateChanged(Object object) {
+        ViewCanvas<DicomImageElement> view = getSelectedViewPane();
+        firePropertyChange(ActionW.SYNCH.cmd(), null, new SynchEvent(view, action.cmd(), object));
       }
     };
   }
@@ -591,26 +483,11 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
     int keyEvent = e.getKeyCode();
     int modifiers = e.getModifiers();
 
-    if (keyEvent == KeyEvent.VK_ESCAPE) {
+    if (ShortcutManager.getInstance()
+        .matches(ShortcutManager.ID_VIEWER_ESCAPE, keyEvent, modifiers)) {
       resetDisplay();
     } else {
-      applyPreset(keyEvent, modifiers);
       triggerDrawingToolKeyEvent(keyEvent, modifiers);
-    }
-  }
-
-  protected void applyPreset(int keyEvent, int modifiers) {
-    Optional<ComboItemListener<Object>> presetAction = getAction(ActionW.PRESET);
-    if (modifiers == 0 && presetAction.isPresent() && presetAction.get().isActionEnabled()) {
-      ComboItemListener<?> presetComboListener = presetAction.get();
-      DefaultComboBoxModel<?> model = presetComboListener.getModel();
-      for (int i = 0; i < model.getSize(); i++) {
-        PresetWindowLevel val = (PresetWindowLevel) model.getElementAt(i);
-        if (val.getKeyCode() == keyEvent) {
-          presetComboListener.setSelectedItem(val);
-          return;
-        }
-      }
     }
   }
 
@@ -631,20 +508,16 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
     if (selectedView2dContainer != null) {
       Optional<ComboItemListener<SynchView>> synchAction = getAction(ActionW.SYNCH);
-      Optional<ComboItemListener<GridBagLayoutModel>> layoutAction = getAction(ActionW.LAYOUT);
+      Optional<ComboItemListener<MigLayoutModel>> layoutAction = getAction(ActionW.LAYOUT);
       if (oldContainer == null
           || !oldContainer.getClass().equals(selectedView2dContainer.getClass())) {
-        synchAction.ifPresent(
-            a ->
-                a.setDataListWithoutTriggerAction(
-                    selectedView2dContainer.getSynchList().toArray(new SynchView[0])));
         layoutAction.ifPresent(
             a ->
                 a.setDataListWithoutTriggerAction(
-                    selectedView2dContainer.getLayoutList().toArray(new GridBagLayoutModel[0])));
+                    selectedView2dContainer.getLayoutList().toArray(new MigLayoutModel[0])));
       }
       if (oldContainer != null) {
-        ViewCanvas<DicomImageElement> pane = oldContainer.getSelectedImagePane();
+        ViewCanvas<DicomImageElement> pane = oldContainer.getSelectedViewCanvas();
         if (pane != null) {
           pane.setFocused(false);
         }
@@ -655,9 +528,9 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
           a ->
               a.setSelectedItemWithoutTriggerAction(
                   selectedView2dContainer.getOriginalLayoutModel()));
-      updateComponentsListener(selectedView2dContainer.getSelectedImagePane());
+      updateComponentsListener(selectedView2dContainer.getSelectedViewCanvas());
       selectedView2dContainer.setMouseActions(mouseActions);
-      ViewCanvas<DicomImageElement> pane = selectedView2dContainer.getSelectedImagePane();
+      ViewCanvas<DicomImageElement> pane = selectedView2dContainer.getSelectedViewCanvas();
       if (pane != null) {
         pane.setFocused(true);
         fireSeriesViewerListeners(
@@ -674,7 +547,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
     }
 
     if (selectedView2dContainer == null
-        || view2d != selectedView2dContainer.getSelectedImagePane()) {
+        || view2d != selectedView2dContainer.getSelectedViewCanvas()) {
       return false;
     }
 
@@ -699,11 +572,6 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
 
     Optional<SliderChangeListener> rotation = getAction(ActionW.ROTATION);
     rotation.ifPresent(a -> a.setSliderValue(canvas.getCamera().getCurrentAxisRotationInDegrees()));
-    getAction(ActionW.FLIP)
-        .ifPresent(
-            a ->
-                a.setSelectedWithoutTriggerAction(
-                    (Boolean) canvas.getActionValue(ActionW.FLIP.cmd())));
 
     getAction(ActionW.ZOOM).ifPresent(a -> a.setRealValue(canvas.getCamera().getZoomFactor()));
     getAction(ActionW.SPATIAL_UNIT)
@@ -715,101 +583,44 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
     Optional<ComboItemListener<RenderingType>> viewType = getAction(ActionVol.RENDERING_TYPE);
     viewType.ifPresent(a -> a.setSelectedItemWithoutTriggerAction(rendering.getRenderingType()));
 
-    Optional<ComboItemListener<MipView.Type>> mipType = getAction(ActionVol.MIP_TYPE);
-    mipType.ifPresent(a -> a.setSelectedItemWithoutTriggerAction(rendering.getMipType()));
-
-    Optional<SliderChangeListener> cineAction = getAction(ActionVol.SCROLLING);
-    cineAction.ifPresent(
-        a ->
-            a.setSliderMinMaxValue(
-                1,
-                canvas.getVolTexture().getDepth() // FIXME
-                ,
-                canvas.getFrameIndex(),
-                false));
-
-    boolean volume = ViewType.VOLUME3D.equals(canvas.getViewType());
-    Optional<SliderChangeListener> mipThickness = getAction(ActionVol.MIP_DEPTH);
-    if (!volume) {
-      mipThickness.ifPresent(
-          a ->
-              a.setSliderMinMaxValue(
-                  2,
-                  cineAction.map(SliderChangeListener::getSliderMax).orElse(1),
-                  canvas.getRenderingLayer().getMipThickness(),
-                  false));
-    }
-
     Optional<ToggleButtonListener> volumeLighting = getAction(ActionVol.VOL_SHADING);
-    Optional<ToggleButtonListener> volumeSlicing = getAction(ActionVol.VOL_SLICING);
     Optional<SliderChangeListener> volumeQuality = getAction(ActionVol.VOL_QUALITY);
     Optional<SliderChangeListener> volumeOpacity = getAction(ActionVol.VOL_OPACITY);
     Optional<ToggleButtonListener> volumeProjection = getAction(ActionVol.VOL_PROJECTION);
     Optional<ComboItemListener<Axis>> volumeAxis = getAction(ActionVol.VOL_AXIS);
-    if (volume) {
-      volumeLighting.ifPresent(a -> a.setSelectedWithoutTriggerAction(rendering.isShading()));
-      volumeSlicing.ifPresent(a -> a.setSelectedWithoutTriggerAction(rendering.isSlicing()));
-      volumeProjection.ifPresent(
-          a -> a.setSelectedWithoutTriggerAction(canvas.getCamera().isOrthographicProjection()));
-      volumeQuality.ifPresent(a -> a.setSliderValue(rendering.getQuality(), false));
-      volumeAxis.ifPresent(
-          a -> a.setSelectedItemWithoutTriggerAction(canvas.getCamera().getRotationAxis()));
-    }
-    volumeLighting.ifPresent(a -> a.enableAction(volume));
-    volumeSlicing.ifPresent(a -> a.enableAction(volume));
-    volumeQuality.ifPresent(a -> a.enableAction(volume));
-    //   volumeOpacity.ifPresent(a -> a.enableAction(volume));
-    volumeProjection.ifPresent(a -> a.enableAction(volume));
-    volumeAxis.ifPresent(a -> a.enableAction(volume));
+    Optional<ComboItemListener<CrosshairCutMode>> crosshairCutMode =
+        getAction(ActionVol.CROSSHAIR_CUT_MODE);
+    volumeLighting.ifPresent(a -> a.setSelectedWithoutTriggerAction(rendering.isShading()));
+    volumeProjection.ifPresent(
+        a -> a.setSelectedWithoutTriggerAction(canvas.getCamera().isOrthographicProjection()));
+    volumeQuality.ifPresent(a -> a.setSliderValue(rendering.getQuality(), false));
+    volumeAxis.ifPresent(
+        a -> a.setSelectedItemWithoutTriggerAction(canvas.getCamera().getRotationAxis()));
+    crosshairCutMode.ifPresent(
+        a -> a.setSelectedItemWithoutTriggerAction(canvas.getCrossHairCutMode()));
+    volumeLighting.ifPresent(a -> a.enableAction(true));
+    volumeQuality.ifPresent(a -> a.enableAction(true));
+    //   volumeOpacity.ifPresent(a -> a.enableAction(true));
+    volumeProjection.ifPresent(a -> a.enableAction(true));
+    volumeAxis.ifPresent(a -> a.enableAction(true));
+    crosshairCutMode.ifPresent(a -> a.enableAction(true));
 
     volumeOpacity.ifPresent(a -> a.setRealValue(rendering.getOpacity(), false));
-    mipType.ifPresent(
-        a -> a.enableAction(!volume || RenderingType.MIP.equals(rendering.getRenderingType())));
-    mipThickness.ifPresent(a -> a.enableAction(!volume));
-    cineAction.ifPresent(a -> a.enableAction(!volume));
-    //    rotation.ifPresent(a -> a.enableAction(!volume));
-    getAction(ActionW.FLIP).ifPresent(a -> a.enableAction(!volume));
-    //    getAction(ActionW.MEASURE).ifPresent(a -> a.enableAction(!volume));
-    //    getAction(ActionW.DRAW).ifPresent(a -> a.enableAction(!volume));
-    getAction(ActionW.CROSSHAIR).ifPresent(a -> a.enableAction(!volume));
 
     getAction(ActionW.INVERT_LUT)
         .ifPresent(a -> a.setSelectedWithoutTriggerAction(rendering.isInvertLut()));
 
-    getAction(ActionW.SORT_STACK)
-        .ifPresent(
-            a ->
-                a.setSelectedItemWithoutTriggerAction(
-                    canvas.getActionValue(ActionW.SORT_STACK.cmd())));
-    getAction(ActionW.INVERSE_STACK)
-        .ifPresent(
-            a ->
-                a.setSelectedWithoutTriggerAction(
-                    (Boolean) canvas.getActionValue(ActionW.INVERSE_STACK.cmd())));
-
-    Optional<ComboItemListener<Type>> segType = getAction(ActionVol.SEG_TYPE);
-    Type segmenationType;
-    if (selectedView2dContainer instanceof View3DContainer view3DContainer) {
-      segmenationType = view3DContainer.getSegmentationType();
-      segType.ifPresent(a -> a.setSelectedItemWithoutTriggerAction(segmenationType));
-    } else {
-      segmenationType = Type.NONE;
-    }
-
-    boolean segDisable = segmenationType == Type.NONE;
-    // getAction(ActionVol.VOL_PRESET).ifPresent(a -> a.enableAction(segDisable));
-    //    getAction(ActionW.WINLEVEL).ifPresent(a -> a.enableAction(segDisable));
-    //    getAction(ActionW.WINDOW).ifPresent(a -> a.enableAction(segDisable));
-    //    getAction(ActionW.LEVEL).ifPresent(a -> a.enableAction(segDisable));
-    // getAction(ActionW.PRESET).ifPresent(a -> a.enableAction(segDisable));
-    // getAction(ActionW.LUT_SHAPE).ifPresent(a -> a.enableAction(segDisable));
+    getAction(ActionVol.SEG_TYPE)
+        .ifPresent(a -> a.setSelectedItemWithoutTriggerAction(canvas.getSegType()));
 
     // register all actions for the selected view and for the other views register according to
     // synchview.
     ComboItemListener<SynchView> synchAction = getAction(ActionW.SYNCH).orElse(null);
     updateAllListeners(
         selectedView2dContainer,
-        synchAction == null ? SynchView.NONE : (SynchView) synchAction.getSelectedItem());
+        synchAction == null
+            ? View3DContainer.SYNCH_VOLUME
+            : (SynchView) synchAction.getSelectedItem());
 
     view2d.updateGraphicSelectionListener(selectedView2dContainer);
     return true;
@@ -843,21 +654,8 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
     DicomVolTexture volTexture = view3d.getVolTexture();
     if (volTexture != null) {
       applyDefaultWindowLevel(view3d);
-      PresetWindowLevel preset = (PresetWindowLevel) view3d.getActionValue(ActionW.PRESET.cmd());
       boolean pixelPadding = true;
       LutShape lutShapeItem = view3d.getRenderingLayer().getLutShape();
-      List<PresetWindowLevel> presetList =
-          volTexture.getPresetList(
-              pixelPadding, view3d.getVolumePreset(), view3d.getViewType() != ViewType.VOLUME3D);
-
-      Optional<ComboItemListener<Object>> presetAction = getAction(ActionW.PRESET);
-      if (presetAction.isPresent()) {
-        presetAction
-            .get()
-            .setDataListWithoutTriggerAction(presetList == null ? null : presetList.toArray());
-        presetAction.get().setSelectedItemWithoutTriggerAction(preset);
-      }
-
       Optional<? extends ComboItemListener<Object>> lutShapeAction = getAction(ActionW.LUT_SHAPE);
       if (lutShapeAction.isPresent()) {
         Collection<LutShape> lutShapeList = volTexture.getLutShapeCollection(pixelPadding);
@@ -896,10 +694,17 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
           null,
           new SynchEvent(getSelectedViewPane(), ActionW.ZOOM.cmd(), 0.0));
     } else if (ResetTools.WL.equals(action)) {
-      applyPreset(0x30, 0);
+      if (selectedView2dContainer != null) {
+        if (selectedView2dContainer.getSelectedViewCanvas() instanceof View3d view3d) {
+          var volumePreset = view3d.getVolumePreset();
+          PresetWindowLevel defaultPreset = view3d.getVolTexture().getDefaultPreset(volumePreset);
+          updatePreset(ActionW.PRESET.cmd(), defaultPreset, false);
+        }
+      }
+
     } else if (ResetTools.PAN.equals(action)) {
       if (selectedView2dContainer != null) {
-        ViewCanvas viewPane = selectedView2dContainer.getSelectedImagePane();
+        ViewCanvas viewPane = selectedView2dContainer.getSelectedViewCanvas();
         if (viewPane != null) {
           viewPane.resetPan();
           viewPane.getJComponent().repaint();
@@ -908,73 +713,124 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
     }
   }
 
+  /**
+   * Broadcast a free-form arcball rotation to all views. The {@link ActionW#ROTATION} slider only
+   * carries a single-axis integer angle, which can't represent the full 3D rotation produced by the
+   * arcball drag — so the arcball ships the resulting quaternion directly via a SynchEvent and
+   * {@link View3d#propertyChange} applies it to non-source cameras.
+   */
+  public void fireRotationSync(View3d source, Quaterniond rotation, boolean valueIsAdjusting) {
+    firePropertyChange(
+        ActionW.SYNCH.cmd(),
+        null,
+        new SynchEvent(source, ActionW.ROTATION.cmd(), rotation, valueIsAdjusting));
+  }
+
+  /**
+   * 3D-specific SYNCH_MODE toggle. Defaults to ON (the 3D viewer is most useful when sync is
+   * already on after opening). Acts as a master switch: toggling it resets every view's per-view
+   * customization (isOriginal=true) so the global state wins, then {@code updateAllListeners}
+   * propagates it to all views. Mirrors the 2D toolbar Synchronize toggle.
+   */
+  @Override
+  protected ToggleButtonListener newSynchModeAction() {
+    return new ToggleButtonListener(ActionW.SYNCH_MODE, true) {
+      @Override
+      public void actionPerformed(boolean selected) {
+        getAction(ActionW.SYNCH)
+            .ifPresent(
+                a -> {
+                  if (a.getSelectedItem() instanceof SynchView sel) {
+                    sel.getSynchData()
+                        .setAutoSyncState(
+                            selected ? SynchData.SyncState.ON : SynchData.SyncState.OFF);
+                    ImageViewerPlugin<DicomImageElement> container = getSelectedView2dContainer();
+                    if (container != null) {
+                      // Wipe per-view customization so the master toggle propagates everywhere.
+                      for (ViewCanvas<DicomImageElement> v : container.getImagePanels()) {
+                        if (v.getActionValue(ActionW.SYNCH_LINK.cmd())
+                            instanceof ViewSynchData sd) {
+                          sd.setOriginal(true);
+                        }
+                      }
+                      updateAllListeners(container, sel);
+                    }
+                  }
+                });
+      }
+    };
+  }
+
   @Override
   public void updateAllListeners(
       ImageViewerPlugin<DicomImageElement> viewerPlugin, SynchView synchView) {
     clearAllPropertyChangeListeners();
 
     if (viewerPlugin != null) {
-      ViewCanvas<DicomImageElement> viewPane = viewerPlugin.getSelectedImagePane();
+      ViewCanvas<DicomImageElement> viewPane = viewerPlugin.getSelectedViewCanvas();
       // if (viewPane == null || viewPane.getSeries() == null) {
       if (!(viewPane instanceof View3d canvas) || canvas.getVolTexture() == null) {
         return;
       }
       SynchData synch = synchView.getSynchData();
+      // Per-view SynchData inherits the current SYNCH_MODE state, so toggling Synchronize in the
+      // toolbar / popup is reflected on every view's button after the next layout-change refresh.
+      boolean synchModeOn =
+          getAction(ActionW.SYNCH_MODE)
+              .filter(ToggleButtonListener.class::isInstance)
+              .map(a -> ((ToggleButtonListener) a).isSelected())
+              .orElse(true);
+      SynchData.SyncState paneState =
+          synchModeOn ? SynchData.SyncState.ON : SynchData.SyncState.OFF;
       MediaSeries<DicomImageElement> series = canvas.getVolTexture().getSeries();
       if (series != null) {
-        SynchData oldSynch = (SynchData) viewPane.getActionValue(ActionW.SYNCH_LINK.cmd());
-        if (oldSynch == null || !oldSynch.getMode().equals(synch.getMode())) {
-          oldSynch = synch;
+        // Wrap in ViewSynchData so the toolbar's "Apply to all views" entry and per-view user
+        // overrides keep working — ViewerToolBar gates that menu on instanceof ViewSynchData.
+        // Only original (auto-managed) views inherit the global SYNCH_MODE state; user-customized
+        // views (isOriginal=false) keep their per-view autoSyncState across refreshes.
+        ViewSynchData oldSynch = getOrCreateSynchData(viewPane, synch);
+        if (oldSynch.isOriginal()) {
+          oldSynch.setAutoSyncState(paneState);
         }
-        viewPane.setActionsInView(ActionW.SYNCH_LINK.cmd(), null);
+        viewPane.setActionsInView(ActionW.SYNCH_LINK.cmd(), oldSynch);
         addPropertyChangeListener(ActionW.SYNCH.cmd(), viewPane);
 
         final List<ViewCanvas<DicomImageElement>> panes = viewerPlugin.getImagePanels();
         panes.remove(viewPane);
         viewPane.setActionsInView(ActionW.SYNCH_CROSSLINE.cmd(), false);
 
-        if (SynchView.NONE.equals(synchView) || canvas.getViewType() == ViewType.VOLUME3D) {
-          for (int i = 0; i < panes.size(); i++) {
-            ViewCanvas<DicomImageElement> pane = panes.get(i);
+        for (ViewCanvas<DicomImageElement> pane : panes) {
+          if (!synchView.isSynch()) {
             pane.getGraphicManager().deleteByLayerType(LayerType.CROSSLINES);
-
-            oldSynch = (SynchData) pane.getActionValue(ActionW.SYNCH_LINK.cmd());
-            if (oldSynch == null || !oldSynch.getMode().equals(synch.getMode())) {
-              oldSynch = synch;
-            }
-            pane.setActionsInView(ActionW.SYNCH_LINK.cmd(), oldSynch);
-            // pane.updateSynchState();
           }
-        } else {
-          // TODO if Pan is activated than rotation is required
-          if (Mode.STACK.equals(synch.getMode())) {
-            boolean sliceMode = canvas.getViewType() == ViewType.SLICE;
-            for (int i = 0; i < panes.size(); i++) {
-              ViewCanvas<DicomImageElement> pane = panes.get(i);
-              pane.getGraphicManager().deleteByLayerType(LayerType.CROSSLINES);
-
-              MediaSeries<DicomImageElement> s = pane.getSeries();
-              if (s != null) {
-                oldSynch = (SynchData) pane.getActionValue(ActionW.SYNCH_LINK.cmd());
-                if (oldSynch == null || !oldSynch.getMode().equals(synch.getMode())) {
-                  oldSynch = synch.copy();
-                }
-                if (sliceMode
-                    && pane instanceof View3d view3d
-                    && view3d.getViewType() == ViewType.SLICE) {
-                  addPropertyChangeListener(ActionW.SYNCH.cmd(), pane);
-                }
-
-                pane.setActionsInView(ActionW.SYNCH_LINK.cmd(), oldSynch);
-                // pane.updateSynchState();
-              }
-            }
+          ViewSynchData paneSynch = getOrCreateSynchData(pane, synch);
+          if (paneSynch.isOriginal()) {
+            paneSynch.setAutoSyncState(paneState);
           }
+          pane.setActionsInView(ActionW.SYNCH_LINK.cmd(), paneSynch);
+          // Every view must listen for SYNCH events so a change in any one view is forwarded to
+          // all other views; without this only the selected view received the propagated event
+          // and the others stayed stale.
+          addPropertyChangeListener(ActionW.SYNCH.cmd(), pane);
+          pane.updateSynchState();
         }
       }
 
-      // viewPane.updateSynchState();
+      viewPane.updateSynchState();
     }
+  }
+
+  private static ViewSynchData getOrCreateSynchData(
+      ViewCanvas<DicomImageElement> pane, SynchData synch) {
+    // Mirror DicomSynchManager: only keep an existing ViewSynchData if the user has customized it
+    // (isOriginal=false). Auto-managed (original) instances are rebuilt from the global template
+    // so the global SYNCH_MODE state can take effect.
+    if (pane.getActionValue(ActionW.SYNCH_LINK.cmd()) instanceof ViewSynchData existing
+        && !existing.isOriginal()
+        && existing.getMode().equals(synch.getMode())) {
+      return existing;
+    }
+    return new ViewSynchData(synch.getMode(), synch.getActions(), synch.isSynchActivated());
   }
 
   public JMenu getResetMenu(String prop) {
@@ -995,28 +851,6 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
           item.addActionListener(e -> reset(action));
           menu.add(item);
           group.add(item);
-        }
-      }
-    }
-    return menu;
-  }
-
-  public JMenu getPresetMenu(String prop) {
-    JMenu menu = null;
-    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
-      Optional<? extends ComboItemListener<?>> presetAction = getAction(ActionW.PRESET);
-      if (presetAction.isPresent()) {
-        menu =
-            presetAction
-                .get()
-                .createUnregisteredRadioMenu(ActionW.PRESET.getTitle(), ActionW.WINLEVEL.getIcon());
-        GuiUtils.applySelectedIconEffect(menu);
-        for (Component mitem : menu.getMenuComponents()) {
-          RadioMenuItem ritem = (RadioMenuItem) mitem;
-          PresetWindowLevel preset = (PresetWindowLevel) ritem.getUserObject();
-          if (preset.getKeyCode() > 0) {
-            ritem.setAccelerator(KeyStroke.getKeyStroke(preset.getKeyCode(), 0));
-          }
         }
       }
     }
@@ -1093,30 +927,6 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
     return menuItem;
   }
 
-  public JMenu getSortStackMenu(String prop) {
-    JMenu menu = null;
-    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
-      Optional<ComboItemListener<SeriesComparator<?>>> sortStackAction =
-          getAction(ActionW.SORT_STACK);
-      if (sortStackAction.isPresent()) {
-        menu =
-            sortStackAction
-                .get()
-                .createUnregisteredRadioMenu(Messages.getString("View2dContainer.sort_stack"));
-        Optional<ToggleButtonListener> inverseStackAction = getAction(ActionW.INVERSE_STACK);
-        if (inverseStackAction.isPresent()) {
-          menu.add(new JSeparator());
-          menu.add(
-              inverseStackAction
-                  .get()
-                  .createUnregisteredJCCheckBoxMenuItem(
-                      Messages.getString("View2dContainer.inv_stack")));
-        }
-      }
-    }
-    return menu;
-  }
-
   public JMenu getLutMenu(String prop) {
     JMenu menu = null;
     if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
@@ -1144,17 +954,6 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
       if (viewTypeAction.isPresent()) {
         menu =
             viewTypeAction.get().createUnregisteredRadioMenu(ActionVol.RENDERING_TYPE.getTitle());
-      }
-    }
-    return menu;
-  }
-
-  public JMenu getMipTypeMenu(String prop) {
-    JMenu menu = null;
-    if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
-      Optional<ComboItemListener<MipView.Type>> viewTypeAction = getAction(ActionVol.MIP_TYPE);
-      if (viewTypeAction.isPresent()) {
-        menu = viewTypeAction.get().createUnregisteredRadioMenu(ActionVol.MIP_TYPE.getTitle());
       }
     }
     return menu;
@@ -1190,17 +989,18 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement> {
     return menu;
   }
 
-  public JCheckBoxMenuItem getSlicingMenu(String prop) {
-    JCheckBoxMenuItem menu = null;
+  public JMenu getMprCutMenu(String prop) {
+    JMenu menu = null;
     if (GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
-      Optional<ToggleButtonListener> shadingAction = getAction(ActionVol.VOL_SLICING);
-      if (shadingAction.isPresent()) {
+      Optional<ComboItemListener<CrosshairCutMode>> crosshairCutModeAction =
+          getAction(ActionVol.CROSSHAIR_CUT_MODE);
+      if (crosshairCutModeAction.isPresent()) {
         menu =
-            shadingAction
+            crosshairCutModeAction
                 .get()
-                .createUnregisteredJCCheckBoxMenuItem(
-                    ActionVol.VOL_SLICING.getTitle(),
-                    ResourceUtil.getIcon(ActionIcon.VOLUME_SLICING));
+                .createUnregisteredRadioMenu(
+                    ActionVol.CROSSHAIR_CUT_MODE.getTitle(),
+                    ResourceUtil.getIcon(ActionIcon.CROSSHAIR));
       }
     }
     return menu;

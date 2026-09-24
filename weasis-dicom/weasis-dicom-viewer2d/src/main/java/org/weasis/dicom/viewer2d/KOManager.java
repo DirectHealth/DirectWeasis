@@ -22,6 +22,7 @@ import org.weasis.core.api.gui.util.ActionState;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.Filter;
 import org.weasis.core.api.gui.util.GuiExecutor;
+import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.gui.util.WinUtil;
 import org.weasis.core.api.media.data.MediaElement;
 import org.weasis.core.api.media.data.MediaSeries;
@@ -43,6 +44,8 @@ import org.weasis.dicom.macro.HierarchicalSOPInstanceReference;
 import org.weasis.dicom.macro.KODocumentModule;
 
 public final class KOManager {
+
+  private static final String KO_HELP_TOPIC = "build-ko-pr/#key-object-selection-ko"; // NON-NLS
 
   public static List<Object> getKOElementListWithNone(ViewCanvas<DicomImageElement> currentView) {
 
@@ -86,16 +89,7 @@ public final class KOManager {
           Messages.getString("KOManager.select_last_ko"), Messages.getString("KOManager.new_ko")
         };
 
-        int response =
-            JOptionPane.showOptionDialog(
-                WinUtil.getValidComponent(view2d.getJComponent()),
-                message,
-                Messages.getString("KOManager.ko_title"),
-                JOptionPane.YES_NO_OPTION,
-                JOptionPane.WARNING_MESSAGE,
-                null,
-                options,
-                options[0]);
+        int response = showKOOptionDialog(view2d.getJComponent(), message, options);
 
         if (response == 0) {
           newKOSelection = validKOSelection;
@@ -125,16 +119,7 @@ public final class KOManager {
             Messages.getString("KOManager.use_ko"), Messages.getString("KOManager.new_ko")
           };
 
-          int response =
-              JOptionPane.showOptionDialog(
-                  WinUtil.getValidComponent(view2d.getJComponent()),
-                  message,
-                  Messages.getString("KOManager.ko_title"),
-                  JOptionPane.YES_NO_OPTION,
-                  JOptionPane.WARNING_MESSAGE,
-                  null,
-                  options,
-                  options[0]);
+          int response = showKOOptionDialog(view2d.getJComponent(), message, options);
 
           if (response == 0) {
             newKOSelection = currentSelectedKO;
@@ -152,16 +137,7 @@ public final class KOManager {
           Messages.getString("KOManager.new_ko"), Messages.getString("KOManager.new_ko_from")
         };
 
-        int response =
-            JOptionPane.showOptionDialog(
-                WinUtil.getValidComponent(view2d.getJComponent()),
-                message,
-                Messages.getString("KOManager.ko_title"),
-                JOptionPane.YES_NO_OPTION,
-                JOptionPane.WARNING_MESSAGE,
-                null,
-                options,
-                options[0]);
+        int response = showKOOptionDialog(view2d.getJComponent(), message, options);
 
         if (response == 0) {
           newDicomKO = createNewDicomKeyObject(currentImage, view2d.getJComponent());
@@ -291,6 +267,10 @@ public final class KOManager {
   public static boolean setKeyObjectReference(
       boolean selectedState, final ViewCanvas<DicomImageElement> view2d) {
 
+    // Capture the displayed image first: the KO selection change below may trigger actions
+    // (scroll reset in tiled mode) that alter which image the view displays
+    DicomImageElement currentImage = view2d.getImage();
+
     KOSpecialElement validKOSelection = getValidKOSelection(view2d);
 
     if (validKOSelection == null) {
@@ -311,8 +291,6 @@ public final class KOManager {
     if (validKOSelection == currentSelectedKO || currentSelectedKO == null) {
       // KO Toggle State is changed only if KO Selection remains the same,
       // or if there was no previous KO Selection
-
-      DicomImageElement currentImage = view2d.getImage();
       hasKeyObjectReferenceChanged =
           validKOSelection.setKeyObjectReference(selectedState, currentImage);
 
@@ -327,7 +305,7 @@ public final class KOManager {
         }
 
         boolean filter =
-            LangUtil.getNULLtoFalse((Boolean) view2d.getActionValue(ActionW.KO_FILTER.cmd()));
+            LangUtil.nullToFalse((Boolean) view2d.getActionValue(ActionW.KO_FILTER.cmd()));
         if (filter && (view2d.getEventManager().getSelectedViewPane() == view2d)) {
           // When unchecking an image, force to call the filter action to resize the views
           view2d
@@ -436,9 +414,7 @@ public final class KOManager {
       koFilter =
           Objects.requireNonNullElseGet(
               enableFilter,
-              () ->
-                  LangUtil.getNULLtoFalse(
-                      (Boolean) view2D.getActionValue(ActionW.KO_FILTER.cmd())));
+              () -> LangUtil.nullToFalse((Boolean) view2D.getActionValue(ActionW.KO_FILTER.cmd())));
 
       if (tiledMode && selectedKO == null) {
         // Unselect the filter with the None KO selection
@@ -484,9 +460,8 @@ public final class KOManager {
         if (koFilter && newImageIndex < 0) {
           if (dicomSeries.size(sopInstanceUIDFilter) > 0 && view2D.getImage() != null) {
 
-            double[] val = (double[]) view2D.getImage().getTagValue(TagW.SlicePosition);
-            if (val != null) {
-              double location = val[0] + val[1] + val[2];
+            Double location = (Double) view2D.getImage().getTagValue(TagW.SlicePosition);
+            if (location != null) {
               // Double offset = (Double) view2D.getActionValue(ActionW.STACK_OFFSET.cmd());
               // if (offset != null) {
               // location += offset;
@@ -511,6 +486,19 @@ public final class KOManager {
       }
       view2d.updateKOButtonVisibleState();
     }
+  }
+
+  private static int showKOOptionDialog(
+      Component parentComponent, String message, Object[] options) {
+    return JOptionPane.showOptionDialog(
+        WinUtil.getValidComponent(parentComponent),
+        GuiUtils.buildHelpMessagePanel(message, KO_HELP_TOPIC),
+        Messages.getString("KOManager.ko_title"),
+        JOptionPane.YES_NO_OPTION,
+        JOptionPane.WARNING_MESSAGE,
+        null,
+        options,
+        options[0]);
   }
 
   private static void updateImage(

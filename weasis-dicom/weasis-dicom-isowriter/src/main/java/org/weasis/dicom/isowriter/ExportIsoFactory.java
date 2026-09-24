@@ -9,7 +9,6 @@
  */
 package org.weasis.dicom.isowriter;
 
-import java.io.File;
 import java.util.Hashtable;
 import java.util.Properties;
 import org.osgi.service.component.ComponentContext;
@@ -18,11 +17,11 @@ import org.osgi.service.component.annotations.Deactivate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.service.BundlePreferences;
-import org.weasis.core.util.FileUtil;
-import org.weasis.dicom.explorer.CheckTreeModel;
-import org.weasis.dicom.explorer.DicomExportFactory;
+import org.weasis.core.util.PropertiesUtil;
 import org.weasis.dicom.explorer.DicomModel;
-import org.weasis.dicom.explorer.ExportDicom;
+import org.weasis.dicom.explorer.exp.CheckTreeModel;
+import org.weasis.dicom.explorer.exp.DicomExportFactory;
+import org.weasis.dicom.explorer.exp.ExportDicom;
 
 @org.osgi.service.component.annotations.Component(service = DicomExportFactory.class)
 public class ExportIsoFactory implements DicomExportFactory {
@@ -44,18 +43,18 @@ public class ExportIsoFactory implements DicomExportFactory {
   }
 
   @Activate
-  protected void activate(ComponentContext context) throws Exception {
+  protected void activate(ComponentContext context) {
     LOGGER.info("Export ISO image is activated");
-    FileUtil.readProperties(
-        new File(BundlePreferences.getDataFolder(context.getBundleContext()), "export.properties"),
+    PropertiesUtil.loadProperties(
+        BundlePreferences.getFileInDataFolder(context.getBundleContext(), "export.properties"),
         EXPORT_PERSISTENCE);
   }
 
   @Deactivate
   protected void deactivate(ComponentContext context) {
     LOGGER.info("Export ISO image is deactivated");
-    FileUtil.storeProperties(
-        new File(BundlePreferences.getDataFolder(context.getBundleContext()), "export.properties"),
+    PropertiesUtil.storeProperties(
+        BundlePreferences.getFileInDataFolder(context.getBundleContext(), "export.properties"),
         EXPORT_PERSISTENCE,
         null);
   }

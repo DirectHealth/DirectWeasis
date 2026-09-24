@@ -13,9 +13,9 @@ import java.awt.Window;
 import java.util.ArrayList;
 import java.util.List;
 import javax.swing.JComboBox;
-import org.weasis.core.api.auth.AuthMethod;
-import org.weasis.core.api.auth.OAuth2ServiceFactory;
 import org.weasis.core.api.gui.util.GuiUtils;
+import org.weasis.core.api.net.auth.AuthMethod;
+import org.weasis.core.api.net.auth.OAuth2ServiceFactory;
 import org.weasis.dicom.explorer.Messages;
 
 public class AuthenticationEditor extends AbstractListEditor<AuthMethod> {
@@ -34,7 +34,7 @@ public class AuthenticationEditor extends AbstractListEditor<AuthMethod> {
     List<AuthMethod> list = new ArrayList<>();
     for (int i = 0; i < comboBox.getItemCount(); i++) {
       AuthMethod auth = comboBox.getItemAt(i);
-      if (!OAuth2ServiceFactory.noAuth.equals(auth)) {
+      if (!OAuth2ServiceFactory.NO_AUTH.equals(auth)) {
         list.add(auth);
       }
     }
@@ -44,6 +44,7 @@ public class AuthenticationEditor extends AbstractListEditor<AuthMethod> {
   @Override
   protected void deleteItem(AuthMethod item) {
     comboBox.removeItem(item);
+    AuthenticationPersistence.removeMethod(item);
   }
 
   @Override
@@ -51,8 +52,7 @@ public class AuthenticationEditor extends AbstractListEditor<AuthMethod> {
     AuthMethodDialog dialog =
         new AuthMethodDialog(this, Messages.getString("auth.method"), input, comboBox);
     GuiUtils.showCenterScreen(dialog);
-    if (input == null) {
-      initializeList();
-    }
+    // The combo box holds a new instance after an edit, rebuild the list to drop the stale one
+    initializeList();
   }
 }

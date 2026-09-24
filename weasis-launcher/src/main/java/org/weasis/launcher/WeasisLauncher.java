@@ -24,7 +24,11 @@ import static org.weasis.pref.ConfigData.P_WEASIS_VERSION;
 
 import com.formdev.flatlaf.FlatSystemProperties;
 import com.formdev.flatlaf.util.SystemInfo;
+import java.awt.Desktop;
+import java.awt.Desktop.Action;
 import java.awt.EventQueue;
+import java.awt.desktop.OpenFilesEvent;
+import java.awt.desktop.OpenURIEvent;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
@@ -44,6 +48,7 @@ import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -126,6 +131,8 @@ public class WeasisLauncher {
   protected final Properties modulesi18n;
   protected final ConfigData configData;
 
+  private final List<String> pendingCommands = new ArrayList<>();
+
   public WeasisLauncher(ConfigData configData) {
     this.configData = Objects.requireNonNull(configData);
     this.modulesi18n = new Properties();
@@ -152,10 +159,9 @@ public class WeasisLauncher {
                     mainFrame.getWindow(),
                     String.format(
                         "%s\n\n%s", // NON-NLS
-                        Messages.getString("WeasisLauncher.update_min"),
-                        Messages.getString("WeasisLauncher.continue_local"),
-                        appName,
-                        minVersion),
+                        String.format(
+                            Messages.getString("WeasisLauncher.update_min"), appName, minVersion),
+                        Messages.getString("WeasisLauncher.continue_local")),
                     null,
                     JOptionPane.YES_NO_OPTION,
                     JOptionPane.ERROR_MESSAGE,
@@ -215,7 +221,16 @@ public class WeasisLauncher {
       executeCommands(configData.getArguments(), goshArgs);
 
       checkBundleUI(serverProp);
-      frameworkLoaded = true;
+
+      List<String> deferred;
+      synchronized (pendingCommands) {
+        frameworkLoaded = true;
+        deferred = List.copyOf(pendingCommands);
+        pendingCommands.clear();
+      }
+      if (!deferred.isEmpty()) {
+        executeCommands(deferred, null);
+      }
 
       showMessage(mainFrame, serverProp);
 
@@ -294,6 +309,19 @@ Starting OSGI Bundles...
     LOGGER.info("\u001B[32m{}\u001B[0m", asciiArt);
   }
 
+  // Run the commands now if the framework is ready, otherwise queue them until it is loaded. Used
+  // by the macOS Apple "open file/URI" events, which can arrive while the OSGI framework is still
+  // starting (e.g. cold start from a Finder file association), before the dicom:get command exists.
+  protected void executeCommandsWhenLoaded(List<String> commandList) {
+    synchronized (pendingCommands) {
+      if (!frameworkLoaded) {
+        pendingCommands.addAll(commandList);
+        return;
+      }
+    }
+    executeCommands(commandList, null);
+  }
+
   protected void executeCommands(List<String> commandList, String goshArgs) {
     SwingUtilities.invokeLater(
         () -> {
@@ -337,12 +365,12 @@ Starting OSGI Bundles...
 
   private static void resetBundleCache() {
     // Set flag to clean cache at next launch
-    File sourceIdProps =
-        new File(
+    Path sourceIdProps =
+        Path.of(
             System.getProperty(P_WEASIS_PATH, ""),
             System.getProperty(P_WEASIS_SOURCE_ID) + ".properties"); // NON-NLS
     Properties localSourceProp = new Properties();
-    FileUtil.readProperties(sourceIdProps, localSourceProp);
+    FileUtil.loadProperties(sourceIdProps, localSourceProp);
     localSourceProp.setProperty(ConfigData.P_WEASIS_CLEAN_CACHE, Boolean.TRUE.toString());
     FileUtil.storeProperties(sourceIdProps, localSourceProp, null);
   }
@@ -354,7 +382,7 @@ Starting OSGI Bundles...
     if (versionOld == null) {
       String val = serverProp.get("prev." + ConfigData.P_WEASIS_SHOW_DISCLAIMER); // NON-NLS
       String accept = serverProp.get(ConfigData.P_WEASIS_ACCEPT_DISCLAIMER);
-      if (Utils.geEmptyToTrue(val) && !Utils.getEmptyToFalse(accept)) {
+      if (Utils.emptyToTrue(val) && !Utils.emptyToFalse(accept)) {
 
         EventQueue.invokeLater(
             () -> {
@@ -379,12 +407,12 @@ Starting OSGI Bundles...
                 // remotely. The user will accept the disclaimer only once.
                 System.setProperty(ConfigData.P_WEASIS_ACCEPT_DISCLAIMER, Boolean.TRUE.toString());
               } else {
-                File file =
-                    new File(
+                Path path =
+                    Path.of(
                         System.getProperty(P_WEASIS_PATH, ""),
                         System.getProperty(P_WEASIS_SOURCE_ID) + ".properties");
                 // delete the properties file to ask again
-                FileUtil.delete(file);
+                FileUtil.delete(path);
                 LOGGER.error("Refusing the disclaimer");
                 System.exit(-1);
               }
@@ -392,7 +420,7 @@ Starting OSGI Bundles...
       }
     } else if (versionNew != null && !versionNew.equals(versionOld)) {
       String val = serverProp.get("prev." + ConfigData.P_WEASIS_SHOW_RELEASE); // NON-NLS
-      if (Utils.geEmptyToTrue(val)) {
+      if (Utils.emptyToTrue(val)) {
         try {
           Version vOld = getVersion(versionOld);
           Version vNew = getVersion(versionNew);
@@ -659,7 +687,7 @@ Starting OSGI Bundles...
     serverProp.put("weasis.pref.dir", prefDir.getPath());
 
     Properties currentProps = new Properties();
-    FileUtil.readProperties(new File(prefDir, ConfigData.APP_PROPERTY_FILE), currentProps);
+    FileUtil.loadProperties(Path.of(prefDir.getPath(), ConfigData.APP_PROPERTY_FILE), currentProps);
     currentProps
         .stringPropertyNames()
         .forEach(key -> serverProp.put("wp.init." + key, currentProps.getProperty(key))); // NON-NLS
@@ -709,7 +737,7 @@ Starting OSGI Bundles...
             currentProps,
             true,
             true);
-    if (Utils.getEmptyToFalse(logActivation)) {
+    if (Utils.emptyToFalse(logActivation)) {
       String logFile = dir + File.separator + "log" + File.separator + "default.log"; // NON-NLS
       serverProp.put("org.apache.sling.commons.log.file", logFile);
       currentProps.remove("org.apache.sling.commons.log.file");
@@ -737,6 +765,13 @@ Starting OSGI Bundles...
     loadI18nModules();
 
     Locale locale = textToLocale(lang);
+    // JVM Locale
+    Locale.setDefault(locale);
+    // LookAndFeel Locale
+    UIManager.getDefaults().setDefaultLocale(locale);
+    // For new components
+    JComponent.setDefaultLocale(locale);
+
     if (Locale.ENGLISH.equals(locale)) {
       // if English no need to load i18n bundle fragments
       modulesi18n.clear();
@@ -782,7 +817,7 @@ Starting OSGI Bundles...
               currentProps,
               true,
               true);
-      if (Utils.getEmptyToFalse(decoration)) {
+      if (Utils.emptyToFalse(decoration)) {
         // enable custom window decorations
         JFrame.setDefaultLookAndFeelDecorated(true);
         JDialog.setDefaultLookAndFeelDecorated(true);
@@ -797,13 +832,6 @@ Starting OSGI Bundles...
           lookAndFeelInfo.isDark() ? "NSAppearanceNameDarkAqua" : "NSAppearanceNameAqua");
     }
 
-    // JVM Locale
-    Locale.setDefault(locale);
-    // LookAndFeel Locale
-    UIManager.getDefaults().setDefaultLocale(locale);
-    // For new components
-    JComponent.setDefaultLocale(locale);
-
     UIManager.setInstalledLookAndFeels(
         lookAndFeels.getLookAndFeels().toArray(new LookAndFeelInfo[0]));
 
@@ -812,6 +840,24 @@ Starting OSGI Bundles...
             FlatSystemProperties.UI_SCALE, null, serverProp, currentProps, true, false);
     if (scaleFactor != null) {
       System.setProperty(FlatSystemProperties.UI_SCALE, scaleFactor);
+    }
+
+    final String useSystemFileChooser =
+        getGeneralProperty(
+            "weasis.use.system.file.chooser", null, serverProp, currentProps, true, false);
+    if (useSystemFileChooser != null) {
+      System.setProperty(FlatSystemProperties.USE_SYSTEM_FILE_CHOOSER, useSystemFileChooser);
+    }
+
+    // Init handler for open URI and open file events (after setting the locale for Toolkit init)
+    Desktop desktopApp = Desktop.getDesktop();
+    if (desktopApp.isSupported(Action.APP_OPEN_URI)) {
+      long time = System.currentTimeMillis();
+      boolean noArgs = configData.getArguments().isEmpty();
+      desktopApp.setOpenURIHandler(e -> handleOpenURI(e, time, noArgs));
+    }
+    if (desktopApp.isSupported(Action.APP_OPEN_FILE)) {
+      desktopApp.setOpenFileHandler(this::handleOpenFile);
     }
 
     /*
@@ -846,10 +892,10 @@ Starting OSGI Bundles...
     }
     currentProps.put(P_WEASIS_LOOK, look);
 
-    File sourceIDProps =
-        new File(dir, configData.getProperty(P_WEASIS_SOURCE_ID) + ".properties"); // NON-NLS
+    Path sourceIDProps =
+        Path.of(dir, configData.getProperty(P_WEASIS_SOURCE_ID) + ".properties"); // NON-NLS
     Properties localSourceProp = new Properties();
-    FileUtil.readProperties(sourceIDProps, localSourceProp);
+    FileUtil.loadProperties(sourceIDProps, localSourceProp);
 
     final String versionOld = localSourceProp.getProperty(P_WEASIS_VERSION);
     if (Utils.hasText(versionOld)) {
@@ -873,11 +919,11 @@ Starting OSGI Bundles...
         }
       }
     }
-    File cacheDir = null;
+    Path cacheDir = null;
     try {
       if (isZipResource(resPath)) {
         cacheDir =
-            new File(
+            Path.of(
                 dir
                     + File.separator
                     + "data"
@@ -901,16 +947,16 @@ Starting OSGI Bundles...
       if (mavenRepo) {
         // In Development mode
         File f = new File(System.getProperty("user.dir"));
-        cacheDir = new File(f.getParent(), "weasis-distributions" + File.separator + F_RESOURCES);
+        cacheDir = Path.of(f.getParent(), "weasis-distributions" + File.separator + F_RESOURCES);
       } else {
         String cdbl = configData.getProperty(P_WEASIS_CODEBASE_LOCAL);
-        cacheDir = new File(cdbl, F_RESOURCES);
+        cacheDir = Path.of(cdbl, F_RESOURCES);
       }
     }
-    serverProp.put("weasis.resources.path", cacheDir.getPath());
+    serverProp.put("weasis.resources.path", cacheDir.toString());
 
     // Splash screen that shows bundles loading
-    final WeasisLoader loader = new WeasisLoader(cacheDir.toPath(), mainFrame);
+    final WeasisLoader loader = new WeasisLoader(cacheDir, mainFrame);
     // Display splash screen
     loader.open();
 
@@ -990,7 +1036,7 @@ Starting OSGI Bundles...
     conf.append("\n  User home directory = "); // NON-NLS
     conf.append(dir);
     conf.append("\n  Resources path = "); // NON-NLS
-    conf.append(cacheDir.getPath());
+    conf.append(cacheDir);
     conf.append("\n  Preferences directory = "); // NON-NLS
     conf.append(prefDir.getPath());
     conf.append("\n  Look and Feel = "); // NON-NLS
@@ -1019,7 +1065,7 @@ Starting OSGI Bundles...
     conf.append("\n  Java Path = "); // NON-NLS
     conf.append(System.getProperty("java.home")); // NON-NLS
     conf.append("\n  Java max memory (less survivor space) = "); // NON-NLS
-    conf.append(FileUtil.humanReadableByteCount(Runtime.getRuntime().maxMemory(), false));
+    conf.append(FileUtil.humanReadableByte(Runtime.getRuntime().maxMemory(), false));
 
     conf.append("\n***** End of Configuration *****"); // NON-NLS
     LOGGER.info(conf.toString());
@@ -1113,6 +1159,55 @@ Starting OSGI Bundles...
     return Locale.getDefault();
   }
 
+  private void handleOpenURI(OpenURIEvent e, long time, boolean noArgs) {
+    String uri = e.getURI().toString();
+    LOGGER.info("Get URI event from OS. URI: {}", uri);
+    int index = Utils.getWeasisProtocolIndex(uri);
+    if (index < 0) {
+      uri = "dicom:get -r \"" + uri + "\""; // NON-NLS
+      executeCommandsWhenLoaded(List.of(uri));
+    } else {
+      boolean sameInstance = System.currentTimeMillis() - time < 3000;
+      String[] args = getArgsForURI(uri);
+      Thread.ofVirtual().start(() -> launchProcess(args, sameInstance, noArgs));
+    }
+  }
+
+  private static String[] getArgsForURI(String uri) {
+    if (SystemInfo.isMacOS) {
+      return new String[] {"open", "-n", "-b", "org.weasis.launcher", "--args", uri}; // NON-NLS
+    } else if (SystemInfo.isWindows) {
+      return new String[] {"cmd", "/c", "start", uri}; // NON-NLS
+    } else {
+      return new String[] {"xdg-open", uri}; // NON-NLS
+    }
+  }
+
+  private void launchProcess(String[] args, boolean sameInstance, boolean noArgs) {
+    try {
+      ProcessBuilder pb = new ProcessBuilder(args);
+      pb.start().waitFor(15, TimeUnit.SECONDS);
+      if (sameInstance && noArgs) {
+        LOGGER.info("Configuration with URI is different, restart Weasis with new configuration");
+        shutdownHook();
+      }
+    } catch (Exception ex) {
+      LOGGER.error("Cannot start Weasis from URI", ex);
+      if (ex instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+    }
+  }
+
+  private void handleOpenFile(OpenFilesEvent e) {
+    List<String> files =
+        e.getFiles().stream()
+            .map(f -> "dicom:get -l \"" + f.getPath() + "\"") // NON-NLS
+            .toList();
+    LOGGER.info("Get open file event from OS. Files: {}", files);
+    executeCommandsWhenLoaded(files);
+  }
+
   protected void shutdownHook() {
     closing = true;
     if (mFelix == null || (mFelix.getState() & 6) != 0) {
@@ -1149,16 +1244,16 @@ Starting OSGI Bundles...
           folders.forEach(
               p -> {
                 LOGGER.error("Delete old folder: {}", p);
-                FileUtil.delete(p.toFile());
+                FileUtil.delete(p);
                 Optional<String> id = getID(p.getFileName().toString());
                 if (id.isPresent()) {
                   Path file = Paths.get(dir, id.get() + ".properties");
                   if (Files.isReadable(file)) {
-                    FileUtil.delete(file.toFile());
+                    FileUtil.delete(file);
                   }
                   Path data = Paths.get(dir, "data", id.get());
                   if (Files.isReadable(data)) {
-                    FileUtil.delete(data.toFile());
+                    FileUtil.delete(data);
                   }
                 }
               });
@@ -1186,7 +1281,7 @@ Starting OSGI Bundles...
   private boolean isOlderThan(Path path, long days) {
     try {
       FileTime fileTime = Files.getLastModifiedTime(path);
-      LocalDateTime now = LocalDateTime.now();
+      LocalDateTime now = LocalDateTime.now(ZoneId.systemDefault());
       LocalDateTime convertedFileTime =
           LocalDateTime.ofInstant(fileTime.toInstant(), ZoneId.systemDefault());
       long daysBetween = DAYS.between(convertedFileTime, now);
@@ -1212,7 +1307,7 @@ Starting OSGI Bundles...
     String dir = System.getProperty("weasis.tmp.dir");
     if (Utils.hasText(dir)) {
       long startTime = System.currentTimeMillis();
-      FileUtil.deleteDirectoryContents(new File(dir), 3, 0);
+      FileUtil.deleteDirectoryContents(Path.of(dir), 3, 0);
       LOGGER.info(
           "*PERF* Clean temp folder, type:CLOSE time:{}", System.currentTimeMillis() - startTime);
     }

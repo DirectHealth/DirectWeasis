@@ -9,9 +9,12 @@
  */
 package org.weasis.dicom.au;
 
+import com.formdev.flatlaf.util.SystemFileChooser;
+import com.formdev.flatlaf.util.SystemFileChooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.List;
 import javax.sound.sampled.AudioFileFormat;
 import javax.sound.sampled.AudioFormat;
@@ -25,7 +28,6 @@ import javax.sound.sampled.LineUnavailableException;
 import javax.sound.sampled.SourceDataLine;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
-import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSlider;
@@ -36,7 +38,6 @@ import org.dcm4che3.data.Tag;
 import org.dcm4che3.data.VR;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.weasis.core.api.gui.util.FileFormatFilter;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.media.data.Series;
@@ -211,7 +212,7 @@ public class AuView extends JPanel implements SeriesViewerListener {
 
     // This timer calls the tick( ) method 10 times a second to keep
     // our slider in sync with the music.
-    timer = new javax.swing.Timer(100, e -> tick());
+    timer = new Timer(100, e -> tick());
     add(GuiUtils.boxVerticalStrut(15));
     add(GuiUtils.getHorizontalBoxLayoutPanel(10, play, progress, time));
     add(GuiUtils.boxVerticalStrut(15));
@@ -227,19 +228,20 @@ public class AuView extends JPanel implements SeriesViewerListener {
   private void saveAudioFile(DicomSpecialElement media) {
     AudioData audioData = getAudioData(media);
     if (audioData != null) {
-      JFileChooser fileChooser = new JFileChooser();
-      fileChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+      SystemFileChooser fileChooser = new SystemFileChooser();
+      fileChooser.setFileSelectionMode(SystemFileChooser.FILES_ONLY);
       fileChooser.setAcceptAllFileFilterUsed(false);
-      FileFormatFilter filter = new FileFormatFilter("au", "AU"); // NON-NLS
+      FileNameExtensionFilter filter = new FileNameExtensionFilter("AU audio", "au"); // NON-NLS
       fileChooser.addChoosableFileFilter(filter);
-      fileChooser.addChoosableFileFilter(new FileFormatFilter("wav", "WAVE")); // NON-NLS
+      fileChooser.addChoosableFileFilter(
+          new FileNameExtensionFilter("WAVE audio", "wav")); // NON-NLS
       fileChooser.setFileFilter(filter);
 
-      if (fileChooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION
+      if (fileChooser.showSaveDialog(null) == SystemFileChooser.APPROVE_OPTION
           && fileChooser.getSelectedFile() != null) {
         File file = fileChooser.getSelectedFile();
-        filter = (FileFormatFilter) fileChooser.getFileFilter();
-        String extension = filter == null ? ".au" : "." + filter.getDefaultExtension(); // NON-NLS
+        filter = (FileNameExtensionFilter) fileChooser.getFileFilter();
+        String extension = filter == null ? ".au" : "." + filter.getExtensions()[0]; // NON-NLS
         String filename =
             file.getName().endsWith(extension) ? file.getPath() : file.getPath() + extension;
 
@@ -469,13 +471,13 @@ public class AuView extends JPanel implements SeriesViewerListener {
     }
   }
 
-  private class SeriesHandler extends SequenceHandler {
+  private static class SeriesHandler extends SequenceHandler {
     public SeriesHandler() {
       super(false, true);
     }
 
     @Override
-    protected boolean dropFiles(List<File> files, TransferSupport support) {
+    protected boolean dropFiles(List<Path> files) {
       return DicomSeriesHandler.dropDicomFiles(files);
     }
   }

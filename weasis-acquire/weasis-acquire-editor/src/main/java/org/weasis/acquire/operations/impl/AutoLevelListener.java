@@ -11,6 +11,7 @@ package org.weasis.acquire.operations.impl;
 
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.util.Optional;
 import org.weasis.acquire.AcquireObject;
 import org.weasis.acquire.explorer.AcquireImageInfo;
 import org.weasis.acquire.operations.OpValueChanged;
@@ -30,10 +31,10 @@ public class AutoLevelListener extends AcquireObject implements ActionListener, 
   @Override
   public void applyNextValues() {
     AcquireImageInfo imageInfo = getImageInfo();
-    ImageOpNode node = imageInfo.getPostProcessOpManager().getNode(AutoLevelsOp.OP_NAME);
-    if (node != null) {
-      node.clearIOCache();
-      node.setParam(AutoLevelsOp.P_AUTO_LEVEL, imageInfo.getNextValues().isAutoLevel());
+    Optional<ImageOpNode> node = imageInfo.getPostProcessOpManager().getNode(AutoLevelsOp.OP_NAME);
+    if (node.isPresent()) {
+      node.get().clearIOCache();
+      node.get().setParam(AutoLevelsOp.P_AUTO_LEVEL, imageInfo.getNextValues().isAutoLevel());
     }
   }
 }

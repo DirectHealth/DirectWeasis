@@ -9,13 +9,15 @@
  */
 package org.weasis.core.ui.model.graphic.imp.seg;
 
+import java.awt.BasicStroke;
 import java.awt.Shape;
 import java.awt.Stroke;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
+import java.awt.geom.Point2D;
+import java.awt.geom.Rectangle2D;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import org.weasis.core.api.image.util.MeasurableLayer;
 import org.weasis.core.ui.model.graphic.AbstractGraphic;
 import org.weasis.core.ui.model.graphic.Graphic;
@@ -26,7 +28,16 @@ import org.weasis.core.ui.util.MouseEventDouble;
 
 public class SegGraphic extends AbstractGraphic implements GraphicArea {
 
+  /** Extra stroke width, in display pixels, applied while the region is highlighted. */
+  public static final float HIGHLIGHT_EXTRA_THICKNESS = 2f;
+
   private Stroke stroke;
+  private SegContour contour;
+
+  /** Cached outline bounds: {@link Shape#getBounds2D()} iterates all the path segments. */
+  private Rectangle2D outlineBounds;
+
+  private boolean highlighted;
 
   public SegGraphic(Shape path) {
     this(path, null);
@@ -36,18 +47,22 @@ public class SegGraphic extends AbstractGraphic implements GraphicArea {
     super(0);
     this.stroke = stroke;
     setShape(path, null);
+    this.outlineBounds = path == null ? null : path.getBounds2D();
     updateLabel(null, null);
   }
 
-  public SegGraphic(SegGraphic graphic) {
+  public SegGraphic(SegGraphic graphic) { // NOSONAR see initCopy()
     super(graphic);
   }
 
   @Override
   protected void initCopy(Graphic graphic) {
     super.initCopy(graphic);
-    if (graphic instanceof SegGraphic SegGraphic) {
-      this.stroke = SegGraphic.stroke;
+    if (graphic instanceof SegGraphic other) {
+      this.stroke = other.stroke;
+      this.contour = other.contour;
+      this.shape = other.shape;
+      this.outlineBounds = other.outlineBounds;
     }
   }
 
@@ -59,7 +74,7 @@ public class SegGraphic extends AbstractGraphic implements GraphicArea {
   @Override
   public void setFilled(Boolean filled) {
     if (!Objects.equals(this.filled, filled)) {
-      this.filled = Optional.ofNullable(filled).orElse(DEFAULT_FILLED);
+      this.filled = filled == null ? DEFAULT_FILLED : filled;
       fireDrawingChanged();
     }
   }
@@ -105,12 +120,72 @@ public class SegGraphic extends AbstractGraphic implements GraphicArea {
     this.stroke = stroke;
   }
 
+  public SegContour getContour() {
+    return contour;
+  }
+
+  public void setContour(SegContour contour) {
+    this.contour = contour;
+  }
+
+  /** Returns the region this graphic was built from, or {@code null} if unknown. */
+  public SegRegion<?> getRegion() {
+    return contour != null && contour.getAttributes() instanceof SegRegion<?> region
+        ? region
+        : null;
+  }
+
+  public boolean isHighlighted() {
+    return highlighted;
+  }
+
+  /**
+   * Widens the outline at paint time. Unlike {@link #setLineThickness(Float)} it does not alter the
+   * model, so the change never outlives the hover and fires no drawing event: the caller repaints
+   * the affected area.
+   */
+  public void setHighlighted(boolean highlighted) {
+    this.highlighted = highlighted;
+  }
+
+  /**
+   * Tests whether an image-space point lies on the outline, or anywhere inside the region when it
+   * is filled. Deliberately avoids building an {@link Area} from the stroked path: on segmentation
+   * contours that is orders of magnitude more expensive than the crossing tests used here.
+   *
+   * @param p the point in image coordinates
+   * @param tolerance the half-width, in image coordinates, of the square tested around the point
+   */
+  public boolean isOnOutline(Point2D p, double tolerance) {
+    if (shape == null || outlineBounds == null || !isInBounds(p, tolerance)) {
+      return false;
+    }
+    Rectangle2D box =
+        new Rectangle2D.Double(
+            p.getX() - tolerance, p.getY() - tolerance, tolerance * 2, tolerance * 2);
+    if (!shape.intersects(box)) {
+      return false;
+    }
+    // The box straddles the outline when it intersects the shape without being fully inside it
+    return getFilled() || !shape.contains(box);
+  }
+
+  private boolean isInBounds(Point2D p, double tolerance) {
+    return p.getX() >= outlineBounds.getMinX() - tolerance
+        && p.getX() <= outlineBounds.getMaxX() + tolerance
+        && p.getY() >= outlineBounds.getMinY() - tolerance
+        && p.getY() <= outlineBounds.getMaxY() + tolerance;
+  }
+
   @Override
   public Stroke getStroke(Float lineThickness) {
-    if (stroke != null) {
-      return stroke;
+    if (highlighted) {
+      float width =
+          (lineThickness == null ? DEFAULT_LINE_THICKNESS : lineThickness)
+              + HIGHLIGHT_EXTRA_THICKNESS;
+      return new BasicStroke(width, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
     }
-    return super.getStroke(lineThickness);
+    return stroke != null ? stroke : super.getStroke(lineThickness);
   }
 
   @Override

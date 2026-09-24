@@ -148,8 +148,8 @@ public class PolylineGraphic extends AbstractDragGraphic {
       if (adapter != null) {
         ArrayList<MeasureItem> measVal = new ArrayList<>(5);
 
-        double ratio = adapter.getCalibRatio();
-        String unitStr = adapter.getUnit();
+        double ratio = adapter.calibrationRatio();
+        String unitStr = adapter.unit();
         // Get copy to be sure that point value are not modified any more and filter point equal to
         // null.
         List<Point2D> handlePointListcopy = new ArrayList<>(pts.size());

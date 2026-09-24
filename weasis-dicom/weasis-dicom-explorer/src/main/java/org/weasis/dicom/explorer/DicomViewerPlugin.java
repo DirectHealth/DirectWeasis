@@ -12,11 +12,12 @@ package org.weasis.dicom.explorer;
 import javax.swing.Icon;
 import org.weasis.core.api.explorer.DataExplorerView;
 import org.weasis.core.api.explorer.ObservableEvent;
+import org.weasis.core.api.gui.layout.MigLayoutModel;
 import org.weasis.core.api.gui.util.GuiUtils;
-import org.weasis.core.api.image.GridBagLayoutModel;
 import org.weasis.core.ui.editor.image.ImageViewerEventManager;
 import org.weasis.core.ui.editor.image.ImageViewerPlugin;
 import org.weasis.dicom.codec.DicomImageElement;
+import org.weasis.dicom.explorer.main.DicomExplorer;
 
 public abstract class DicomViewerPlugin extends ImageViewerPlugin<DicomImageElement> {
 
@@ -27,7 +28,7 @@ public abstract class DicomViewerPlugin extends ImageViewerPlugin<DicomImageElem
 
   protected DicomViewerPlugin(
       ImageViewerEventManager<DicomImageElement> eventManager,
-      GridBagLayoutModel layoutModel,
+      MigLayoutModel layoutModel,
       String uid,
       String pluginName,
       Icon icon,

@@ -16,9 +16,7 @@ import com.jogamp.opengl.GLContext;
 import com.jogamp.opengl.Threading;
 import java.awt.Component;
 import java.awt.Window;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import javax.swing.Action;
 import javax.swing.Icon;
 import javax.swing.JButton;
@@ -32,26 +30,29 @@ import org.osgi.service.component.annotations.Deactivate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.explorer.DataExplorerView;
+import org.weasis.core.api.explorer.model.DataExplorerModel;
+import org.weasis.core.api.gui.layout.MigCell;
+import org.weasis.core.api.gui.layout.MigLayoutModel;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.ComboItemListener;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.gui.util.WinUtil;
-import org.weasis.core.api.image.GridBagLayoutModel;
-import org.weasis.core.api.image.LayoutConstraints;
 import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.service.AuditLog;
 import org.weasis.core.api.service.WProperties;
+import org.weasis.core.api.util.GraphicsInfo;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.ActionIcon;
 import org.weasis.core.ui.editor.SeriesViewer;
 import org.weasis.core.ui.editor.SeriesViewerFactory;
+import org.weasis.core.ui.editor.ViewerOpenOptions;
 import org.weasis.core.ui.editor.image.ImageViewerPlugin;
 import org.weasis.core.ui.editor.image.ImageViewerPlugin.LayoutModel;
 import org.weasis.core.ui.pref.PreferenceDialog;
 import org.weasis.core.ui.util.ColorLayerUI;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.DicomMediaIO;
-import org.weasis.dicom.explorer.DicomExplorer;
+import org.weasis.dicom.explorer.main.DicomExplorer;
 import org.weasis.dicom.viewer2d.EventManager;
 import org.weasis.dicom.viewer3d.vr.OpenglUtils;
 
@@ -64,6 +65,15 @@ public class View3DFactory implements SeriesViewerFactory {
   public static final String P_DEFAULT_LAYOUT = "volume.default.layout";
   public static final String P_OPENGL_ENABLE = "opengl.enable";
   public static final String P_OPENGL_PREV_INIT = "opengl.prev.init";
+
+  /**
+   * System property / preference key that forces the FBO-based fragment-shader path even when
+   * compute shaders are available (OpenGL >= 4.3). Useful for testing the OpenGL 3.3 fallback on
+   * any platform.
+   *
+   * <p>Set via JVM argument: {@code -Dweasis.3d.force.fbo=true}
+   */
+  public static final String P_FORCE_FBO = "weasis.3d.force.fbo"; // NON-NLS
 
   private static final String JOGL_THREAD_CONFIG = "jogl.1thread";
 
@@ -84,7 +94,7 @@ public class View3DFactory implements SeriesViewerFactory {
     return NAME;
   }
 
-  public static GridBagLayoutModel getDefaultGridBagLayoutModel() {
+  public static MigLayoutModel getDefaultMigLayoutModel() {
     String defLayout =
         GuiUtils.getUICore().getSystemPreferences().getProperty(View3DFactory.P_DEFAULT_LAYOUT);
     if (StringUtil.hasText(defLayout)) {
@@ -97,16 +107,15 @@ public class View3DFactory implements SeriesViewerFactory {
   }
 
   @Override
-  public SeriesViewer createSeriesViewer(Map<String, Object> properties) {
+  public SeriesViewer createSeriesViewer(ViewerOpenOptions options, DataExplorerModel model) {
     if (isOpenglEnable()) {
-      ComboItemListener<GridBagLayoutModel> layoutAction =
+      ComboItemListener<MigLayoutModel> layoutAction =
           EventManager.getInstance().getAction(ActionW.LAYOUT).orElse(null);
       LayoutModel layout =
-          ImageViewerPlugin.getLayoutModel(
-              properties, getDefaultGridBagLayoutModel(), layoutAction);
+          ImageViewerPlugin.getLayoutModel(options, getDefaultMigLayoutModel(), layoutAction);
       View3DContainer instance =
           new View3DContainer(layout.model(), layout.uid(), getUIName(), getIcon(), null);
-      ImageViewerPlugin.registerInDataExplorerModel(properties, instance);
+      ImageViewerPlugin.registerInDataExplorerModel(model, instance);
       return instance;
     }
 
@@ -114,13 +123,12 @@ public class View3DFactory implements SeriesViewerFactory {
     return null;
   }
 
-  public static int getViewTypeNumber(GridBagLayoutModel layout, Class<?> defaultClass) {
+  public static int getViewTypeNumber(MigLayoutModel layout, Class<?> defaultClass) {
     int val = 0;
     if (layout != null && defaultClass != null) {
-      Iterator<LayoutConstraints> enumVal = layout.getConstraints().keySet().iterator();
-      while (enumVal.hasNext()) {
+      for (MigCell cell : layout.getCells()) {
         try {
-          Class<?> clazz = Class.forName(enumVal.next().getType());
+          Class<?> clazz = Class.forName(cell.type());
           if (defaultClass.isAssignableFrom(clazz)) {
             val++;
           }
@@ -157,10 +165,7 @@ public class View3DFactory implements SeriesViewerFactory {
 
   @Override
   public boolean isViewerCreatedByThisFactory(SeriesViewer viewer) {
-    if (viewer instanceof View3DContainer) {
-      return true;
-    }
-    return false;
+    return viewer instanceof View3DContainer;
   }
 
   @Override
@@ -233,6 +238,11 @@ public class View3DFactory implements SeriesViewerFactory {
               var2.glGetString(GL.GL_RENDERER),
               textMax[0]);
       glContext.release();
+      GraphicsInfo.set(
+          openGLInfo.vendor(),
+          openGLInfo.renderer(),
+          openGLInfo.shortVersion(),
+          openGLInfo.looksSoftware());
       LOGGER.info(
           "{} 3D initialization, type:INIT time:{}",
           AuditLog.MARKER_PERF,
@@ -245,7 +255,13 @@ public class View3DFactory implements SeriesViewerFactory {
           openGLInfo.version());
       if (!openGLInfo.isVersionCompliant()) {
         throw new IllegalStateException(
-            "OpenGL %s is not compliant with compute shader".formatted(openGLInfo.shortVersion()));
+            "OpenGL %s is below the minimum required version 3.3"
+                .formatted(openGLInfo.shortVersion()));
+      }
+      if (!openGLInfo.isComputeShaderCapable()) {
+        LOGGER.info(
+            "OpenGL {} does not support compute shaders (requires 4.3). Using FBO-based fragment shader fallback.",
+            openGLInfo.shortVersion());
       }
       if (openGLInfo.looksSoftware()) {
         throw new IllegalStateException(
@@ -261,6 +277,24 @@ public class View3DFactory implements SeriesViewerFactory {
 
   public static boolean isOpenglEnable() {
     return GuiUtils.getUICore().getLocalPersistence().getBooleanProperty(P_OPENGL_ENABLE, true);
+  }
+
+  /**
+   * Returns {@code true} when the FBO-based fragment-shader fallback should be used regardless of
+   * the actual OpenGL version. This is controlled by:
+   *
+   * <ul>
+   *   <li>The JVM system property {@code -Dweasis.3d.force.fbo=true}, or
+   *   <li>The local persistence preference {@value P_FORCE_FBO}.
+   * </ul>
+   *
+   * Use this to test the macOS fallback path on a machine that has OpenGL 4.3+.
+   */
+  public static boolean isFboForced() {
+    if (Boolean.getBoolean(P_FORCE_FBO)) {
+      return true;
+    }
+    return GuiUtils.getUICore().getLocalPersistence().getBooleanProperty(P_FORCE_FBO, false);
   }
 
   public static void showOpenglErrorMessage(Component parent) {

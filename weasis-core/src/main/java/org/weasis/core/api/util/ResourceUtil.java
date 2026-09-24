@@ -89,8 +89,10 @@ public class ResourceUtil {
     EXPORT_CLIPBOARD("svg/action/exportClipboard.svg"), // NON-NLS
     EXPORT_DICOM("svg/action/exportDicom.svg"), // NON-NLS
     EXPORT_IMAGE("svg/action/exportImage.svg"), // NON-NLS
+    EXPORT_ANNOTATIONS("svg/action/exportAnnotations.svg"), // NON-NLS
     FILTER("svg/action/filter.svg"), // NON-NLS
     FLIP("svg/action/flip.svg"), // NON-NLS
+    HAND("svg/action/hand.svg"), // NON-NLS
     HELP("svg/action/help.svg"), // NON-NLS
     IMPORT_CD("svg/action/importCd.svg"), // NON-NLS
     IMPORT_DICOM("svg/action/importDicom.svg"), // NON-NLS
@@ -139,6 +141,7 @@ public class ResourceUtil {
     SYNCH_STAR("svg/action/synchStar.svg"), // NON-NLS
     TILE("svg/action/tile.svg"), // NON-NLS
     VOLUME("svg/action/volume.svg"), // NON-NLS
+    VOLUME_CUT("svg/action/volumeCut.svg"), // NON-NLS
     VOLUME_SETTINGS("svg/action/volumeSettings.svg"), // NON-NLS
     VOLUME_SLICING("svg/action/volumeSlicing.svg"), // NON-NLS
     WINDOW_LEVEL("svg/action/winLevel.svg"), // NON-NLS
@@ -164,11 +167,13 @@ public class ResourceUtil {
     AUDIO("svg/other/audio.svg"), // NON-NLS
     CALENDAR("svg/other/calendar.svg"), // NON-NLS
     CDROM("svg/other/cdrom.svg"), // NON-NLS
+    CLOCK("svg/other/clock.svg"), // NON-NLS
     ECG("svg/other/ecg.svg"), // NON-NLS
     HISTOGRAM("svg/other/histogram.svg"), // NON-NLS
     IMAGE_EDIT("svg/other/imageEdit.svg"), // NON-NLS
     IMAGE_PRESENTATION("svg/other/imagePresentation.svg"), // NON-NLS
     KEY_IMAGE("svg/other/keyImage.svg"), // NON-NLS
+    MODALITY("svg/other/modality.svg"), // NON-NLS
 
     PATIENT("svg/other/patient.svg"), // NON-NLS
     PRESENTATION("svg/other/presentation.svg"), // NON-NLS

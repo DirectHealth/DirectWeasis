@@ -53,7 +53,7 @@ public class PixelInfoGraphic extends AnnotationGraphic {
     super();
   }
 
-  public PixelInfoGraphic(PixelInfoGraphic graphic) {
+  public PixelInfoGraphic(PixelInfoGraphic graphic) { // NOSONAR see initCopy()
     super(graphic);
   }
 
@@ -196,22 +196,20 @@ public class PixelInfoGraphic extends AnnotationGraphic {
         if (ANCHOR_POINT_X.getComputed()) {
           measVal.add(
               new MeasureItem(
-                  ANCHOR_POINT_X, adapter.getXCalibratedValue(ptAnchor.getX()), adapter.getUnit()));
+                  ANCHOR_POINT_X, adapter.getXCalibratedValue(ptAnchor.getX()), adapter.unit()));
         }
         if (ANCHOR_POINT_Y.getComputed()) {
           measVal.add(
               new MeasureItem(
-                  ANCHOR_POINT_Y, adapter.getYCalibratedValue(ptAnchor.getY()), adapter.getUnit()));
+                  ANCHOR_POINT_Y, adapter.getYCalibratedValue(ptAnchor.getY()), adapter.unit()));
         }
         String unit = Unit.PIXEL.getAbbreviation();
-        if (!unit.equals(adapter.getUnit())) {
+        if (!unit.equals(adapter.unit())) {
           if (ANCHOR_POINT_X.getComputed()) {
-            measVal.add(
-                new MeasureItem(ANCHOR_POINT_X, ptAnchor.getX() + adapter.getOffsetX(), unit));
+            measVal.add(new MeasureItem(ANCHOR_POINT_X, ptAnchor.getX() + adapter.offsetX(), unit));
           }
           if (ANCHOR_POINT_Y.getComputed()) {
-            measVal.add(
-                new MeasureItem(ANCHOR_POINT_Y, ptAnchor.getY() + adapter.getOffsetY(), unit));
+            measVal.add(new MeasureItem(ANCHOR_POINT_Y, ptAnchor.getY() + adapter.offsetY(), unit));
           }
         }
 

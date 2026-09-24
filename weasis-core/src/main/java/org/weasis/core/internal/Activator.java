@@ -15,6 +15,7 @@ import ch.qos.logback.classic.encoder.PatternLayoutEncoder;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.rolling.RollingFileAppender;
 import java.io.File;
+import java.nio.file.Path;
 import java.util.Dictionary;
 import java.util.Hashtable;
 import java.util.List;
@@ -35,6 +36,7 @@ import org.weasis.core.api.explorer.model.AbstractFileModel;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
+import org.weasis.core.api.gui.util.ShortcutManager;
 import org.weasis.core.api.media.data.Codec;
 import org.weasis.core.api.media.data.MediaElement;
 import org.weasis.core.api.service.AuditLog;
@@ -48,6 +50,7 @@ import org.weasis.core.ui.editor.ViewerPluginBuilder;
 import org.weasis.core.ui.editor.image.dockable.MeasureTool;
 import org.weasis.core.ui.model.layer.AbstractInfoLayer;
 import org.weasis.core.util.FileUtil;
+import org.weasis.core.util.PropertiesUtil;
 
 @Header(name = Constants.BUNDLE_ACTIVATOR, value = "${@class}") // NON-NLS
 public class Activator implements BundleActivator, ServiceListener {
@@ -81,6 +84,12 @@ public class Activator implements BundleActivator, ServiceListener {
     MeasureTool.viewSetting.initMonitors();
     MeasureTool.viewSetting.applyPreferences(prefs);
 
+    // Initialize keyboard shortcut manager
+    ShortcutManager shortcutManager = ShortcutManager.getInstance();
+    shortcutManager.registerDefaults();
+    shortcutManager.loadPreferences(prefs);
+    shortcutManager.applyToFeatures();
+
     // Must be instantiated in EDT
     GuiExecutor.execute(
         () -> {
@@ -106,13 +115,14 @@ public class Activator implements BundleActivator, ServiceListener {
     Preferences prefs = BundlePreferences.getDefaultPreferences(bundleContext);
     AbstractInfoLayer.savePreferences(prefs);
     MeasureTool.viewSetting.savePreferences(prefs);
+    ShortcutManager.getInstance().savePreferences(prefs);
     prefs.sync(); // Force to save as PreferencesManager (as specific bundle managing preferences)
 
-    File dataFolder = AppProperties.getBundleDataFolder(bundleContext);
+    Path dataFolder = AppProperties.getBundleDataFolder(bundleContext);
     if (dataFolder != null) {
-      File file = new File(dataFolder, "persistence.properties");
-      FileUtil.prepareToWriteFile(file);
-      FileUtil.storeProperties(file, GuiUtils.getUICore().getLocalPersistence(), null);
+      Path filePath = dataFolder.resolve("persistence.properties");
+      FileUtil.prepareToWriteFile(filePath);
+      PropertiesUtil.storeProperties(filePath, GuiUtils.getUICore().getLocalPersistence(), null);
     }
   }
 
@@ -121,6 +131,9 @@ public class Activator implements BundleActivator, ServiceListener {
 
     ServiceReference<?> sRef = event.getServiceReference();
     BundleContext context = AppProperties.getBundleContext(sRef);
+    if (context == null) {
+      return;
+    }
     Object service = null;
     try {
       service = context.getService(sRef);

@@ -11,14 +11,16 @@ package org.weasis.core.api.media.data;
 
 import java.io.File;
 import java.net.URI;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
-import org.weasis.core.util.FileUtil;
+import org.weasis.core.util.StreamUtil;
 
 public class MediaElement implements Taggable {
 
@@ -98,7 +100,7 @@ public class MediaElement implements Taggable {
    *
    * @return the final file that has been loaded by the reader.
    */
-  public File getFile() {
+  public Path getFilePath() {
     return mediaIO.getFileCache().getFinalFile();
   }
 
@@ -123,15 +125,15 @@ public class MediaElement implements Taggable {
       return mediaIO.buildFile(output);
     }
 
-    Optional<File> file = mediaIO.getFileCache().getOriginalFile();
-    return file.filter(value -> FileUtil.nioCopyFile(value, output)).isPresent();
+    Optional<Path> file = mediaIO.getFileCache().getOriginalFile();
+    return file.filter(value -> StreamUtil.copyFile(value, output.toPath())).isPresent();
   }
 
   public long getLength() {
     return mediaIO.getFileCache().getLength();
   }
 
-  public long getLastModified() {
+  public FileTime getLastModified() {
     return mediaIO.getFileCache().getLastModified();
   }
 

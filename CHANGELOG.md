@@ -1,5 +1,194 @@
 # Changelog
 
+## [v4.7.3](https://github.com/nroduit/Weasis/tree/v4.7.3) (2026-08-25)
+
+[Full Changelog](https://github.com/nroduit/Weasis/compare/v4.7.2...v4.7.3)
+
+**Implemented enhancements:**
+
+- Enhance volume rendering: add color texture support and improve mipmapping logic [\#905](https://github.com/nroduit/Weasis/issues/905)
+- Update to dcm4che 5.35.0 [\#903](https://github.com/nroduit/Weasis/issues/903)
+- Volume rendering: add shading capabilities to segmentation objects [\#902](https://github.com/nroduit/Weasis/issues/902)
+- Implement auto-hide for crowded segmentation series to improve visibility. Fixes crash when loading multiple SEG files [\#901](https://github.com/nroduit/Weasis/issues/901)
+- FBO volume rendering: adaptive resolution handling for improved performance [\#900](https://github.com/nroduit/Weasis/issues/900)
+- Improving the management of queries on DICOMweb series [\#898](https://github.com/nroduit/Weasis/issues/898)
+- Enhance DICOM retrieval with series selection and loading placeholders [\#897](https://github.com/nroduit/Weasis/issues/897)
+- Add AreaIcon and TabPlacement classes for enhanced tab management and visual representation [\#895](https://github.com/nroduit/Weasis/issues/895)
+- Add PersonNameCellEditor and PersonNameView for editing DICOM person names in Dicomizer [\#894](https://github.com/nroduit/Weasis/issues/894)
+- Add segmentation region tooltip and visibility toggle functionality [\#885](https://github.com/nroduit/Weasis/issues/885)
+- Add SegRegionCellRenderer for color swatch display in segmentation tree [\#884](https://github.com/nroduit/Weasis/issues/884)
+- Refactor DICOM manifest handling [\#883](https://github.com/nroduit/Weasis/issues/883)
+- Render multiple SEG files in 3D \(merged volume\), add voxel mask modes and async texture build [\#881](https://github.com/nroduit/Weasis/issues/881)
+- Add segmentation selection controls: Show/Hide all, view button and complete tool listing [\#879](https://github.com/nroduit/Weasis/issues/879)
+- Hide non-relevant segmentations by default \(keyword list and global preference\) [\#878](https://github.com/nroduit/Weasis/issues/878)
+- Refactor Thumbnail rendering to avoid AWT tree lock during icon updates [\#877](https://github.com/nroduit/Weasis/issues/877)
+
+**Fixed bugs:**
+
+- Dicomizer - The first modifier "right" does not appear in the modifiers list in the Anatomic Region popup selection [\#904](https://github.com/nroduit/Weasis/issues/904)
+- STOW-RS export fails on studies that take longer than UrlReadTimeout [\#899](https://github.com/nroduit/Weasis/issues/899)
+- Implement service invalidation for updated authentication methods [\#896](https://github.com/nroduit/Weasis/issues/896)
+- WADO-RS retrieval failed after upgrade to Weasis 4.7.x [\#893](https://github.com/nroduit/Weasis/issues/893)
+- Not able to open the CAG images... The screen remains black [\#890](https://github.com/nroduit/Weasis/issues/890)
+- "Copy images into the local temporary directory" option is not applied [\#887](https://github.com/nroduit/Weasis/issues/887)
+- Fix determining plane from DICOM images when building volume [\#882](https://github.com/nroduit/Weasis/issues/882)
+- Regression after 4.6.6: series no longer loads progressively and the viewer freezes while scrolling large CT series [\#880](https://github.com/nroduit/Weasis/issues/880)
+- Export as lossless transfer syntax is incorrectly setting LossyImageCompression value [\#876](https://github.com/nroduit/Weasis/issues/876)
+
+**Security fixes:**
+
+- Enhance property handling to prevent path injection and ensure safe directory names [\#888](https://github.com/nroduit/Weasis/issues/888)
+
+**Closed issues:**
+
+- ROI Metrics Not showing [\#871](https://github.com/nroduit/Weasis/issues/871)
+- Hounsfield Units measurement does not appear. [\#869](https://github.com/nroduit/Weasis/issues/869)
+
+**Merged pull requests:**
+
+- build: bump the maven group across 1 directory with 7 updates [\#889](https://github.com/nroduit/Weasis/pull/889) ([dependabot[bot]](https://github.com/apps/dependabot))
+- ci: bump the actions group across 1 directory with 2 updates [\#872](https://github.com/nroduit/Weasis/pull/872) ([dependabot[bot]](https://github.com/apps/dependabot))
+
+## [v4.7.2](https://github.com/nroduit/Weasis/tree/v4.7.2) (2026-08-03)
+
+[Full Changelog](https://github.com/nroduit/Weasis/compare/v4.7.1...v4.7.2)
+
+**Implemented enhancements:**
+
+- Add user-configurable default filter mode for DICOM explorer [\#874](https://github.com/nroduit/Weasis/issues/874)
+- Allow adding and editing custom 3D LUTs [\#805](https://github.com/nroduit/Weasis/issues/805)
+
+**Fixed bugs:**
+
+- Ellipse showing wrong Mean [\#870](https://github.com/nroduit/Weasis/issues/870)
+- Fixed blackening when setting segment opacity in 3D viewer [\#865](https://github.com/nroduit/Weasis/issues/865)
+- Preset changes are only applied after scrolling in multi-view layouts [\#860](https://github.com/nroduit/Weasis/issues/860)
+- Attenuation measurement returns incorrect HU values in v4.7.1 [\#858](https://github.com/nroduit/Weasis/issues/858)
+- Area-based intensity measurement issue [\#855](https://github.com/nroduit/Weasis/issues/855)
+
+**Merged pull requests:**
+
+- Fixed blackening when setting segment opacity in 3D viewer. [\#857](https://github.com/nroduit/Weasis/pull/857) ([loximann](https://github.com/loximann))
+- build: bump the maven group with 7 updates [\#854](https://github.com/nroduit/Weasis/pull/854) ([dependabot[bot]](https://github.com/apps/dependabot))
+- ci: bump actions/setup-java from 5.4.0 to 5.5.0 in the actions group [\#853](https://github.com/nroduit/Weasis/pull/853) ([dependabot[bot]](https://github.com/apps/dependabot))
+
+## [v4.7.1](https://github.com/nroduit/Weasis/tree/v4.7.1) (2026-07-09)
+
+[Full Changelog](https://github.com/nroduit/Weasis/compare/v4.7.0...v4.7.1)
+
+**Implemented enhancements:**
+
+- PET/CT Image Fusion Overlay [\#850](https://github.com/nroduit/Weasis/issues/850)
+- DICOM Explorer: add a per-patient series filter and a searchable patient selector [\#849](https://github.com/nroduit/Weasis/issues/849)
+- Upgrade codecs to OpenCV 5 [\#843](https://github.com/nroduit/Weasis/issues/843)
+- Curved MPR View [\#828](https://github.com/nroduit/Weasis/issues/828)
+
+**Fixed bugs:**
+
+- Mouse actions \(zoom and pan\) not applied to non-DICOM views [\#851](https://github.com/nroduit/Weasis/issues/851)
+- Reset tools do not synchronize to other linked views [\#848](https://github.com/nroduit/Weasis/issues/848)
+- Flatpak: 3D Viewer fails to load due to missing java.applet dependency under Java 26 \(OSGi BundleException for jogamp\) [\#847](https://github.com/nroduit/Weasis/issues/847)
+- Dicomizer: cannot import color images with 16-bit per channel [\#842](https://github.com/nroduit/Weasis/issues/842)
+- Manual synchronization setup lost when opening another series [\#840](https://github.com/nroduit/Weasis/issues/840)
+- Weasis freezes after using the File or Help menu on macOS [\#839](https://github.com/nroduit/Weasis/issues/839)
+- NPE when reloading DICOM Presentation State on Linux created on MacOS [\#836](https://github.com/nroduit/Weasis/issues/836)
+- I dont have the 3d viewer option in 4.7 [\#834](https://github.com/nroduit/Weasis/issues/834)
+- Cannot send study with STOW-RS without authentication [\#833](https://github.com/nroduit/Weasis/issues/833)
+- Cannot open dicom files from Finder on macOS [\#832](https://github.com/nroduit/Weasis/issues/832)
+- The deb installer do not have the correct Weasis icon for desktop shortcuts [\#831](https://github.com/nroduit/Weasis/issues/831)
+- GSPS TextObject annotations not showing in 4.7 [\#827](https://github.com/nroduit/Weasis/issues/827)
+- File/View/Help menus not \(always\) responding [\#819](https://github.com/nroduit/Weasis/issues/819)
+
+**Merged pull requests:**
+
+- build: bump the maven group with 21 updates [\#846](https://github.com/nroduit/Weasis/pull/846) ([dependabot[bot]](https://github.com/apps/dependabot))
+- ci: bump the actions group with 2 updates [\#845](https://github.com/nroduit/Weasis/pull/845) ([dependabot[bot]](https://github.com/apps/dependabot))
+- Bump com.fasterxml.jackson.core:jackson-databind from 2.21.3 to 2.22.0 in /weasis-parent in the maven group across 1 directory [\#844](https://github.com/nroduit/Weasis/pull/844) ([dependabot[bot]](https://github.com/apps/dependabot))
+- Add preference to toggle delete measurement confirmation dialog \(fixe… [\#809](https://github.com/nroduit/Weasis/pull/809) ([LornaReilly](https://github.com/LornaReilly))
+
+## [v4.7.0](https://github.com/nroduit/Weasis/tree/v4.7.0) (2026-05-28)
+
+[Full Changelog](https://github.com/nroduit/Weasis/compare/v4.6.6...v4.7.0)
+
+**Implemented enhancements:**
+
+- Per-action auto-synchronization with per-view control and FrameOfReferenceUID-aware grouping [\#823](https://github.com/nroduit/Weasis/issues/823)
+- Manage OpenCV native \(off-heap\) memory and add a resource monitor for hardware fitness [\#822](https://github.com/nroduit/Weasis/issues/822)
+- Acquire/Dicomizer: validate imported videos and warn the user when files are rejected [\#821](https://github.com/nroduit/Weasis/issues/821)
+- Add segmentation overlay rendering in the 3D Volume Renderer [\#818](https://github.com/nroduit/Weasis/issues/818)
+- Add segmentation overlay in MPR views [\#817](https://github.com/nroduit/Weasis/issues/817)
+- DICOM SEG: Fix frame position lookup priority and handle Spatial Locations Preserved attribute [\#816](https://github.com/nroduit/Weasis/issues/816)
+- Support FRACTIONAL and LABELMAP DICOM segmentation types [\#815](https://github.com/nroduit/Weasis/issues/815)
+- Update to weasis-dicom-tools 5.34.2 \(Refactoring and API changes\) [\#811](https://github.com/nroduit/Weasis/issues/811)
+- Misleading Error Message: "Cannot Be Read" for Valid DICOM Files [\#810](https://github.com/nroduit/Weasis/issues/810)
+- Redesign tab opening preferences for studies to improve usability and handle different import contexts [\#806](https://github.com/nroduit/Weasis/issues/806)
+- Allow customization of most keyboard shortcuts in preferences [\#804](https://github.com/nroduit/Weasis/issues/804)
+- MPR crosshair cut mode for 3D volume rendering [\#799](https://github.com/nroduit/Weasis/issues/799)
+- Add DICOM export for MPR views with current orientation [\#796](https://github.com/nroduit/Weasis/issues/796)
+- Integrated MIP projection mode in the standard 2D viewer with full synchronization and slab geometry overlay [\#795](https://github.com/nroduit/Weasis/issues/795)
+- Unify DICOM import UX: handle ZIP drag-and-drop and consolidate into the "Local Device" dialog [\#793](https://github.com/nroduit/Weasis/issues/793)
+- Replace GridBagLayout with MigLayout and improve layout management [\#791](https://github.com/nroduit/Weasis/issues/791)
+- Add a new date picker [\#789](https://github.com/nroduit/Weasis/issues/789)
+- Upgrade to Java 25 LTS and fix related issues [\#786](https://github.com/nroduit/Weasis/issues/786)
+- Add OpenGL 3.3 volume rendering backend \(FBO + Fragment Shader\) to enable macOS support [\#784](https://github.com/nroduit/Weasis/issues/784)
+- Remove the confirmation to delete measurements [\#783](https://github.com/nroduit/Weasis/issues/783)
+- Speed up MPR loading when no patient-orientation rectification is required [\#781](https://github.com/nroduit/Weasis/issues/781)
+- Enable color image rendering in MPR views [\#780](https://github.com/nroduit/Weasis/issues/780)
+- Use system file chooser instead of the Java common one [\#761](https://github.com/nroduit/Weasis/issues/761)
+- Manual series scroll sync [\#700](https://github.com/nroduit/Weasis/issues/700)
+- Display regions of multiple SEG objects in same list [\#681](https://github.com/nroduit/Weasis/issues/681)
+
+**Fixed bugs:**
+
+- BINARY SEG masks with Columns not a multiple of 8 decoded incorrectly by OpenCV native 1-bit decoder [\#820](https://github.com/nroduit/Weasis/issues/820)
+- IllegalThreadStateException: duplicate Thread.start\(\) call in Launcher.java [\#813](https://github.com/nroduit/Weasis/issues/813)
+- Several Horizontal Banding/Striations in MPR Views \(COR/SAG\) [\#771](https://github.com/nroduit/Weasis/issues/771)
+- The current view will also move when MPR is orthogonal. [\#769](https://github.com/nroduit/Weasis/issues/769)
+- MPR generates deformed axial image in non-axially scanned volumes. [\#752](https://github.com/nroduit/Weasis/issues/752)
+- MPR scrolling follows the image axes instead of the oblique MPR axis [\#702](https://github.com/nroduit/Weasis/issues/702)
+
+**Closed issues:**
+
+- HTTP downloads now exclusively use HttpClient \(removed legacy HttpURLConnection paths\) [\#812](https://github.com/nroduit/Weasis/issues/812)
+- Search in Cyrillic [\#802](https://github.com/nroduit/Weasis/issues/802)
+- fix: oauth service cache key ignores callback port, reusing wrong service instance [\#800](https://github.com/nroduit/Weasis/issues/800)
+- Deprecate 32-bit ARM build support due to lack of official JDK compatibility [\#790](https://github.com/nroduit/Weasis/issues/790)
+- Update to weasis-dicom-tools 5.34.2 [\#788](https://github.com/nroduit/Weasis/issues/788)
+- Use only java.net.http.HttpClient for all HTTP requests [\#787](https://github.com/nroduit/Weasis/issues/787)
+
+**Merged pull requests:**
+
+- Bump org.codehaus.plexus:plexus-utils from 4.0.0 to 4.0.3 in /weasis-distributions in the maven group across 1 directory [\#803](https://github.com/nroduit/Weasis/pull/803) ([dependabot[bot]](https://github.com/apps/dependabot))
+- Quality: OAuth service cache key ignores callback port, reusing wrong service instance [\#801](https://github.com/nroduit/Weasis/pull/801) ([Nam0101](https://github.com/Nam0101))
+- Bump ch.qos.logback:logback-core from 1.5.23 to 1.5.25 in /weasis-parent in the maven group across 1 directory [\#774](https://github.com/nroduit/Weasis/pull/774) ([dependabot[bot]](https://github.com/apps/dependabot))
+
+## [v4.6.6](https://github.com/nroduit/Weasis/tree/v4.6.6) (2025-12-29)
+
+[Full Changelog](https://github.com/nroduit/Weasis/compare/v4.6.5...v4.6.6)
+
+**Implemented enhancements:**
+
+- Improve logic for hiding corner annotations according to view size [\#766](https://github.com/nroduit/Weasis/issues/766)
+- Display warning on MPR on non-axial series requiring geometric transformations [\#765](https://github.com/nroduit/Weasis/issues/765)
+- 4D Series: Dialog to automatically divide a multi-phase series into individual phase sub-series \(MPR, MIP and VR\) [\#763](https://github.com/nroduit/Weasis/issues/763)
+- Dicomizer: Use the file’s last modified date instead of the invalid date from the acquisition device [\#762](https://github.com/nroduit/Weasis/issues/762)
+- Update to Flatlaf 3.7 [\#760](https://github.com/nroduit/Weasis/issues/760)
+- Preserve the last-used format as the default setting for the ECG viewer [\#754](https://github.com/nroduit/Weasis/issues/754)
+
+**Fixed bugs:**
+
+- View selection incorrectly resets to first position after MIP view replacement [\#764](https://github.com/nroduit/Weasis/issues/764)
+- Images with Deflated Explicit VR Little Endian not shown correctly [\#755](https://github.com/nroduit/Weasis/issues/755)
+- Overlay buttons on view canvas should always be visible [\#744](https://github.com/nroduit/Weasis/issues/744)
+- Orientation in Display do not work for some modalities [\#743](https://github.com/nroduit/Weasis/issues/743)
+- Strange behavior of the selected view while building MIP. [\#741](https://github.com/nroduit/Weasis/issues/741)
+- Pan with Orthographic Projection Mode in 3D Viewer [\#732](https://github.com/nroduit/Weasis/issues/732)
+- PNG codec error and image zooming/moving trouble [\#553](https://github.com/nroduit/Weasis/issues/553)
+
+**Security fixes:**
+
+- Weasis installer disables browser URL security popups via managed policies [\#753](https://github.com/nroduit/Weasis/issues/753)
+
 ## [v4.6.5](https://github.com/nroduit/Weasis/tree/v4.6.5) (2025-10-05)
 
 [Full Changelog](https://github.com/nroduit/Weasis/compare/v4.6.4...v4.6.5)

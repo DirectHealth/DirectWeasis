@@ -9,8 +9,17 @@
  */
 package org.weasis.core.api.image;
 
+/**
+ * Functional interface for handling image operation events. Implementations receive notifications
+ * when image operations occur.
+ */
 @FunctionalInterface
 public interface OpEventListener {
 
+  /**
+   * Processes an image operation event.
+   *
+   * @param event the image operation event to handle
+   */
   void handleImageOpEvent(ImageOpEvent event);
 }

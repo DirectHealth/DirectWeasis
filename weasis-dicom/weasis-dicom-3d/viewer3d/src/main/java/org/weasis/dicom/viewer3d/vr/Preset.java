@@ -9,30 +9,36 @@
  */
 package org.weasis.dicom.viewer3d.vr;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jogamp.common.nio.Buffers;
 import com.jogamp.opengl.GL;
-import com.jogamp.opengl.GL4;
+import com.jogamp.opengl.GL2ES2;
+import jakarta.json.Json;
+import jakarta.json.JsonArrayBuilder;
+import jakarta.json.JsonException;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.IntBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Objects;
 import javax.swing.Icon;
 import org.joml.Vector4f;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.gui.util.ActionW;
+import org.weasis.core.api.service.UICore;
+import org.weasis.core.api.util.JsonUtil;
 import org.weasis.core.ui.model.graphic.imp.seg.SegRegion;
 import org.weasis.dicom.codec.display.Modality;
 import org.weasis.dicom.viewer3d.EventManager;
@@ -40,13 +46,14 @@ import org.weasis.dicom.viewer3d.View3DContainer;
 import org.weasis.dicom.viewer3d.vr.lut.PresetGroup;
 import org.weasis.dicom.viewer3d.vr.lut.PresetPoint;
 import org.weasis.dicom.viewer3d.vr.lut.VolumePreset;
-import org.weasis.opencv.seg.RegionAttributes;
 
 public class Preset extends TextureData {
   private static final Logger LOGGER = LoggerFactory.getLogger(Preset.class);
+  public static final String CUSTOM_PRESETS_FILENAME = "customVolumePresets.json";
   public static final List<Preset> basicPresets = loadPresets();
+  public static final List<Preset> customPresets =
+      Collections.synchronizedList(new ArrayList<>(loadCustomPresets()));
 
-  public static final Preset originalPreset = getOriginalPreset();
   private final boolean defaultElement;
   private final List<PresetGroup> groups;
   private boolean requiredBuilding;
@@ -54,6 +61,7 @@ public class Preset extends TextureData {
   private byte[] invertColors;
   private final String name;
   private final Modality modality;
+  private final boolean custom;
 
   private final boolean shade;
   private final float specularPower;
@@ -71,7 +79,8 @@ public class Preset extends TextureData {
         v.isDefaultElement(),
         v.isShade(),
         v.getSpecularPower(),
-        v.getGroups());
+        v.getGroups(),
+        false);
   }
 
   public Preset(
@@ -81,12 +90,24 @@ public class Preset extends TextureData {
       boolean shade,
       float specularPower,
       List<PresetGroup> groups) {
+    this(name, modality, defaultElement, shade, specularPower, groups, false);
+  }
+
+  public Preset(
+      String name,
+      String modality,
+      boolean defaultElement,
+      boolean shade,
+      float specularPower,
+      List<PresetGroup> groups,
+      boolean custom) {
     super(256, PixelFormat.RGBA8);
     this.name = Objects.requireNonNull(name);
     this.modality = Modality.getModality(modality);
     this.defaultElement = defaultElement;
     this.shade = shade;
     this.specularPower = specularPower;
+    this.custom = custom;
 
     this.groups = groups;
     if (groups.isEmpty() || groups.stream().anyMatch(g -> g.getPoints().length == 0)) {
@@ -246,39 +267,56 @@ public class Preset extends TextureData {
   public static Vector4f linearColorGradient(PresetPoint vStart, PresetPoint vEnd, int stepX) {
     int min = vStart.getIntensity();
     int n = vEnd.getIntensity() - min;
+    if (n <= 1) {
+      // Avoid division by zero; just return the start colour clamped to a valid range
+      return new Vector4f(
+          Math.clamp(vStart.getRed(), 0.0f, 1.0f),
+          Math.clamp(vStart.getGreen(), 0.0f, 1.0f),
+          Math.clamp(vStart.getBlue(), 0.0f, 1.0f),
+          stepX);
+    }
     float stepR = (vEnd.getRed() - vStart.getRed()) / (n - 1);
     float stepG = (vEnd.getGreen() - vStart.getGreen()) / (n - 1);
     float stepB = (vEnd.getBlue() - vStart.getBlue()) / (n - 1);
 
     int pos = stepX - min;
     return new Vector4f(
-        vStart.getRed() + stepR * pos,
-        vStart.getGreen() + stepG * pos,
-        vStart.getBlue() + stepB * pos,
+        Math.clamp(vStart.getRed() + stepR * pos, 0.0f, 1.0f),
+        Math.clamp(vStart.getGreen() + stepG * pos, 0.0f, 1.0f),
+        Math.clamp(vStart.getBlue() + stepB * pos, 0.0f, 1.0f),
         stepX);
   }
 
   public static Vector4f linearLightingGradient(PresetPoint vStart, PresetPoint vEnd, int stepX) {
     int min = vStart.getIntensity();
     int n = vEnd.getIntensity() - min;
+    if (n <= 1) {
+      return new Vector4f(
+          Math.clamp(PresetPoint.convertFloat(vStart.getAmbient(), 0.2f), 0.0f, 1.0f),
+          Math.clamp(PresetPoint.convertFloat(vStart.getDiffuse(), 0.9f), 0.0f, 1.0f),
+          Math.clamp(PresetPoint.convertFloat(vStart.getSpecular(), 0.2f), 0.0f, 1.0f),
+          stepX);
+    }
     float stepA = (vEnd.getAmbient() - vStart.getAmbient()) / (n - 1);
     float stepD = (vEnd.getDiffuse() - vStart.getDiffuse()) / (n - 1);
     float stepS = (vEnd.getSpecular() - vStart.getSpecular()) / (n - 1);
 
     int pos = stepX - min;
     return new Vector4f(
-        vStart.getAmbient() + stepA * pos,
-        vStart.getDiffuse() + stepD * pos,
-        vStart.getSpecular() + stepS * pos,
+        Math.clamp(vStart.getAmbient() + stepA * pos, 0.0f, 1.0f),
+        Math.clamp(vStart.getDiffuse() + stepD * pos, 0.0f, 1.0f),
+        Math.clamp(vStart.getSpecular() + stepS * pos, 0.0f, 1.0f),
         stepX);
   }
 
   public static float linearOpacityGradient(PresetPoint vStart, PresetPoint vEnd, int stepX) {
     int min = vStart.getIntensity();
     int n = vEnd.getIntensity() - min;
+    if (n <= 1) {
+      return Math.clamp(vStart.getOpacity(), 0.0f, 1.0f);
+    }
     float step = (vEnd.getOpacity() - vStart.getOpacity()) / (n - 1);
-
-    return vStart.getOpacity() + step * (stepX - min);
+    return Math.clamp(vStart.getOpacity() + step * (stepX - min), 0.0f, 1.0f);
   }
 
   @Override
@@ -318,26 +356,119 @@ public class Preset extends TextureData {
     return modality == Modality.DEFAULT && defaultElement;
   }
 
-  @Override
-  public void init(GL4 gl4) {
-    init(gl4, false);
+  public boolean isCustom() {
+    return custom;
   }
 
-  public void init(GL4 gl4, boolean inverse) {
-    super.init(gl4);
+  public List<PresetGroup> getGroups() {
+    return groups;
+  }
+
+  public static List<Preset> getAllPresets() {
+    List<Preset> all = new ArrayList<>(basicPresets);
+    all.addAll(customPresets);
+    all.sort(
+        Comparator.comparing(
+            o -> (String.format("%03d", o.getModality().ordinal()) + o.getName())));
+    return all;
+  }
+
+  public static Path getCustomPresetsPath() {
+    Path prefFolder =
+        Path.of(
+            UICore.getInstance().getSystemPreferences().getProperty("weasis.pref.dir")); // NON-NLS
+    try {
+      Files.createDirectories(prefFolder);
+    } catch (IOException e) {
+      LOGGER.error("Cannot create preferences folder", e);
+    }
+    return prefFolder.resolve(CUSTOM_PRESETS_FILENAME);
+  }
+
+  public static void saveCustomPresets() {
+    try {
+      JsonArrayBuilder builder = Json.createArrayBuilder();
+      for (Preset p : customPresets) {
+        VolumePreset vp = new VolumePreset();
+        vp.setName(p.getName());
+        vp.setModality(p.getModality().name());
+        vp.setDefaultElement(p.isDefaultElement());
+        vp.setShade(p.isShade());
+        vp.setSpecularPower(p.getSpecularPower());
+        vp.setGroups(p.getGroups().stream().map(PresetGroup::copy).toArray(PresetGroup[]::new));
+        builder.add(vp.toJson());
+      }
+      Path customPresetsPath = getCustomPresetsPath();
+      JsonUtil.write(customPresetsPath, builder.build());
+      UICore.getInstance()
+          .storeRemotePref(customPresetsPath, "application/json;charset=UTF-8"); // NON-NLS
+    } catch (IOException e) {
+      LOGGER.error("Cannot save custom presets", e);
+    }
+  }
+
+  /** Reloads the custom presets from disk, discarding any unsaved in-memory changes. */
+  public static void reloadCustomPresets() {
+    List<Preset> reloaded = loadCustomPresets();
+    synchronized (customPresets) {
+      customPresets.clear();
+      customPresets.addAll(reloaded);
+    }
+  }
+
+  static List<Preset> loadCustomPresets() {
+    List<Preset> presets = new ArrayList<>();
+    Path path = getCustomPresetsPath();
+    if (Files.exists(path)) {
+      try {
+        List<VolumePreset> list =
+            JsonUtil.objects(JsonUtil.readArray(path)).stream()
+                .map(VolumePreset::fromJson)
+                .toList();
+        list.forEach(
+            p -> {
+              try {
+                Preset preset =
+                    new Preset(
+                        p.getName(),
+                        p.getModality(),
+                        p.isDefaultElement(),
+                        p.isShade(),
+                        p.getSpecularPower(),
+                        p.getGroups(),
+                        true);
+                presets.add(preset);
+              } catch (Exception e) {
+                LOGGER.error("Cannot read custom preset {}", p.getName(), e);
+              }
+            });
+      } catch (IOException | JsonException e) {
+        LOGGER.error("Cannot load custom presets", e);
+      }
+    }
+    return presets;
+  }
+
+  @Override
+  public void init(GL2ES2 gl) {
+    init(gl, false);
+  }
+
+  public void init(GL2ES2 gl, boolean inverse) {
+    super.init(gl);
     if (inverse && id2 <= 0) {
       IntBuffer intBuffer = IntBuffer.allocate(1);
-      gl4.glGenTextures(1, intBuffer);
+      gl.glGenTextures(1, intBuffer);
       id2 = intBuffer.get(0);
     }
     initColors(this, inverse);
-    gl4.glActiveTexture(GL.GL_TEXTURE1);
-    gl4.glBindTexture(GL.GL_TEXTURE_2D, inverse ? id2 : getId());
-    gl4.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR);
-    gl4.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR);
-    gl4.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE);
-    gl4.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE);
-    gl4.glTexImage2D(
+    gl.glActiveTexture(GL.GL_TEXTURE1);
+    gl.glBindTexture(GL.GL_TEXTURE_2D, inverse ? id2 : getId());
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE);
+    gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE);
+    gl.glTexImage2D(
         GL.GL_TEXTURE_2D,
         0,
         internalFormat,
@@ -348,26 +479,26 @@ public class Preset extends TextureData {
         type,
         Buffers.newDirectByteBuffer(inverse ? invertColors : colors).rewind());
 
-    lightingMap.init(gl4);
+    lightingMap.init(gl);
   }
 
   @Override
-  public void render(GL4 gl4) {
-    render(gl4, false, false);
+  public void render(GL2ES2 gl) {
+    render(gl, false);
   }
 
-  void render(GL4 gl4, boolean inverse, boolean originalLut) {
-    if (gl4 != null) {
-      Preset p = originalLut ? originalPreset : this;
+  void render(GL2ES2 gl, boolean inverse) {
+    if (gl != null) {
+      Preset p = this;
       if (requiredBuilding) {
         this.requiredBuilding = false;
         if (p.getId() <= 0 || (inverse && (p.invertColors == null || p.id2 <= 0))) {
-          p.init(gl4, inverse);
+          p.init(gl, inverse);
         }
       }
 
-      gl4.glActiveTexture(GL.GL_TEXTURE1);
-      gl4.glTexImage2D(
+      gl.glActiveTexture(GL.GL_TEXTURE1);
+      gl.glTexImage2D(
           GL.GL_TEXTURE_2D,
           0,
           p.internalFormat,
@@ -378,20 +509,20 @@ public class Preset extends TextureData {
           p.type,
           Buffers.newDirectByteBuffer(inverse ? p.invertColors : p.colors).rewind());
 
-      p.lightingMap.update(gl4);
+      p.lightingMap.update(gl);
     }
   }
 
   @Override
-  public void destroy(GL4 gl4) {
-    super.destroy(gl4);
+  public void destroy(GL2ES2 gl) {
+    super.destroy(gl);
     if (id2 != 0) {
-      gl4.glDeleteTextures(1, new int[] {id2}, 0);
+      gl.glDeleteTextures(1, new int[] {id2}, 0);
       id2 = 0;
     }
   }
 
-  public void drawLutIcon(Graphics2D g2d, Icon icon, int x, int y, int border, boolean markers) {
+  public void drawLutIcon(Graphics2D g2d, Icon icon, int x, int y, int border) {
     int iconWidth = icon.getIconWidth();
     int iconHeight = icon.getIconHeight() - 2 * border;
     boolean inverse =
@@ -432,18 +563,10 @@ public class Preset extends TextureData {
         g = 1 - g;
         b = 1 - b;
       }
-      g2d.setColor(new Color(r, g, b));
+      g2d.setColor(
+          new Color(
+              Math.clamp(r, 0.0f, 1.0f), Math.clamp(g, 0.0f, 1.0f), Math.clamp(b, 0.0f, 1.0f)));
       g2d.drawLine(sx + i, sy, sx + i, sy + iconHeight);
-    }
-
-    if (markers) {
-      for (PresetPoint p : points) {
-        if (p.getRed() != null) {
-          int index = (p.getIntensity() - colorMin) * iconWidth / width;
-          g2d.setColor(Color.BLACK);
-          g2d.draw3DRect(sx + index - 1, sy + iconHeight / 2 - 1, 3, 3, true);
-        }
-      }
     }
   }
 
@@ -454,7 +577,7 @@ public class Preset extends TextureData {
       public void paintIcon(Component c, Graphics g, int x, int y) {
         if (g instanceof Graphics2D g2d) {
           g2d.setStroke(new BasicStroke(1.2f));
-          drawLutIcon(g2d, this, x, y, border, false);
+          drawLutIcon(g2d, this, x, y, border);
         }
       }
 
@@ -513,18 +636,10 @@ public class Preset extends TextureData {
     return presets;
   }
 
-  static Preset getOriginalPreset() {
-    try {
-      List<VolumePreset> original = loadFile("/originalLut.json"); // NON-NLS
-      return buildPreset(original.getFirst());
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
-  }
-
   static List<VolumePreset> loadFile(String file) throws IOException {
-    ObjectMapper objectMapper = new ObjectMapper();
-    return objectMapper.readValue(Preset.class.getResourceAsStream(file), new TypeReference<>() {});
+    try (InputStream in = Preset.class.getResourceAsStream(file)) {
+      return JsonUtil.objects(JsonUtil.readArray(in)).stream().map(VolumePreset::fromJson).toList();
+    }
   }
 
   static Preset buildPreset(VolumePreset p) {
@@ -542,57 +657,5 @@ public class Preset extends TextureData {
       return container.getRegionMap();
     }
     return null;
-  }
-
-  private static List<SegRegion<?>> getOrderRegionAttributes(Map<String, List<SegRegion<?>>> map) {
-    List<SegRegion<?>> list = new ArrayList<>();
-    for (Entry<String, List<SegRegion<?>>> entry : map.entrySet()) {
-      list.addAll(entry.getValue());
-    }
-    list.sort(Comparator.comparingInt(RegionAttributes::getId));
-    return list;
-  }
-
-  public static Preset getSegmentationLut() {
-    Map<String, List<SegRegion<?>>> map = getRegionMap();
-
-    if (map != null && !map.isEmpty()) {
-      List<PresetGroup> groups = new ArrayList<>();
-      groups.add(new PresetGroup("StartEmpty", new PresetPoint[] {getTransparentPoint(0)}));
-
-      List<PresetPoint> presetPoints = new ArrayList<>();
-      int max = 1;
-
-      for (RegionAttributes a : getOrderRegionAttributes(map)) {
-        float opacity = a.getInteriorOpacity();
-        int density = a.getId();
-        max = Math.max(max, density);
-        if (a.isVisible()) {
-          Color c = a.getColor();
-          presetPoints.add(
-              new PresetPoint(
-                  density,
-                  opacity,
-                  c.getRed() / 255.0f,
-                  c.getGreen() / 255.0f,
-                  c.getBlue() / 255.0f,
-                  1.0f,
-                  0.2f,
-                  1.0f));
-        } else {
-          presetPoints.add(getTransparentPoint(density));
-        }
-      }
-      //   presetPoints.add(presetPoints.getLast());
-
-      groups.add(new PresetGroup("segments", presetPoints.toArray(new PresetPoint[0]))); // NON-NLS
-      // groups.add(new PresetGroup("EndEmpty", new PresetPoint[] {getTransparentPoint(max + 1)}));
-      return new Preset("Segmentation", "SEG", false, true, 1.0f, groups); // NON-NLS
-    }
-    return null;
-  }
-
-  private static PresetPoint getTransparentPoint(int intensity) {
-    return new PresetPoint(intensity, 0, 0f, 0f, 0f, 0.2f, 0.1f, 0.9f);
   }
 }

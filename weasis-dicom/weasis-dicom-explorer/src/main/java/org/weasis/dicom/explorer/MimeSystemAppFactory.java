@@ -12,8 +12,8 @@ package org.weasis.dicom.explorer;
 import com.formdev.flatlaf.util.SystemInfo;
 import java.awt.Desktop;
 import java.io.File;
-import java.util.Map;
 import javax.swing.Icon;
+import org.weasis.core.api.explorer.model.DataExplorerModel;
 import org.weasis.core.api.media.data.MediaElement;
 import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.util.ResourceUtil;
@@ -22,6 +22,7 @@ import org.weasis.core.ui.editor.MimeSystemAppViewer;
 import org.weasis.core.ui.editor.SeriesViewer;
 import org.weasis.core.ui.editor.SeriesViewerFactory;
 import org.weasis.core.ui.editor.SeriesViewerUI;
+import org.weasis.core.ui.editor.ViewerOpenOptions;
 import org.weasis.dicom.codec.DicomMediaIO;
 import org.weasis.dicom.codec.FilesExtractor;
 
@@ -45,11 +46,11 @@ public class MimeSystemAppFactory implements SeriesViewerFactory {
             // https://bugs.java.com/bugdatabase/view_bug.do?bug_id=6486393
             for (File file : extractor.getExtractFiles()) {
               if (SystemInfo.isLinux) {
-                startAssociatedProgramFromLinux(file);
+                startAssociatedProgramFromLinux(file.toPath());
               } else if (Desktop.isDesktopSupported()) {
                 final Desktop desktop = Desktop.getDesktop();
                 if (desktop.isSupported(Desktop.Action.OPEN)) {
-                  startAssociatedProgramFromDesktop(desktop, file);
+                  startAssociatedProgramFromDesktop(desktop, file.toPath());
                 }
               }
             }
@@ -94,7 +95,8 @@ public class MimeSystemAppFactory implements SeriesViewerFactory {
   }
 
   @Override
-  public SeriesViewer<? extends MediaElement> createSeriesViewer(Map<String, Object> properties) {
+  public SeriesViewer<? extends MediaElement> createSeriesViewer(
+      ViewerOpenOptions options, DataExplorerModel model) {
     return mimeSystemViewer;
   }
 

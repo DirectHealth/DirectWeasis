@@ -9,9 +9,10 @@
  */
 package org.weasis.core.ui.editor;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,9 +22,9 @@ import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.explorer.model.AbstractFileModel;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiExecutor;
-import org.weasis.core.api.util.ClosableURLConnection;
-import org.weasis.core.api.util.NetworkUtil;
-import org.weasis.core.api.util.URLParameters;
+import org.weasis.core.api.net.ClosableURLConnection;
+import org.weasis.core.api.net.NetworkUtil;
+import org.weasis.core.api.net.URLParameters;
 import org.weasis.core.util.FileUtil;
 
 // TODO required to change the static ref
@@ -33,15 +34,15 @@ import org.weasis.core.util.FileUtil;
 public class FileModel extends AbstractFileModel {
   private static final Logger LOGGER = LoggerFactory.getLogger(FileModel.class);
 
-  public static final File IMAGE_CACHE_DIR =
-      AppProperties.buildAccessibleTempDirectory(AppProperties.FILE_CACHE_DIR.getName(), "image");
+  public static final Path IMAGE_CACHE_DIR =
+      AppProperties.buildAccessibleTempDirectory(AppProperties.CACHE_NAME, "image");
 
-  private File getFile(String url) {
-    File outFile;
-    try (ClosableURLConnection http = NetworkUtil.getUrlConnection(url, new URLParameters());
+  private Path getFile(String url) {
+    Path outFile;
+    try (ClosableURLConnection http = NetworkUtil.getUrlConnection(url, URLParameters.DEFAULT);
         InputStream in = http.getInputStream()) {
-      outFile = File.createTempFile("img_", FileUtil.getExtension(url), IMAGE_CACHE_DIR);
-      LOGGER.debug("Start to download image {} to {}.", url, outFile.getName());
+      outFile = Files.createTempFile(IMAGE_CACHE_DIR, "img_", FileUtil.getExtension(url));
+      LOGGER.debug("Start to download image {} to {}.", url, outFile);
       FileUtil.writeStreamWithIOException(in, outFile);
     } catch (IOException e) {
       LOGGER.error("Dowloading image", e);
@@ -75,14 +76,16 @@ public class FileModel extends AbstractFileModel {
               new ObservableEvent(ObservableEvent.BasicAction.SELECT, dataModel, null, dataModel));
           if (opt.isSet("file")) { // NON-NLS
             fargs.stream()
-                .map(File::new)
-                .filter(File::isFile)
-                .forEach(f -> ViewerPluginBuilder.openSequenceInDefaultPlugin(f, true, true));
+                .map(Path::of)
+                .filter(Files::isRegularFile)
+                .forEach(
+                    f -> ViewerPluginBuilder.openInDefaultViewer(f, ViewerOpenOptions.defaults()));
           }
           if (opt.isSet("url")) { // NON-NLS
             uargs.stream()
                 .map(this::getFile)
-                .forEach(f -> ViewerPluginBuilder.openSequenceInDefaultPlugin(f, true, true));
+                .forEach(
+                    f -> ViewerPluginBuilder.openInDefaultViewer(f, ViewerOpenOptions.defaults()));
           }
         });
   }

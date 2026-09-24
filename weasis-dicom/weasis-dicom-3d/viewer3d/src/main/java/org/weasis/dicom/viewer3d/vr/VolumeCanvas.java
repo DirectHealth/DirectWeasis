@@ -68,6 +68,7 @@ public class VolumeCanvas extends GLJPanel implements Canvas {
       ImageViewerEventManager<DicomImageElement> eventManager,
       DicomVolTexture volTexture,
       VolumeViewModel viewModel) {
+    super(OpenglUtils.getDefaultCapabilities());
     this.volTexture = volTexture;
     this.eventManager = (EventManager) eventManager;
     this.camera = new Camera(this);
@@ -173,7 +174,7 @@ public class VolumeCanvas extends GLJPanel implements Canvas {
   public void setActionsInView(String action, Object value, Boolean repaint) {
     if (action != null) {
       actionsInView.put(action, value);
-      if (LangUtil.getNULLtoFalse(repaint)) {
+      if (LangUtil.nullToFalse(repaint)) {
         repaint();
       }
     }
@@ -220,7 +221,7 @@ public class VolumeCanvas extends GLJPanel implements Canvas {
           if (realFactor > 0.0) {
             Unit imgUnit = vol.getPixelSpacingUnit();
             if (!Unit.PIXEL.equals(imgUnit)) {
-              viewScale = imgUnit.getConvFactor() * vol.getTexelSize().x / realFactor;
+              viewScale = imgUnit.getFactorToMeters() * vol.getTexelSize().x / realFactor;
               viewScale = -adjustViewScale(viewScale);
             }
           }

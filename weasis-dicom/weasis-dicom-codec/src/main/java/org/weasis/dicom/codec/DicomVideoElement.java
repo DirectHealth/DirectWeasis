@@ -22,7 +22,7 @@ import org.dcm4che3.util.StreamUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.gui.util.AppProperties;
-import org.weasis.core.util.FileUtil;
+import org.weasis.core.util.StreamUtil;
 
 public class DicomVideoElement extends DicomImageElement implements FileExtractor {
   private static final Logger LOGGER = LoggerFactory.getLogger(DicomVideoElement.class);
@@ -59,7 +59,8 @@ public class DicomVideoElement extends DicomImageElement implements FileExtracto
         FileOutputStream out = null;
         try {
           File file =
-              File.createTempFile("video_", ".mpg", AppProperties.FILE_CACHE_DIR); // NON-NLS
+              File.createTempFile(
+                  "video_", ".mpg", AppProperties.FILE_CACHE_DIR.toFile()); // NON-NLS
           in = new BufferedInputStream(bulkData.openStream());
           out = new FileOutputStream(file);
           StreamUtils.copy(in, out, bulkData.length());
@@ -67,8 +68,8 @@ public class DicomVideoElement extends DicomImageElement implements FileExtracto
         } catch (Exception e) {
           LOGGER.error("Cannot extract video stream", e);
         } finally {
-          FileUtil.safeClose(out);
-          FileUtil.safeClose(in);
+          StreamUtil.safeClose(out);
+          StreamUtil.safeClose(in);
         }
       }
     }

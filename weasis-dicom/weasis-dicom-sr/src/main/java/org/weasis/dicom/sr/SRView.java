@@ -11,8 +11,8 @@ package org.weasis.dicom.sr;
 
 import java.awt.BorderLayout;
 import java.beans.PropertyChangeListener;
-import java.io.File;
 import java.net.URL;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -40,6 +40,7 @@ import org.weasis.core.ui.editor.SeriesViewerEvent;
 import org.weasis.core.ui.editor.SeriesViewerEvent.EVENT;
 import org.weasis.core.ui.editor.SeriesViewerFactory;
 import org.weasis.core.ui.editor.SeriesViewerListener;
+import org.weasis.core.ui.editor.ViewerOpenOptions;
 import org.weasis.core.ui.editor.ViewerPluginBuilder;
 import org.weasis.core.ui.editor.image.SequenceHandler;
 import org.weasis.core.ui.editor.image.ViewerPlugin;
@@ -58,12 +59,12 @@ import org.weasis.dicom.codec.KOSpecialElement;
 import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.TagD.Level;
 import org.weasis.dicom.codec.utils.DicomMediaUtils;
-import org.weasis.dicom.explorer.DicomExplorer;
 import org.weasis.dicom.explorer.DicomModel;
 import org.weasis.dicom.explorer.DicomSeriesHandler;
 import org.weasis.dicom.explorer.HangingProtocols.OpeningViewer;
 import org.weasis.dicom.explorer.LoadDicomObjects;
 import org.weasis.dicom.explorer.MimeSystemAppFactory;
+import org.weasis.dicom.explorer.main.DicomExplorer;
 import org.weasis.dicom.macro.SOPInstanceReference;
 
 public class SRView extends JScrollPane implements SeriesViewerListener {
@@ -234,16 +235,11 @@ public class SRView extends JScrollPane implements SeriesViewerListener {
                 List<DicomSeries> seriesList = new ArrayList<>();
                 seriesList.add((DicomSeries) s);
 
-                Map<String, Object> props = model.createViewerKeyImagePluginProperties();
-                ViewerPluginBuilder builder =
-                    new ViewerPluginBuilder(plugin, seriesList, model, props);
-                ViewerPluginBuilder.openSequenceInPlugin(builder);
+                ViewerOpenOptions opts = model.createViewerKeyImageOpenOptions();
+                new ViewerPluginBuilder(plugin, seriesList, model, opts).open();
                 model.firePropertyChange(
                     new ObservableEvent(
-                        ObservableEvent.BasicAction.SELECT,
-                        props.get(ViewerPluginBuilder.UID),
-                        null,
-                        keyReferences));
+                        ObservableEvent.BasicAction.SELECT, opts.uid(), null, keyReferences));
               }
             }
           } else {
@@ -388,13 +384,13 @@ public class SRView extends JScrollPane implements SeriesViewerListener {
     return null;
   }
 
-  private class SeriesHandler extends SequenceHandler {
+  private static class SeriesHandler extends SequenceHandler {
     public SeriesHandler() {
       super(false, true);
     }
 
     @Override
-    protected boolean dropFiles(List<File> files, TransferSupport support) {
+    protected boolean dropFiles(List<Path> files) {
       return DicomSeriesHandler.dropDicomFiles(files);
     }
   }

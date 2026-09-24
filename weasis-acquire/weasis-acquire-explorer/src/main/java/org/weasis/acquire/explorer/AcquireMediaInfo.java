@@ -9,7 +9,6 @@
  */
 package org.weasis.acquire.explorer;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Objects;
@@ -96,10 +95,12 @@ public class AcquireMediaInfo {
   }
 
   protected static void setContentDateTime(MediaElement media, LocalDateTime dateTime) {
-    if (dateTime == null) {
+    LocalDateTime now = LocalDateTime.now(ZoneId.systemDefault());
+    if (dateTime == null
+        || dateTime.isAfter(now.plusDays(1))
+        || dateTime.isBefore(now.minusYears(30))) {
       dateTime =
-          LocalDateTime.from(
-              Instant.ofEpochMilli(media.getLastModified()).atZone(ZoneId.systemDefault()));
+          LocalDateTime.from(media.getLastModified().toInstant().atZone(ZoneId.systemDefault()));
     }
     media.setTagNoNull(TagD.get(Tag.ContentDate), dateTime.toLocalDate());
     media.setTagNoNull(TagD.get(Tag.ContentTime), dateTime.toLocalTime());
