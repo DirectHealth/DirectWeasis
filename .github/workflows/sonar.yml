@@ -17,7 +17,7 @@ permissions:
 jobs:
   sonar:
     name: SonarCloud
-    if: github.event.workflow_run.conclusion == 'success'
+    if: github.repository == 'nroduit/Weasis' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
