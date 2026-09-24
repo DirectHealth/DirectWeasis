@@ -9,16 +9,12 @@
  */
 package org.weasis.dicom.viewer2d.mpr;
 
-import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.GridBagConstraints;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import javax.swing.Action;
 import javax.swing.JComponent;
@@ -34,16 +30,19 @@ import org.slf4j.LoggerFactory;
 import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.gui.Insertable.Type;
 import org.weasis.core.api.gui.InsertableUtil;
+import org.weasis.core.api.gui.layout.MergedCellsBuilder;
+import org.weasis.core.api.gui.layout.MigCell;
+import org.weasis.core.api.gui.layout.MigLayoutModel;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
-import org.weasis.core.api.image.GridBagLayoutModel;
-import org.weasis.core.api.image.LayoutConstraints;
+import org.weasis.core.api.image.cv.CvUtil;
 import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.media.data.MediaSeriesGroup;
 import org.weasis.core.api.media.data.Series;
 import org.weasis.core.api.service.BundlePreferences;
+import org.weasis.core.api.util.ResourceMonitor;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.ActionIcon;
 import org.weasis.core.api.util.ResourceUtil.OtherIcon;
@@ -56,6 +55,7 @@ import org.weasis.core.ui.editor.image.SynchView;
 import org.weasis.core.ui.editor.image.ViewCanvas;
 import org.weasis.core.ui.editor.image.ViewerToolBar;
 import org.weasis.core.ui.editor.image.ZoomToolBar;
+import org.weasis.core.ui.model.graphic.imp.line.PolylineGraphic;
 import org.weasis.core.ui.util.ColorLayerUI;
 import org.weasis.core.ui.util.DefaultAction;
 import org.weasis.core.ui.util.PrintDialog;
@@ -66,11 +66,10 @@ import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.TagD.Level;
 import org.weasis.dicom.codec.geometry.ImageOrientation;
-import org.weasis.dicom.codec.geometry.ImageOrientation.Plan;
 import org.weasis.dicom.explorer.DicomModel;
 import org.weasis.dicom.explorer.DicomViewerPlugin;
-import org.weasis.dicom.explorer.ExportToolBar;
-import org.weasis.dicom.explorer.ImportToolBar;
+import org.weasis.dicom.explorer.exp.ExportToolBar;
+import org.weasis.dicom.explorer.imp.ImportToolBar;
 import org.weasis.dicom.explorer.print.DicomPrintDialog;
 import org.weasis.dicom.viewer2d.DcmHeaderToolBar;
 import org.weasis.dicom.viewer2d.EventManager;
@@ -79,9 +78,15 @@ import org.weasis.dicom.viewer2d.Messages;
 import org.weasis.dicom.viewer2d.ResetTools;
 import org.weasis.dicom.viewer2d.View2dContainer;
 import org.weasis.dicom.viewer2d.View2dFactory;
+import org.weasis.dicom.viewer2d.fusion.FusionController;
+import org.weasis.dicom.viewer2d.fusion.FusionState;
 import org.weasis.dicom.viewer2d.mpr.MprView.Plane;
+import org.weasis.dicom.viewer2d.mpr.cmpr.CrossSectionParams;
+import org.weasis.dicom.viewer2d.mpr.cmpr.CurvedMprBuilder;
+import org.weasis.dicom.viewer2d.mpr.cmpr.CurvedMprView;
 
-public class MprContainer extends DicomViewerPlugin implements PropertyChangeListener {
+public class MprContainer extends DicomViewerPlugin
+    implements PropertyChangeListener, VolumeProvider {
   private static final Logger LOGGER = LoggerFactory.getLogger(MprContainer.class);
 
   static SynchView defaultMpr;
@@ -103,123 +108,84 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
             Messages.getString("mpr.synchronisation"),
             "mpr", // NON-NLS
             SynchData.Mode.STACK,
+            true,
             ActionIcon.TILE,
             actions);
   }
 
-  public static final List<SynchView> SYNCH_LIST = List.of(SynchView.NONE, defaultMpr);
+  public static final MigLayoutModel view1 =
+      new MergedCellsBuilder(2, 2, "mpr1", "3 views (left merged)", MprView.class.getName())
+          .addMergedCell(0, 0, 1, 2)
+          .addCell(0, 1)
+          .addCell(1, 1)
+          .build();
+  protected static final MigLayoutModel view2 =
+      new MergedCellsBuilder(2, 2, "mpr2", "3 views (right merged)", MprView.class.getName())
+          .addCell(0, 0)
+          .addMergedCell(0, 1, 1, 2)
+          .addCell(1, 0)
+          .build();
+  protected static final MigLayoutModel view3 =
+      new MergedCellsBuilder(2, 2, "mpr3", "3 views (top merged)", MprView.class.getName())
+          .addMergedCell(0, 0, 2, 1)
+          .addCell(1, 0)
+          .addCell(1, 1)
+          .build();
+  public static final MigLayoutModel view4 =
+      new MergedCellsBuilder(2, 2, "mpr4", "3 views (bottom merged)", MprView.class.getName())
+          .addCell(0, 0)
+          .addCell(0, 1)
+          .addMergedCell(1, 0, 2, 1)
+          .build();
+  protected static final MigLayoutModel view5 =
+      new MigLayoutModel("mpr5", "3 horizontal views", 1, 3, MprView.class.getName());
+  public static final MigLayoutModel VIEWS_2x2_mpr =
+      new MigLayoutModel(
+          "mpr2x2_vr", // NON-NLS
+          String.format(F_VIEWS, "2x2"), // NON-NLS
+          2,
+          2,
+          MprView.class.getName());
 
-  public static final GridBagLayoutModel view1 =
-      new GridBagLayoutModel(LinkedHashMap.newLinkedHashMap(3), "mpr", "MPR (col 1,2)"); // NON-NLS
-  protected static final GridBagLayoutModel view2 = VIEWS_2x2_f2.copy();
-  protected static final GridBagLayoutModel view3 = VIEWS_2_f1x2.copy();
-  public static final GridBagLayoutModel view4 =
-      new GridBagLayoutModel(
-          LinkedHashMap.newLinkedHashMap(3), "layout_r2x1", "MPR (row 2,1)"); // NON-NLS
-  protected static final GridBagLayoutModel view5 = VIEWS_1x3.copy();
+  public static final List<MigLayoutModel> LAYOUT_LIST = List.of(view1, view2, view3, view4, view5);
 
-  static {
-    view2.setTitle("MPR (col 2,1)"); // NON-NLS
-    view3.setTitle("MPR (row 1,2)"); // NON-NLS
-    view5.setTitle("MPR (col 1,1,1)"); // NON-NLS
+  /**
+   * Layout used to display the three MPR views together with a curved-MPR panoramic view. The
+   * curved cell is empty until a polyline is drawn on one of the MPR views and "Generate Curved
+   * MPR" is triggered; {@link #openCurvedMpr} also switches to this layout automatically.
+   */
+  public static final MigLayoutModel mprWithCurved = buildMprWithCurvedLayout();
 
-    Map<LayoutConstraints, Component> constraints = view1.getConstraints();
-    constraints.put(
-        new LayoutConstraints(
-            MprView.class.getName(),
-            0,
-            0,
-            0,
-            1,
-            2,
-            0.5,
-            1.0,
-            GridBagConstraints.CENTER,
-            GridBagConstraints.BOTH),
-        null);
-    constraints.put(
-        new LayoutConstraints(
-            MprView.class.getName(),
-            1,
-            1,
-            0,
-            1,
-            1,
-            0.5,
-            0.5,
-            GridBagConstraints.CENTER,
-            GridBagConstraints.BOTH),
-        null);
-    constraints.put(
-        new LayoutConstraints(
-            MprView.class.getName(),
-            2,
-            1,
-            1,
-            1,
-            1,
-            0.5,
-            0.5,
-            GridBagConstraints.CENTER,
-            GridBagConstraints.BOTH),
-        null);
-
-    Map<LayoutConstraints, Component> view4Constraints = view4.getConstraints();
-    view4Constraints.put(
-        new LayoutConstraints(
-            MprView.class.getName(),
-            0,
-            0,
-            0,
-            1,
-            1,
-            0.5,
-            0.5,
-            GridBagConstraints.CENTER,
-            GridBagConstraints.BOTH),
-        null);
-    view4Constraints.put(
-        new LayoutConstraints(
-            MprView.class.getName(),
-            1,
-            1,
-            0,
-            1,
-            1,
-            0.5,
-            0.5,
-            GridBagConstraints.CENTER,
-            GridBagConstraints.BOTH),
-        null);
-    view4Constraints.put(
-        new LayoutConstraints(
-            MprView.class.getName(),
-            2,
-            0,
-            1,
-            2,
-            1,
-            1.0,
-            0.5,
-            GridBagConstraints.CENTER,
-            GridBagConstraints.BOTH),
-        null);
+  private static MigLayoutModel buildMprWithCurvedLayout() {
+    String mprClass = MprView.class.getName();
+    String curvedClass = CurvedMprView.class.getName();
+    List<MigCell> cells =
+        List.of(
+            new MigCell(0, mprClass, "grow", 0, 0, 1, 1), // AXIAL
+            new MigCell(1, mprClass, "grow", 1, 0, 1, 1), // CORONAL
+            new MigCell(2, mprClass, "newline, grow", 0, 1, 1, 1), // SAGITTAL
+            new MigCell(3, curvedClass, "grow", 1, 1, 1, 1)); // CURVED
+    return new MigLayoutModel(
+        "mpr-curved",
+        "3 MPR + Curved",
+        "wrap 2, ins 0, gap " + MigLayoutModel.DEFAULT_INTERCELL_GAP,
+        "[grow,fill][grow,fill]",
+        "[grow,fill][grow,fill]",
+        cells);
   }
-
-  public static final List<GridBagLayoutModel> LAYOUT_LIST =
-      List.of(view1, view2, view3, view4, view5);
 
   public static final SeriesViewerUI UI =
       new SeriesViewerUI(MprContainer.class, null, View2dContainer.UI.tools, null);
   private MprController mprController;
 
   private Thread process;
+  private FusionState inheritedFusion;
 
   public MprContainer() {
     this(VIEWS_1x1, null);
   }
 
-  public MprContainer(GridBagLayoutModel layoutModel, String uid) {
+  public MprContainer(MigLayoutModel layoutModel, String uid) {
     super(
         EventManager.getInstance(),
         layoutModel,
@@ -227,7 +193,6 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
         MprFactory.NAME,
         ResourceUtil.getIcon(OtherIcon.VIEW_3D),
         null);
-    setSynchView(SynchView.NONE);
     if (!UI.init.getAndSet(true)) {
       List<Toolbar> toolBars = UI.toolBars;
 
@@ -307,7 +272,7 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
   }
 
   @Override
-  protected synchronized void setLayoutModel(GridBagLayoutModel layoutModel) {
+  protected synchronized void setLayoutModel(MigLayoutModel layoutModel) {
     super.setLayoutModel(layoutModel);
     if (eventManager instanceof EventManager manager) {
       // Force to refresh view with ZoomType.CURRENT
@@ -351,7 +316,7 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
           // Study Group
           else if (TagD.getUID(Level.STUDY).equals(group.getTagID())) {
             if (event.getSource() instanceof DicomModel model) {
-              for (ViewCanvas<DicomImageElement> v : view2ds) {
+              for (ViewCanvas<DicomImageElement> v : cellManager) {
                 if (group.equals(model.getParent(v.getSeries(), DicomModel.study))) {
                   v.setSeries(null);
                   if (closeIfNoContent()) {
@@ -363,7 +328,7 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
           }
           // Series Group
           else if (TagD.getUID(Level.SERIES).equals(group.getTagID())) {
-            for (ViewCanvas<DicomImageElement> v : view2ds) {
+            for (ViewCanvas<DicomImageElement> v : cellManager) {
               if (newVal.equals(v.getSeries())) {
                 v.setSeries(null);
                 if (closeIfNoContent()) {
@@ -375,7 +340,7 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
         }
       } else if (ObservableEvent.BasicAction.REPLACE.equals(action)) {
         if (newVal instanceof Series series) {
-          for (ViewCanvas<DicomImageElement> v : view2ds) {
+          for (ViewCanvas<DicomImageElement> v : cellManager) {
             MediaSeries<DicomImageElement> s = v.getSeries();
             if (series.equals(s)) {
               // It will reset MIP view
@@ -388,7 +353,7 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
   }
 
   @Override
-  public int getViewTypeNumber(GridBagLayoutModel layout, Class<?> defaultClass) {
+  public int getViewTypeNumber(MigLayoutModel layout, Class<?> defaultClass) {
     return View2dFactory.getViewTypeNumber(layout, defaultClass);
   }
 
@@ -412,8 +377,23 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
     return mprController;
   }
 
+  /**
+   * Delegates to the {@link MprController} to find a volume whose {@link OriginalStack} matches the
+   * given one.
+   *
+   * @param originalStack the stack to match; must not be {@code null}
+   * @return the matching volume, or {@code null}
+   */
+  @Override
+  public Volume<?, ?> getVolumeForStack(OriginalStack originalStack) {
+    return getMprController().getVolumeForStack(originalStack);
+  }
+
   @Override
   public DefaultView2d<DicomImageElement> createDefaultView(String classType) {
+    if (CurvedMprView.class.getName().equals(classType)) {
+      return new CurvedMprView(eventManager);
+    }
     return new MprView(eventManager, getMprController());
   }
 
@@ -435,19 +415,24 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
 
   @Override
   public Class<?> getSeriesViewerClass() {
-    return view2dClass;
+    return MprView.class;
   }
 
   @Override
-  public GridBagLayoutModel getDefaultLayoutModel() {
+  public boolean supportsViewportPanes() {
+    // MPR views are fixed orthogonal planes and must never be tiled
+    return false;
+  }
+
+  @Override
+  public MigLayoutModel getDefaultLayoutModel() {
     return view1;
   }
 
   @Override
   public List<Action> getExportActions() {
-    return selectedImagePane == null
-        ? super.getExportActions()
-        : selectedImagePane.getExportActions();
+    ViewCanvas<DicomImageElement> selected = getSelectedViewCanvas();
+    return selected == null ? super.getExportActions() : selected.getExportActions();
   }
 
   @Override
@@ -484,12 +469,49 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
   }
 
   public MprView getMprView(Plane plane) {
-    for (ViewCanvas<?> v : view2ds) {
+    for (ViewCanvas<?> v : cellManager) {
       if (v instanceof MprView mprView && plane != null && plane.equals(mprView.getPlane())) {
         return mprView;
       }
     }
     return null;
+  }
+
+  /** Returns the curved-MPR view in the current layout, or {@code null} if absent. */
+  public CurvedMprView getCurvedMprView() {
+    for (ViewCanvas<?> v : cellManager) {
+      if (v instanceof CurvedMprView curvedView) {
+        return curvedView;
+      }
+    }
+    return null;
+  }
+
+  /** Build the curved-MPR axis from a user-drawn polyline */
+  public void openCurvedMpr(MprView sourceView, PolylineGraphic polyline) {
+    CurvedMprBuilder.buildAxis(sourceView, polyline)
+        .ifPresent(
+            axis -> {
+              axis.bindPolyline(sourceView, polyline);
+              GuiExecutor.execute(
+                  () -> {
+                    if (!mprWithCurved.equals(cellManager.getLayoutModel())) {
+                      setLayoutModel(mprWithCurved);
+                    }
+                    CurvedMprView curvedView = getCurvedMprView();
+                    if (curvedView != null) {
+                      curvedView.setCurvedMprAxis(axis);
+                    } else {
+                      LOGGER.warn("Curved MPR layout does not expose a CurvedMprView cell");
+                    }
+                  });
+            });
+  }
+
+  /** Build a DICOM series of perpendicular cross-section slices along the polyline */
+  public void openCrossSections(
+      MprView sourceView, PolylineGraphic polyline, CrossSectionParams params) {
+    CurvedMprBuilder.openCrossSectionSeries(sourceView, polyline, params);
   }
 
   @Override
@@ -500,11 +522,10 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
     control.reset();
 
     // TODO Should be init elsewhere
-    for (int i = 0; i < view2ds.size(); i++) {
-      ViewCanvas<DicomImageElement> val = view2ds.get(i);
-      if (val instanceof MprView mprView) {
+    for (var cell : cellManager.getAllEntries()) {
+      if (cell.getViewCanvas().orElse(null) instanceof MprView mprView) {
         Plane plane =
-            switch (i) {
+            switch (cell.getPosition()) {
               case 1 -> Plane.CORONAL;
               case 2 -> Plane.SAGITTAL;
               default -> Plane.AXIAL;
@@ -529,7 +550,7 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
             @Override
             public void run() {
               try {
-                MPRGenerator.createMissingSeries(this, MprContainer.this, view);
+                MPRGenerator.createMissingSeries(MprContainer.this, view);
 
                 // Following actions need to be executed in EDT thread
                 GuiExecutor.execute(
@@ -546,17 +567,63 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
                                 c.setSelectedItemWithoutTriggerAction(null);
                                 c.setSelectedItem(c.getFirstItem());
                               });
+
+                      applyInheritedFusion();
                     });
+              } catch (final OutOfMemoryError e) {
+                // OutOfMemoryError is an Error, not an Exception: caught explicitly so an
+                // out-of-memory MPR build fails gracefully instead of killing the build thread
+                // and leaving the views stuck. Releasing the half-built volume lets the heap
+                // recover before the message dialog is shown.
+                ResourceMonitor.getInstance().recordOutOfMemory();
+                LOGGER.error("Out of memory while building MPR views", e);
+                GuiExecutor.execute(
+                    () ->
+                        showErrorMessage(
+                            cellManager.getAllViewCanvases(),
+                            view,
+                            Messages.getString("MPRContainer.out_of_memory")));
+                CvUtil.runGarbageCollectorAndWait(50);
               } catch (final Exception e) {
                 LOGGER.error("Build MPR", e);
                 // Following actions need to be executed in EDT thread
-                GuiExecutor.execute(() -> showErrorMessage(view2ds, view, e.getMessage()));
+                GuiExecutor.execute(
+                    () -> showErrorMessage(cellManager.getAllViewCanvases(), view, e.getMessage()));
               }
             }
           };
       process.start();
     } else {
-      showErrorMessage(view2ds, null, Messages.getString("MPRContainer.mesg_missing_3d"));
+      showErrorMessage(
+          cellManager.getAllViewCanvases(),
+          null,
+          Messages.getString("MPRContainer.mesg_missing_3d"));
+    }
+  }
+
+  /** Fusion captured from the launching 2D view; applied once the MPR build completes. */
+  public void setInheritedFusion(FusionState fusion) {
+    this.inheritedFusion = fusion;
+  }
+
+  /**
+   * Applies the inherited 2D fusion to the MPR panes once they are built, but only if the overlay
+   * series is still a compatible overlay for the MPR base. Each pane keeps its own FusionOp, so the
+   * planes can be tuned independently afterwards.
+   */
+  private void applyInheritedFusion() {
+    FusionState fusion = inheritedFusion;
+    inheritedFusion = null;
+    if (fusion == null) {
+      return;
+    }
+    List<ViewCanvas<DicomImageElement>> views = getView2ds();
+    if (!views.isEmpty()
+        && FusionController.compatibleSeries(views.getFirst()).contains(fusion.series())) {
+      FusionController.applyState(views, fusion);
+      if (eventManager instanceof EventManager manager) {
+        manager.refreshFusionControls();
+      }
     }
   }
 
@@ -588,7 +655,7 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
   public void addSeriesList(
       List<MediaSeries<DicomImageElement>> seriesList, boolean removeOldSeries) {
     if (seriesList != null && !seriesList.isEmpty()) {
-      addSeries(seriesList.get(0));
+      addSeries(seriesList.getFirst());
     }
   }
 
@@ -600,20 +667,13 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
   public MprView selectLayoutPositionForAddingSeries(MediaSeries<DicomImageElement> s) {
     if (s != null) {
       Object img = s.getMedia(MediaSeries.MEDIA_POSITION.MIDDLE, null, null);
-      if (img instanceof DicomImageElement imageElement) {
-        Plan orientation = ImageOrientation.getPlan(imageElement);
-        if (orientation != null) {
-          Plane plane = Plane.AXIAL;
-          if (Plan.CORONAL.equals(orientation)) {
-            plane = Plane.CORONAL;
-          } else if (Plan.SAGITTAL.equals(orientation)) {
-            plane = Plane.SAGITTAL;
-          }
-          MprView view = getMprView(plane);
-          if (view != null) {
-            setSelectedImagePane(view);
-            return view;
-          }
+      // A null plan means no orientation tags, hence no geometry to build the volume from
+      if (img instanceof DicomImageElement imageElement
+          && ImageOrientation.getPlan(imageElement) != null) {
+        MprView view = getMprView(Plane.getAcquisitionPlane(imageElement));
+        if (view != null) {
+          setSelectedImagePane(view);
+          return view;
         }
       }
     }
@@ -621,12 +681,7 @@ public class MprContainer extends DicomViewerPlugin implements PropertyChangeLis
   }
 
   @Override
-  public List<SynchView> getSynchList() {
-    return SYNCH_LIST;
-  }
-
-  @Override
-  public List<GridBagLayoutModel> getLayoutList() {
+  public List<MigLayoutModel> getLayoutList() {
     return LAYOUT_LIST;
   }
 }

@@ -12,7 +12,7 @@ package org.weasis.acquire.graphics;
 import java.awt.Color;
 import java.util.Collections;
 import java.util.List;
-import javax.swing.Icon;
+import java.util.Optional;
 import org.weasis.acquire.AcquireObject;
 import org.weasis.acquire.Messages;
 import org.weasis.acquire.explorer.AcquireImageInfo;
@@ -68,19 +68,15 @@ public class CropRectangleGraphic extends RectangleGraphic {
   }
 
   public static void updateCropDisplay(AcquireImageInfo imageInfo) {
-    ImageOpNode node = imageInfo.getPostProcessOpManager().getNode(MaskOp.OP_NAME);
-    if (node != null) {
-      node.clearIOCache();
-      node.setParam(MaskOp.P_SHOW, true);
-      node.setParam(MaskOp.P_SHAPE, imageInfo.getNextValues().getCropZone());
-      node.setParam(MaskOp.P_ALPHA, 0.7);
+    Optional<ImageOpNode> node = imageInfo.getPostProcessOpManager().getNode(MaskOp.OP_NAME);
+    if (node.isPresent()) {
+      ImageOpNode n = node.get();
+      n.clearIOCache();
+      n.setParam(MaskOp.P_SHOW, true);
+      n.setParam(MaskOp.P_SHAPE, imageInfo.getNextValues().getCropZone());
+      n.setParam(MaskOp.P_ALPHA, 0.7);
       imageInfo.getPostProcessOpManager().setParamValue(CropOp.OP_NAME, CropOp.P_AREA, null);
     }
-  }
-
-  @Override
-  public Icon getIcon() {
-    return RectangleGraphic.ICON;
   }
 
   @Override
@@ -102,7 +98,7 @@ public class CropRectangleGraphic extends RectangleGraphic {
   @Override
   public CropRectangleGraphic copy() {
     if (!pts.isEmpty()) {
-      // Do not allow to copy it elsewhere
+      // Do not allow copying it elsewhere
       return null;
     }
     return new CropRectangleGraphic(this);

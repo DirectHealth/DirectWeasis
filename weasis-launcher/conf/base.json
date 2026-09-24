@@ -2,7 +2,7 @@
   "weasisPreferences": [
     {
       "code": "framework.system.packages.extra.basic",
-      "value": "ch.qos.logback.classic,ch.qos.logback.classic.encoder,ch.qos.logback.classic.spi,ch.qos.logback.core,ch.qos.logback.core.encoder,ch.qos.logback.core.rolling,ch.qos.logback.core.util,com.formdev.flatlaf, com.formdev.flatlaf.extras, com.formdev.flatlaf.extras.components, com.formdev.flatlaf.icons, com.formdev.flatlaf.ui, com.formdev.flatlaf.util, com.sun.awt, com.sun.image.codec.jpeg, com.sun.imageio.spi, javax.accessibility, javax.imageio, javax.imageio.event, javax.imageio.metadata, javax.imageio.plugins.jpeg, javax.imageio.spi, javax.imageio.stream, javax.media, javax.swing, javax.swing.border, javax.swing.event, javax.swing.filechooser, javax.swing.plaf, javax.swing.plaf.basic, javax.swing.plaf.metal, javax.swing.table, javax.swing.text, javax.swing.tree, javax.xml.bind, javax.xml.parsers, javax.xml.namespace, javax.xml.stream, javax.xml.transform, javax.xml.transform.stax, javax.xml.validation, net.miginfocom.layout, net.miginfocom.swing, org.slf4j, org.w3c.dom, org.weasis.pref, org.xml.sax, org.xml.sax.ext, org.xml.sax.helpers, sun.awt, sun.awt.geom, sun.awt.image, sun.awt.image.codec, sun.java2d.opengl, sun.security.action, sun.misc, sun.net.www.protocol.file, sun.reflect",
+      "value": "ch.qos.logback.classic,ch.qos.logback.classic.encoder,ch.qos.logback.classic.spi,ch.qos.logback.core,ch.qos.logback.core.encoder,ch.qos.logback.core.rolling,ch.qos.logback.core.util,com.formdev.flatlaf, com.formdev.flatlaf.extras, com.formdev.flatlaf.extras.components, com.formdev.flatlaf.icons, com.formdev.flatlaf.ui, com.formdev.flatlaf.util, com.sun.awt, com.sun.image.codec.jpeg, com.sun.imageio.spi, com.sun.management, javax.accessibility, javax.imageio, javax.imageio.event, javax.imageio.metadata, javax.imageio.plugins.jpeg, javax.imageio.spi, javax.imageio.stream, javax.media, javax.sound.sampled, javax.swing, javax.swing.border, javax.swing.event, javax.swing.filechooser, javax.swing.plaf, javax.swing.plaf.basic, javax.swing.plaf.metal, javax.swing.table, javax.swing.text, javax.swing.tree, javax.xml.bind, javax.xml.parsers, javax.xml.namespace, javax.xml.stream, javax.xml.transform, javax.xml.transform.stax, javax.xml.validation, net.miginfocom.layout, net.miginfocom.swing, org.slf4j, org.w3c.dom, org.weasis.pref, org.xml.sax, org.xml.sax.ext, org.xml.sax.helpers, sun.awt, sun.awt.geom, sun.awt.image, sun.awt.image.codec, sun.java2d.opengl, sun.security.action, sun.misc, sun.net.www.protocol.file, sun.reflect",
       "description": "List of additional packages for Felix (by default only java.* is visible in main class loader)",
       "type": "A",
       "category": "FELIX_CONFIG"
@@ -118,13 +118,6 @@
       "code": "felix.auto.start.30",
       "value": "file:${maven.localRepository}/org/weasis/dicom/weasis-dicom-codec/${app.version}/weasis-dicom-codec-${app.version}.jar",
       "description": "DICOM Codec",
-      "type": "A",
-      "category": "FELIX_INSTALL"
-    },
-    {
-      "code": "felix.auto.start.35",
-      "value": "file:${maven.localRepository}/com/fasterxml/jackson/core/jackson-annotations/${jackson.version}/jackson-annotations-${jackson.version}.jar file:${maven.localRepository}/com/fasterxml/jackson/core/jackson-core/${jackson.version}/jackson-core-${jackson.version}.jar file:${maven.localRepository}/com/fasterxml/jackson/core/jackson-databind/${jackson.version}/jackson-databind-${jackson.version}.jar",
-      "description": "Jackson databind and annotation",
       "type": "A",
       "category": "FELIX_INSTALL"
     },
@@ -282,6 +275,14 @@
       "category": "LAUNCH"
     },
     {
+      "code": "weasis.resource.stats.clean.previous.version",
+      "value": "false",
+      "description": "If true, the measured resource statistics (peaks, uptime and events) are cleared when the weasis version has changed from the previous launch",
+      "type": "A",
+      "javaType": "BOOLEAN",
+      "category": "LAUNCH"
+    },
+    {
       "code": "weasis.main.ui",
       "value": "weasis-base-ui",
       "description": "Application main user interface bundle. Mandatory with the default launcher.",
@@ -383,13 +384,6 @@
       "category": "DOC"
     },
     {
-      "code": "weasis.help.shortcuts",
-      "value": "https://nroduit.github.io/en/basics/shortcuts",
-      "description": "Provides a list of available shortcuts.",
-      "type": "A",
-      "category": "DOC"
-    },
-    {
       "code": "weasis.theme",
       "value": "org.weasis.launcher.FlatWeasisTheme",
       "description": "FaltLaf Look and feel, see https://www.formdev.com/flatlaf/themes/",
@@ -449,6 +443,36 @@
       "category": "DICOM"
     },
     {
+      "code": "weasis.dicom.explorer.filter.mode",
+      "value": "TEXT",
+      "description": "Default series filter mode in the DICOM explorer. Possible values: TEXT (full text), DATE (study date), MODALITY",
+      "type": "F",
+      "category": "DICOM"
+    },
+    {
+      "code": "weasis.dicom.seg.hide.all",
+      "value": "false",
+      "description": "If true, no segmentation is displayed when loaded; the user must enable them in the Segmentation tool or with the segmentation button in the view",
+      "type": "F",
+      "javaType": "BOOLEAN",
+      "category": "DICOM"
+    },
+    {
+      "code": "weasis.dicom.seg.hide.keywords",
+      "value": "table removal, tabletop, couch, patient support, bed removal",
+      "description": "Comma-separated keywords to hide segmentations by default (case, spaces, underscores and hyphens are ignored when matching)",
+      "type": "F",
+      "category": "DICOM"
+    },
+    {
+      "code": "weasis.import.dicom.network.cache",
+      "value": "true",
+      "description": "Copy DICOM files imported from a network share (SMB/NFS mount, UNC path) or an optical disc into the local cache, so that images are read from the slow medium only once",
+      "type": "F",
+      "javaType": "BOOLEAN",
+      "category": "DICOM"
+    },
+    {
       "code": "download.concurrent.series",
       "value": "3",
       "description": "Controls the number of series downloaded simultaneously",
@@ -462,6 +486,14 @@
       "description": "The number of concurrently downloaded images within a series",
       "type": "A",
       "javaType": "INT",
+      "category": "DICOM"
+    },
+    {
+      "code": "weasis.rt.dvh.recalculate.enable",
+      "value": "true",
+      "description": "Enables experimental DVH (re)calculation in the RT plugin (derived from dicompyler, not clinically validated). When false (default), only DVHs stored in RTDOSE files are displayed.",
+      "type": "F",
+      "javaType": "BOOLEAN",
       "category": "DICOM"
     },
     {
@@ -560,6 +592,14 @@
       "code": "weasis.export.dicom.send",
       "value": "true",
       "description": "Show the send page in the DICOM Export dialog",
+      "type": "A",
+      "javaType": "BOOLEAN",
+      "category": "UI"
+    },
+    {
+      "code": "weasis.export.annotations",
+      "value": "false",
+      "description": "Show the Export Annotations button in the toolbar",
       "type": "A",
       "javaType": "BOOLEAN",
       "category": "UI"

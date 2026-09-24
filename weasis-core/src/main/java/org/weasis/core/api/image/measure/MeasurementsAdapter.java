@@ -9,57 +9,97 @@
  */
 package org.weasis.core.api.image.measure;
 
-public class MeasurementsAdapter {
-  private final double calibRatio;
-  private final boolean upYAxis;
-  private final int offsetX;
-  private final int offsetY;
-  private final int imageHeight;
-  private final String unit;
+import java.util.Objects;
 
-  public MeasurementsAdapter(
-      double calibRatio, int offsetX, int offsetY, boolean upYAxis, int imageHeight, String unit) {
-    this.offsetY = offsetY;
-    this.offsetX = offsetX;
-    this.upYAxis = upYAxis;
-    this.calibRatio = calibRatio;
-    this.imageHeight = imageHeight - 1;
-    this.unit = unit;
+/**
+ * Adapter for converting between pixel and calibrated measurements. Handles coordinate
+ * transformations, offsets, and unit calibration.
+ *
+ * @param calibrationRatio the ratio for converting pixels to calibrated units (must be positive)
+ * @param offsetX the horizontal offset in pixels
+ * @param offsetY the vertical offset in pixels
+ * @param upYAxis true if Y-axis increases upward, false if downward
+ * @param imageHeight the height of the image in pixels
+ * @param unit the measurement unit (defaults to "px" if null)
+ */
+public record MeasurementsAdapter(
+    double calibrationRatio,
+    int offsetX,
+    int offsetY,
+    boolean upYAxis,
+    int imageHeight,
+    String unit) {
+  private static final double DEFAULT_CALIBRATION_RATIO = 1.0;
+
+  private static final String DEFAULT_UNIT = "px"; // NON-NLS
+
+  public MeasurementsAdapter {
+    if (Double.isNaN(calibrationRatio)
+        || Double.isInfinite(calibrationRatio)
+        || calibrationRatio <= 0) {
+      throw new IllegalArgumentException("Calibration ratio must be a positive finite number");
+    }
+
+    imageHeight = Math.max(0, imageHeight - 1);
+    unit = Objects.requireNonNullElse(unit, DEFAULT_UNIT);
   }
 
-  public double getCalibRatio() {
-    return calibRatio;
-  }
-
-  public int getOffsetX() {
-    return offsetX;
-  }
-
-  public int getOffsetY() {
-    return offsetY;
-  }
-
-  public boolean isUpYAxis() {
-    return upYAxis;
-  }
-
-  public String getUnit() {
-    return unit;
-  }
-
+  /**
+   * Gets the uncalibrated X value with offset applied.
+   *
+   * @param xVal the X value to transform
+   * @return the transformed X value in pixels
+   */
   public double getXUncalibratedValue(double xVal) {
     return xVal + offsetX;
   }
 
+  /**
+   * Gets the uncalibrated Y value with axis transformation and offset applied.
+   *
+   * @param yVal the Y value to transform
+   * @return the transformed Y value in pixels
+   */
   public double getYUncalibratedValue(double yVal) {
-    return (upYAxis ? imageHeight - yVal : yVal) + offsetY;
+    return transformY(yVal) + offsetY;
   }
 
+  /**
+   * Gets the calibrated X value with offset and calibration ratio applied.
+   *
+   * @param xVal the X value to transform
+   * @return the calibrated X value in measurement units
+   */
   public double getXCalibratedValue(double xVal) {
-    return calibRatio * (xVal + offsetX);
+    return calibrationRatio * getXUncalibratedValue(xVal);
   }
 
+  /**
+   * Gets the calibrated Y value with axis transformation, offset, and calibration ratio applied.
+   *
+   * @param yVal the Y value to transform
+   * @return the calibrated Y value in measurement units
+   */
   public double getYCalibratedValue(double yVal) {
-    return calibRatio * ((upYAxis ? imageHeight - yVal : yVal) + offsetY);
+    return calibrationRatio * getYUncalibratedValue(yVal);
+  }
+
+  /**
+   * Checks if calibration is applied.
+   *
+   * @return true if calibration ratio differs from 1.0, false otherwise
+   */
+  public boolean isCalibrated() {
+    return Double.compare(calibrationRatio, DEFAULT_CALIBRATION_RATIO) != 0;
+  }
+
+  private double transformY(double yVal) {
+    return upYAxis ? imageHeight - yVal : yVal;
+  }
+
+  @Override
+  public String toString() {
+    return "MeasurementsAdapter{ratio=%.3f, unit='%s', offsetX=%d, offsetY=%d, upYAxis=%s, imageHeight=%d}"
+        .formatted(calibrationRatio, unit, offsetX, offsetY, upYAxis, imageHeight); // NON-NLS
   }
 }

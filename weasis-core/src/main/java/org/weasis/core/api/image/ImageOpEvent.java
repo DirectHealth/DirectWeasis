@@ -9,48 +9,56 @@
  */
 package org.weasis.core.api.image;
 
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import org.weasis.core.api.media.data.ImageElement;
 import org.weasis.core.api.media.data.MediaSeries;
 
-public class ImageOpEvent {
+/**
+ * Represents an image operation event with associated data.
+ *
+ * @param eventType the type of operation event (required)
+ * @param series the media series associated with this event (nullable)
+ * @param image the image element associated with this event (nullable)
+ * @param params additional parameters for the operation (nullable, immutable copy recommended)
+ */
+public record ImageOpEvent(
+    OpEvent eventType,
+    MediaSeries<? extends ImageElement> series,
+    ImageElement image,
+    Map<String, Object> params) {
 
+  /** Types of image operation events. */
   public enum OpEvent {
+    /** Reset the display to default state */
     RESET_DISPLAY,
+    /** Series has changed */
     SERIES_CHANGE,
+    /** Image has changed */
     IMAGE_CHANGE,
+    /** Apply presentation state */
     APPLY_PR
   }
 
-  private final OpEvent eventType;
-  private final MediaSeries series;
-  private final ImageElement image;
-  private final Map<String, Object> params;
-
-  public ImageOpEvent(
-      OpEvent eventType, MediaSeries series, ImageElement image, Map<String, Object> params) {
-    if (eventType == null) {
-      throw new IllegalArgumentException();
-    }
-    this.eventType = eventType;
-    this.series = series;
-    this.image = image;
-    this.params = params;
+  public ImageOpEvent {
+    Objects.requireNonNull(eventType, "Event type cannot be null");
+    params = params == null ? Map.of() : new HashMap<>(params);
   }
 
-  public OpEvent getEventType() {
-    return eventType;
+  /** Creates an event with only the event type. */
+  public static ImageOpEvent of(OpEvent eventType) {
+    return new ImageOpEvent(eventType, null, null, null);
   }
 
-  public MediaSeries getSeries() {
-    return series;
+  /** Creates an event with series. */
+  public static ImageOpEvent withSeries(
+      OpEvent eventType, MediaSeries<? extends ImageElement> series) {
+    return new ImageOpEvent(eventType, series, null, null);
   }
 
-  public ImageElement getImage() {
-    return image;
-  }
-
-  public Map<String, Object> getParams() {
-    return params;
+  /** Creates an event with image. */
+  public static ImageOpEvent withImage(OpEvent eventType, ImageElement image) {
+    return new ImageOpEvent(eventType, null, image, null);
   }
 }

@@ -17,6 +17,7 @@ import java.awt.event.ItemListener;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
@@ -33,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.Messages;
 import org.weasis.core.api.gui.util.GuiUtils;
+import org.weasis.core.api.image.ImageOpNode;
 import org.weasis.core.api.image.OpManager;
 import org.weasis.core.api.image.PseudoColorOp;
 import org.weasis.core.api.image.WindowOp;
@@ -127,7 +129,7 @@ public class HistogramView extends JComponent
 
   private void updatePane(SeriesViewerEvent event) {
     if (event.getSeriesViewer() instanceof ImageViewerPlugin) {
-      view2DPane = ((ImageViewerPlugin<?>) event.getSeriesViewer()).getSelectedImagePane();
+      view2DPane = ((ImageViewerPlugin<?>) event.getSeriesViewer()).getSelectedViewCanvas();
       displayHistogram();
     } else {
       view2DPane = null;
@@ -252,9 +254,9 @@ public class HistogramView extends JComponent
   private WindLevelParameters getWinLeveParameters() {
     if (view2DPane != null) {
       OpManager dispOp = view2DPane.getDisplayOpManager();
-      WindowOp wlOp = (WindowOp) dispOp.getNode(WindowOp.OP_NAME);
-      if (wlOp != null) {
-        return wlOp.getWindLevelParameters();
+      Optional<ImageOpNode> wlOp = dispOp.getNode(WindowOp.OP_NAME);
+      if (wlOp.isPresent() && wlOp.get() instanceof WindowOp windowOp) {
+        return windowOp.getWindLevelParameters();
       }
     }
     return null;
@@ -287,9 +289,9 @@ public class HistogramView extends JComponent
   public static DisplayByteLut buildDisplayByteLut(ViewCanvas<?> view2DPane) {
     DisplayByteLut disLut = null;
     OpManager dispOp = view2DPane.getDisplayOpManager();
-    PseudoColorOp lutOp = (PseudoColorOp) dispOp.getNode(PseudoColorOp.OP_NAME);
-    if (lutOp != null) {
-      ByteLut lutTable = (ByteLut) lutOp.getParam(PseudoColorOp.P_LUT);
+    Optional<ImageOpNode> lutOp = dispOp.getNode(PseudoColorOp.OP_NAME);
+    if (lutOp.isPresent() && lutOp.get() instanceof PseudoColorOp pseudo) {
+      ByteLut lutTable = (ByteLut) pseudo.getParam(PseudoColorOp.P_LUT);
       if (lutTable != null && lutTable.lutTable() != null) {
         disLut = new DisplayByteLut(lutTable);
       }

@@ -16,7 +16,7 @@ import org.weasis.core.api.util.ResourceUtil.ActionIcon;
 import org.weasis.core.ui.editor.image.ImageViewerEventManager;
 import org.weasis.core.ui.util.WtoolBar;
 import org.weasis.dicom.codec.DicomImageElement;
-import org.weasis.dicom.explorer.DicomFieldsView;
+import org.weasis.dicom.explorer.tag.DicomFieldsView;
 
 public class DcmHeaderToolBar extends WtoolBar {
 

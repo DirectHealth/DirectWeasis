@@ -15,7 +15,7 @@ import org.dcm4che3.data.Tag;
 import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.media.data.TagW;
 import org.weasis.core.api.media.data.Taggable;
-import org.weasis.core.util.FileUtil;
+import org.weasis.core.util.StreamUtil;
 import org.weasis.dicom.codec.DcmMediaReader;
 import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.codec.TagD;
@@ -52,7 +52,7 @@ public class DerivedStack extends AbstractStack {
         boolean hasTransformation =
             params.dicomEditors() != null && !params.dicomEditors().isEmpty();
         if (!hasTransformation && params.syntax() == null) {
-          FileUtil.nioCopyFile(reader.getDicomFile(), output);
+          StreamUtil.copyFile(reader.getDicomFile().toPath(), output.toPath());
           return new Attributes();
         }
         return super.saveToFile(output, params);

@@ -11,9 +11,9 @@ package org.weasis.core.ui.editor;
 
 import com.formdev.flatlaf.util.SystemInfo;
 import java.awt.Desktop;
-import java.util.Map;
 import javax.swing.Icon;
 import org.weasis.core.Messages;
+import org.weasis.core.api.explorer.model.DataExplorerModel;
 import org.weasis.core.api.media.data.MediaElement;
 import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.util.ResourceUtil;
@@ -40,11 +40,11 @@ public class DefaultMimeAppFactory implements SeriesViewerFactory {
                 // Linux KDE session not supported
                 // https://bugs.java.com/bugdatabase/view_bug.do?bug_id=6486393
                 if (SystemInfo.isLinux) {
-                  startAssociatedProgramFromLinux(m.getFile());
+                  startAssociatedProgramFromLinux(m.getFilePath());
                 } else if (Desktop.isDesktopSupported()) {
                   final Desktop desktop = Desktop.getDesktop();
                   if (desktop.isSupported(Desktop.Action.OPEN)) {
-                    startAssociatedProgramFromDesktop(desktop, m.getFile());
+                    startAssociatedProgramFromDesktop(desktop, m.getFilePath());
                   }
                 }
               }
@@ -96,7 +96,8 @@ public class DefaultMimeAppFactory implements SeriesViewerFactory {
   }
 
   @Override
-  public SeriesViewer<MediaElement> createSeriesViewer(Map<String, Object> properties) {
+  public SeriesViewer<MediaElement> createSeriesViewer(
+      ViewerOpenOptions options, DataExplorerModel model) {
     return MimeSystemViewer;
   }
 

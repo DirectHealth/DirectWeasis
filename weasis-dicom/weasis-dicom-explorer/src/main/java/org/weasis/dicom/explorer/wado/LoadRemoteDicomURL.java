@@ -10,6 +10,7 @@
 package org.weasis.dicom.explorer.wado;
 
 import java.net.MalformedURLException;
+import java.net.URI;
 import java.net.URL;
 import org.dcm4che3.data.Tag;
 import org.dcm4che3.util.UIDUtils;
@@ -25,9 +26,9 @@ import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.TagD.Level;
 import org.weasis.dicom.codec.utils.SeriesInstanceList;
 import org.weasis.dicom.explorer.DicomModel;
-import org.weasis.dicom.explorer.ExplorerTask;
 import org.weasis.dicom.explorer.Messages;
 import org.weasis.dicom.explorer.PluginOpeningStrategy;
+import org.weasis.dicom.explorer.exp.ExplorerTask;
 import org.weasis.dicom.mf.SopInstance;
 import org.weasis.dicom.mf.WadoParameters;
 
@@ -46,8 +47,8 @@ public class LoadRemoteDicomURL extends ExplorerTask<Boolean, String> {
     for (int i = 0; i < urls.length; i++) {
       if (urls[i] != null) {
         try {
-          urlRef[i] = new URL(urls[i]);
-        } catch (MalformedURLException e) {
+          urlRef[i] = URI.create(urls[i]).toURL();
+        } catch (MalformedURLException | IllegalArgumentException e) {
           LOGGER.error("Not a valid URL", e);
         }
       }

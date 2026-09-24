@@ -14,7 +14,6 @@ import jakarta.xml.bind.annotation.XmlAccessorType;
 import jakarta.xml.bind.annotation.XmlRootElement;
 import jakarta.xml.bind.annotation.XmlType;
 import java.awt.Shape;
-import java.awt.event.KeyEvent;
 import java.awt.geom.Line2D;
 import java.awt.geom.Point2D;
 import java.util.ArrayList;
@@ -22,6 +21,7 @@ import java.util.Collections;
 import java.util.List;
 import javax.swing.Icon;
 import org.weasis.core.Messages;
+import org.weasis.core.api.gui.util.ShortcutManager;
 import org.weasis.core.api.image.measure.MeasurementsAdapter;
 import org.weasis.core.api.image.util.MeasurableLayer;
 import org.weasis.core.api.image.util.Unit;
@@ -81,7 +81,7 @@ public class LineGraphic extends AbstractDragGraphic {
     super(POINTS_NUMBER);
   }
 
-  public LineGraphic(LineGraphic graphic) {
+  public LineGraphic(LineGraphic graphic) { // NOSONAR see initCopy()
     super(graphic);
   }
 
@@ -134,12 +134,12 @@ public class LineGraphic extends AbstractDragGraphic {
 
   @Override
   public int getKeyCode() {
-    return KeyEvent.VK_D;
+    return ShortcutManager.getInstance().getKeyCode(ShortcutManager.ID_GRAPHIC_LINE);
   }
 
   @Override
   public int getModifier() {
-    return 0;
+    return ShortcutManager.getInstance().getModifier(ShortcutManager.ID_GRAPHIC_LINE);
   }
 
   @Override
@@ -167,27 +167,27 @@ public class LineGraphic extends AbstractDragGraphic {
         if (FIRST_POINT_X.getComputed()) {
           measVal.add(
               new MeasureItem(
-                  FIRST_POINT_X, adapter.getXCalibratedValue(ptA.getX()), adapter.getUnit()));
+                  FIRST_POINT_X, adapter.getXCalibratedValue(ptA.getX()), adapter.unit()));
         }
         if (FIRST_POINT_Y.getComputed()) {
           measVal.add(
               new MeasureItem(
-                  FIRST_POINT_Y, adapter.getYCalibratedValue(ptA.getY()), adapter.getUnit()));
+                  FIRST_POINT_Y, adapter.getYCalibratedValue(ptA.getY()), adapter.unit()));
         }
         if (LAST_POINT_X.getComputed()) {
           measVal.add(
               new MeasureItem(
-                  LAST_POINT_X, adapter.getXCalibratedValue(ptB.getX()), adapter.getUnit()));
+                  LAST_POINT_X, adapter.getXCalibratedValue(ptB.getX()), adapter.unit()));
         }
         if (LAST_POINT_Y.getComputed()) {
           measVal.add(
               new MeasureItem(
-                  LAST_POINT_Y, adapter.getYCalibratedValue(ptB.getY()), adapter.getUnit()));
+                  LAST_POINT_Y, adapter.getYCalibratedValue(ptB.getY()), adapter.unit()));
         }
         if (LINE_LENGTH.getComputed()) {
           measVal.add(
               new MeasureItem(
-                  LINE_LENGTH, ptA.distance(ptB) * adapter.getCalibRatio(), adapter.getUnit()));
+                  LINE_LENGTH, ptA.distance(ptB) * adapter.calibrationRatio(), adapter.unit()));
         }
         if (ORIENTATION.getComputed()) {
           measVal.add(

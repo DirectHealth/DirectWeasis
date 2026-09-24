@@ -71,7 +71,7 @@ public class ThreePointsCircleGraphic extends AbstractDragGraphicArea {
     super(POINTS_NUMBER);
   }
 
-  public ThreePointsCircleGraphic(ThreePointsCircleGraphic graphic) {
+  public ThreePointsCircleGraphic(ThreePointsCircleGraphic graphic) { // NOSONAR see initCopy()
     super(graphic);
   }
 
@@ -129,29 +129,29 @@ public class ThreePointsCircleGraphic extends AbstractDragGraphicArea {
       if (adapter != null) {
         ArrayList<MeasureItem> measVal = new ArrayList<>();
 
-        double ratio = adapter.getCalibRatio();
+        double ratio = adapter.calibrationRatio();
 
         if (CENTER_X.getComputed()) {
           measVal.add(
               new MeasureItem(
-                  CENTER_X, adapter.getXCalibratedValue(centerPt.getX()), adapter.getUnit()));
+                  CENTER_X, adapter.getXCalibratedValue(centerPt.getX()), adapter.unit()));
         }
         if (CENTER_Y.getComputed()) {
           measVal.add(
               new MeasureItem(
-                  CENTER_Y, adapter.getYCalibratedValue(centerPt.getY()), adapter.getUnit()));
+                  CENTER_Y, adapter.getYCalibratedValue(centerPt.getY()), adapter.unit()));
         }
         if (RADIUS.getComputed()) {
-          measVal.add(new MeasureItem(RADIUS, ratio * radiusPt, adapter.getUnit()));
+          measVal.add(new MeasureItem(RADIUS, ratio * radiusPt, adapter.unit()));
         }
         if (DIAMETER.getComputed()) {
-          measVal.add(new MeasureItem(DIAMETER, ratio * radiusPt * 2.0, adapter.getUnit()));
+          measVal.add(new MeasureItem(DIAMETER, ratio * radiusPt * 2.0, adapter.unit()));
         }
         if (AREA.getComputed()) {
           String unit =
-              "pix".equals(adapter.getUnit()) // NON-NLS
-                  ? adapter.getUnit()
-                  : adapter.getUnit() + "2";
+              "pix".equals(adapter.unit()) // NON-NLS
+                  ? adapter.unit()
+                  : adapter.unit() + "2";
           measVal.add(new MeasureItem(AREA, Math.PI * radiusPt * radiusPt * ratio * ratio, unit));
         }
 

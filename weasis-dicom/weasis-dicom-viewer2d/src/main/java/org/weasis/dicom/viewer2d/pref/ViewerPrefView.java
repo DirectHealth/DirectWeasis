@@ -9,8 +9,7 @@
  */
 package org.weasis.dicom.viewer2d.pref;
 
-import java.awt.Color;
-import java.awt.FlowLayout;
+import java.awt.*;
 import java.awt.event.ItemEvent;
 import java.util.HashMap;
 import java.util.Hashtable;
@@ -166,6 +165,7 @@ public class ViewerPrefView extends AbstractItemDialogPage {
         GuiUtils.getFlowLayoutPanel(ITEM_SEPARATOR_SMALL, ITEM_SEPARATOR, checkBoxApplyPR));
     otherPanel.add(
         GuiUtils.getFlowLayoutPanel(new JLabel(Messages.getString("overlay.color")), overlayColor));
+
     add(otherPanel);
 
     add(GuiUtils.boxYLastElement(LAST_FILLER_HEIGHT));
@@ -203,7 +203,7 @@ public class ViewerPrefView extends AbstractItemDialogPage {
       view.setMouseActions(eventManager.getMouseActions());
     }
 
-    Interpolation inter = Interpolation.getInterpolation(interpolationPosition);
+    Interpolation inter = Interpolation.fromPosition(interpolationPosition);
     List<ViewerPlugin<?>> viewerPlugins = GuiUtils.getUICore().getViewerPlugins();
     synchronized (viewerPlugins) {
       for (final ViewerPlugin<?> p : viewerPlugins) {

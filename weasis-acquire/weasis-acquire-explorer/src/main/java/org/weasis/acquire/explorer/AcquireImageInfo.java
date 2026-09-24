@@ -14,7 +14,7 @@ import java.awt.Rectangle;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.NoninvertibleTransformException;
 import java.awt.geom.Rectangle2D;
-import java.io.File;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -25,7 +25,7 @@ import org.opencv.core.Mat;
 import org.opencv.core.Rect;
 import org.opencv.core.RotatedRect;
 import org.opencv.core.Size;
-import org.opencv.imgproc.Imgproc;
+import org.opencv.geometry.Geometry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.image.AutoLevelsOp;
@@ -98,10 +98,10 @@ public class AcquireImageInfo extends AcquireMediaInfo {
 
   public void applyNRotation(ViewCanvas<ImageElement> view) {
     int rotation = (nextValues.getFullRotation() + 720) % 360;
-    ImageOpNode node = postProcessOpManager.getNode(RotationOp.OP_NAME);
-    if (node != null) {
-      node.clearIOCache();
-      node.setParam(RotationOp.P_ROTATE, rotation);
+    Optional<ImageOpNode> node = postProcessOpManager.getNode(RotationOp.OP_NAME);
+    if (node.isPresent()) {
+      node.get().clearIOCache();
+      node.get().setParam(RotationOp.P_ROTATE, rotation);
       Rectangle area = ImageConversion.getBounds(view.getSourceImage());
       if (area.width > 1 && area.height > 1) {
         ((DefaultViewModel) view.getViewModel())
@@ -181,10 +181,8 @@ public class AcquireImageInfo extends AcquireMediaInfo {
   public void applyCurrentProcessing(ViewCanvas<ImageElement> view) {
     if (view != null) {
       ImageLayer<ImageElement> imageLayer = view.getImageLayer();
-      ImageOpNode node = imageLayer.getDisplayOpManager().getNode(WindowOp.OP_NAME);
-      if (node != null) {
-        node.setEnabled(false);
-      }
+      Optional<ImageOpNode> node = imageLayer.getDisplayOpManager().getNode(WindowOp.OP_NAME);
+      node.ifPresent(imageOpNode -> imageOpNode.setEnabled(false));
       imageLayer.setImage(getImage(), postProcessOpManager);
     }
   }
@@ -263,14 +261,10 @@ public class AcquireImageInfo extends AcquireMediaInfo {
       double w = modelArea.getWidth();
       double h = modelArea.getHeight();
       org.opencv.core.Point ptCenter = new org.opencv.core.Point(w / 2.0, h / 2.0);
-      Mat rot = Imgproc.getRotationMatrix2D(ptCenter, -rotation, 1.0);
+      Mat rot = Geometry.getRotationMatrix2D(ptCenter, -rotation, 1.0);
 
       Rect bbox = new RotatedRect(ptCenter, new Size(w, h), -rotation).boundingRect();
-      double[] m = new double[rot.cols() * rot.rows()];
-      // adjust transformation matrix
-      rot.get(0, 0, m);
-      m[2] += bbox.width / 2.0 - ptCenter.x;
-      m[rot.cols() + 2] += bbox.height / 2.0 - ptCenter.y;
+      double[] m = RotationOp.transformMatrixWithOffset(rot, bbox, ptCenter);
 
       transform.setTransform(m[0], m[3], m[1], m[4], m[2], m[5]);
       if (inverse) {
@@ -292,8 +286,7 @@ public class AcquireImageInfo extends AcquireMediaInfo {
    */
   private static void populateImageElementFromExif(ImageElement imageElement) {
     // Convert Exif TAG to DICOM attributes
-    Optional<File> file = imageElement.getFileCache().getOriginalFile();
-
+    Optional<Path> file = imageElement.getFileCache().getOriginalFile();
     if (file.isPresent()) {
       imageElement.setTagNoNull(
           TagD.get(Tag.Manufacturer), imageElement.getTagValue(TagW.ExifMake));
@@ -314,7 +307,7 @@ public class AcquireImageInfo extends AcquireMediaInfo {
 
       String imgDescription = (String) imageElement.getTagValue(TagW.ExifImageDescription);
       if (!StringUtil.hasText(imgDescription)) {
-        imgDescription = file.get().getName();
+        imgDescription = file.get().getFileName().toString();
       }
       imageElement.setTagNoNull(TagD.get(Tag.ImageComments), imgDescription);
     }

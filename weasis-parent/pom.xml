@@ -14,25 +14,25 @@
   <properties>
     <!-- force command line arguments settings to set version -->
     <!-- $ mvn clean install -Drevision=4.2.2 -Dchangelist=-SNAPSHOT -->
-    <revision>4.6.6</revision>
+    <revision>4.8.0</revision>
     <changelist>-SNAPSHOT</changelist>  <!-- Remove "-SNAPSHOT" for release -->
 
-    <java-version>24</java-version>
-    <jdk-version>24</jdk-version>
+    <java-version>25</java-version>
+    <jdk-version>25</jdk-version>
     <enforcer.jdk-version>[${jdk-version},)</enforcer.jdk-version>
     <enforcer.maven-version>[3.8.1,)</enforcer.maven-version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
     <app.version>${revision}${changelist}</app.version>
-    <base.minimal.version>4.6.0</base.minimal.version>
+    <base.minimal.version>4.8.0</base.minimal.version>
     <i18n.version>4.0.0-SNAPSHOT</i18n.version>
-    <weasis.releasenotes>https://github.com/nroduit/Weasis/blob/master/CHANGELOG.md#v465-2025-10-05</weasis.releasenotes>
+    <weasis.releasenotes>https://github.com/nroduit/Weasis/blob/master/CHANGELOG.md#v473-2026-08-25</weasis.releasenotes>
 
     <felix.framework.version>7.0.5</felix.framework.version>
-    <flatlaf.version>3.6.1</flatlaf.version>
-    <miglayout.version>11.4.2</miglayout.version>
-    <xz.version>1.10</xz.version>
+    <flatlaf.version>3.7.2</flatlaf.version>
+    <miglayout.version>11.4.3</miglayout.version>
+    <xz.version>1.12</xz.version>
 
     <osgi.core.version>8.0.0</osgi.core.version>
     <osgi.promise.version>8.1.0</osgi.promise.version>
@@ -45,27 +45,26 @@
     <felix.bundlerepository.version>2.0.10</felix.bundlerepository.version>
     <felix.configadmin.version>1.9.26</felix.configadmin.version>
     <felix.prefs.version>1.1.0</felix.prefs.version>
-    <felix.scr.version>2.2.14</felix.scr.version>
+    <felix.scr.version>2.2.18</felix.scr.version>
 
-    <slf4j.version>2.0.17</slf4j.version>
-    <logback.version>1.5.19</logback.version>
+    <slf4j.version>2.0.18</slf4j.version>
+    <logback.version>1.6.1</logback.version>
     <dockingframes.version>1.1.7</dockingframes.version>
-    <weasis-dicom-tools.version>5.34.1.1</weasis-dicom-tools.version>
-    <weasis.core.img.version>4.12.2</weasis.core.img.version>
-    <weasis.opencv.native.version>4.12.2-dcm</weasis.opencv.native.version>
-    <weasis.opencv.pkg.version>4.12.2-dcm</weasis.opencv.pkg.version>
-    <osgi.resource.locator.version>3.0.0</osgi.resource.locator.version>
+    <weasis-dicom-tools.version>5.35.0</weasis-dicom-tools.version>
+    <weasis.core.img.version>5.0.0</weasis.core.img.version>
+    <weasis.opencv.native.version>5.0.0-dcm</weasis.opencv.native.version>
+    <weasis.opencv.pkg.version>5.0.0-dcm</weasis.opencv.pkg.version>
     <jaxb.osgi.version>4.0.3</jaxb.osgi.version>
-    <xml.bind-api.version>4.0.4</xml.bind-api.version>
-    <joml.version>1.10.8</joml.version>
+    <xml.bind-api.version>4.0.5</xml.bind-api.version>
+    <joml.version>1.10.9</joml.version>
     <jogamp.version>2.6.0</jogamp.version>
-    <jackson.version>2.19.2</jackson.version>
-    <scribejava.version>8.3.3</scribejava.version>
-    <zip4j.version>2.11.5</zip4j.version>
+    <jakarta.json.version>2.1.3</jakarta.json.version>
+    <parsson.version>1.1.7</parsson.version>
+    <zip4j.version>2.11.6</zip4j.version>
+    <oshi.version>7.6.0</oshi.version>
 
-    <junit-bom.version>6.0.0-RC3</junit-bom.version>
-    <mockito.version>5.20.0</mockito.version>
-    <junit-pioneer.version>2.3.0</junit-pioneer.version>
+    <junit-bom.version>6.1.2</junit-bom.version>
+    <mockito.version>5.23.0</mockito.version>
 
     <!--suppress UnresolvedMavenProperty -->
     <argLine>-Djava.library.path=${project.build.directory}/lib/${os-name}-${cpu-name}</argLine>
@@ -102,21 +101,21 @@
     </repository>
   </repositories>
 
-  <build>
-    <pluginManagement>
-      <plugins>
-        <plugin>
-          <groupId>org.apache.maven.plugins</groupId>
-          <artifactId>maven-compiler-plugin</artifactId>
-          <version>3.14.1</version>
-          <configuration>
-            <release>${java-version}</release>
-          </configuration>
-        </plugin>
-        <plugin>
-          <groupId>biz.aQute.bnd</groupId>
-          <artifactId>bnd-maven-plugin</artifactId>
-          <version>7.1.0</version>
+ <build>
+   <pluginManagement>
+     <plugins>
+       <plugin>
+         <groupId>org.apache.maven.plugins</groupId>
+         <artifactId>maven-compiler-plugin</artifactId>
+         <version>3.15.0</version>
+         <configuration>
+           <release>${java-version}</release>
+         </configuration>
+       </plugin>
+       <plugin>
+         <groupId>biz.aQute.bnd</groupId>
+         <artifactId>bnd-maven-plugin</artifactId>
+          <version>7.3.0</version>
           <executions>
             <execution>
               <goals>
@@ -151,7 +150,7 @@
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-jar-plugin</artifactId>
-          <version>3.4.2</version>
+          <version>3.5.1</version>
           <configuration>
             <archive>
               <manifestFile>${project.build.outputDirectory}/META-INF/MANIFEST.MF</manifestFile>
@@ -166,12 +165,12 @@
         <plugin>
           <groupId>org.codehaus.mojo</groupId>
           <artifactId>flatten-maven-plugin</artifactId>
-          <version>1.7.3</version>
+          <version>1.8.0</version>
         </plugin>
          <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-dependency-plugin</artifactId>
-          <version>3.8.1</version>
+          <version>3.11.0</version>
            <executions>
              <execution>
                <goals>
@@ -183,26 +182,41 @@
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-surefire-plugin</artifactId>
-          <version>3.5.4</version>
+          <version>3.5.6</version>
           <configuration>
             <argLine>@{argLine} -Xshare:off -XX:+EnableDynamicAgentLoading</argLine>
             <parallel>all</parallel>
+            <!--
+              Shared Logback configuration for the test classpath. Logback is the active
+              SLF4J binding in tests (logback-classic is inherited from the provided
+              scope). The file at weasis-parent/src/test/resources/logback-test.xml
+              routes output to stdout (so Surefire does not render expected-error log
+              lines from negative-path tests in red) and keeps the format compact. A
+              module that needs per-logger silencing can drop its own
+              src/test/resources/logback-test.xml — module classpath entries win.
+            -->
+            <additionalClasspathElements>
+              <additionalClasspathElement>${maven.multiModuleProjectDirectory}/weasis-parent/src/test/resources</additionalClasspathElement>
+            </additionalClasspathElements>
+            <systemPropertyVariables>
+              <java.util.logging.config.file>${maven.multiModuleProjectDirectory}/weasis-parent/src/test/resources/logging.properties</java.util.logging.config.file>
+            </systemPropertyVariables>
           </configuration>
         </plugin>
          <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-source-plugin</artifactId>
-          <version>3.3.1</version>
+          <version>3.4.0</version>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-enforcer-plugin</artifactId>
-          <version>3.6.1</version>
+          <version>3.6.3</version>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-resources-plugin</artifactId>
-          <version>3.3.1</version>
+          <version>3.5.0</version>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
@@ -217,28 +231,33 @@
         <plugin>
           <groupId>com.diffplug.spotless</groupId>
           <artifactId>spotless-maven-plugin</artifactId>
-          <version>3.0.0</version>
+          <version>3.9.0</version>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-assembly-plugin</artifactId>
-          <version>3.7.1</version>
+          <version>3.8.0</version>
         </plugin>
         <plugin>
           <groupId>org.codehaus.mojo</groupId>
           <artifactId>exec-maven-plugin</artifactId>
-          <version>3.5.1</version>
+          <version>3.6.3</version>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-shade-plugin</artifactId>
-          <version>3.6.1</version>
+          <version>3.6.2</version>
         </plugin>
         <plugin>
           <groupId>org.jacoco</groupId>
           <artifactId>jacoco-maven-plugin</artifactId>
-          <version>0.8.13</version>
+          <version>0.8.15</version>
         </plugin>
+       <plugin>
+         <groupId>org.sonarsource.scanner.maven</groupId>
+         <artifactId>sonar-maven-plugin</artifactId>
+         <version>5.7.0.6970</version>
+       </plugin>
       </plugins>
     </pluginManagement>
 
@@ -295,7 +314,9 @@
         <artifactId>spotless-maven-plugin</artifactId>
         <configuration>
           <java>
-            <googleJavaFormat/>
+            <googleJavaFormat>
+              <version>1.33.0</version>
+            </googleJavaFormat>
             <toggleOffOn>
               <off>@formatter:off</off>
               <on>@formatter:on</on>
@@ -357,11 +378,6 @@
     </profile>
     <profile>
       <id>coverage</id>
-      <activation>
-        <property>
-          <name>weasis.tests</name>
-        </property>
-      </activation>
       <build>
         <plugins>
           <plugin>
@@ -516,11 +532,30 @@
           </exclusion>
         </exclusions>
       </dependency>
+      <!-- JSON-P API and its provider: embedded in and exported by the weasis-core bundle -->
       <dependency>
-        <groupId>com.fasterxml.jackson.core</groupId>
-        <artifactId>jackson-databind</artifactId>
-        <version>${jackson.version}</version>
-        <scope>provided</scope>
+        <groupId>jakarta.json</groupId>
+        <artifactId>jakarta.json-api</artifactId>
+        <version>${jakarta.json.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.eclipse.parsson</groupId>
+        <artifactId>parsson</artifactId>
+        <version>${parsson.version}</version>
+      </dependency>
+      <!-- Hardware and removable-drive probe, embedded in the weasis-core bundle. The FFM variant
+        calls the OS through java.lang.foreign, so it needs no JNA. -->
+      <dependency>
+        <groupId>com.github.oshi</groupId>
+        <artifactId>oshi-core-ffm</artifactId>
+        <version>${oshi.version}</version>
+        <exclusions>
+          <!-- Annotations only, not needed at runtime -->
+          <exclusion>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+          </exclusion>
+        </exclusions>
       </dependency>
       <dependency>
         <groupId>net.lingala.zip4j</groupId>
@@ -650,7 +685,7 @@
     <dependency>
       <groupId>org.jetbrains</groupId>
       <artifactId>annotations</artifactId>
-      <version>26.0.2</version>
+      <version>26.1.0</version>
       <scope>provided</scope>
     </dependency>
 
@@ -661,20 +696,21 @@
       <scope>test</scope>
     </dependency>
 
+    <!--
+      Bridge java.util.logging (used by libraries like JSVG/JOGL/dcm4che) to SLF4J so
+      every test-time log line is filtered by the shared logback-test.xml. The bridge
+      is installed by the JUL config file referenced from surefire's
+      java.util.logging.config.file system property.
+    -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>jul-to-slf4j</artifactId>
+      <scope>test</scope>
+    </dependency>
+
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-params</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.junit-pioneer</groupId>
-      <artifactId>junit-pioneer</artifactId>
-      <version>${junit-pioneer.version}</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-simple</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>

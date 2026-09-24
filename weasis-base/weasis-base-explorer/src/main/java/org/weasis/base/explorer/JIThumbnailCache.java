@@ -10,8 +10,9 @@
 package org.weasis.base.explorer;
 
 import java.awt.image.BufferedImage;
-import java.io.File;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -30,7 +31,7 @@ import org.weasis.core.api.media.data.MediaElement;
 import org.weasis.core.api.util.ThreadUtil;
 import org.weasis.opencv.data.PlanarImage;
 import org.weasis.opencv.op.ImageConversion;
-import org.weasis.opencv.op.ImageProcessor;
+import org.weasis.opencv.op.ImageIOHandler;
 
 public final class JIThumbnailCache {
   private static final Logger LOGGER = LoggerFactory.getLogger(JIThumbnailCache.class);
@@ -144,11 +145,11 @@ public final class JIThumbnailCache {
       PlanarImage img = null;
 
       // Get the final that contain the thumbnail when the uncompressed mode is activated
-      File file = diskObject.getFile();
-      if (file != null && file.getName().endsWith(".wcv")) {
-        File thumbFile = new File(ImageCVIO.changeExtension(file.getPath(), ".jpg"));
-        if (thumbFile.canRead()) {
-          img = ImageProcessor.readImage(thumbFile, null);
+      Path path = diskObject.getFilePath();
+      if (path != null && path.getFileName().toString().endsWith(".wcv")) {
+        Path thumbFile = Path.of(ImageCVIO.changeExtension(path.toString(), ".jpg"));
+        if (Files.isReadable(thumbFile)) {
+          img = ImageIOHandler.readImage(thumbFile, null);
         }
       }
 
@@ -162,7 +163,7 @@ public final class JIThumbnailCache {
 
       final BufferedImage tIcon =
           ImageConversion.toBufferedImage(
-              (PlanarImage) ImageProcessor.buildThumbnail(img, ThumbnailRenderer.ICON_DIM, true));
+              (PlanarImage) ImageIOHandler.buildThumbnail(img, ThumbnailRenderer.ICON_DIM, true));
 
       GuiExecutor.execute(
           () -> {

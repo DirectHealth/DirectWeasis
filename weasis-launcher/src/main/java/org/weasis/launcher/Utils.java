@@ -14,12 +14,10 @@ import java.awt.Desktop;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
-import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.LoggerFactory;
@@ -29,22 +27,24 @@ public class Utils {
 
   private Utils() {}
 
-  public static boolean getEmptyToFalse(String val) {
-    if (hasText(val)) {
-      return getBoolean(val);
-    }
-    return false;
+  /**
+   * Converts a string to a boolean, returning false if the string is null or empty.
+   *
+   * @param value the input string, may be null or empty
+   * @return true if the string equals "true" (case-insensitive), false otherwise
+   */
+  public static boolean emptyToFalse(String value) {
+    return hasText(value) && Boolean.parseBoolean(value);
   }
 
-  public static boolean geEmptyToTrue(String val) {
-    if (hasText(val)) {
-      return getBoolean(val);
-    }
-    return true;
-  }
-
-  private static boolean getBoolean(String val) {
-    return Boolean.TRUE.toString().equalsIgnoreCase(val);
+  /**
+   * Converts a string to a boolean, returning true if the string is null or empty.
+   *
+   * @param value the input string, may be null or empty
+   * @return false if the string equals "false" (case-insensitive), true otherwise
+   */
+  public static boolean emptyToTrue(String value) {
+    return !hasText(value) || Boolean.parseBoolean(value);
   }
 
   public static boolean hasLength(CharSequence str) {
@@ -52,30 +52,11 @@ public class Utils {
   }
 
   public static boolean hasText(CharSequence str) {
-    if (!hasLength(str)) {
-      return false;
-    }
-    int strLen = str.length();
-    for (int i = 0; i < strLen; i++) {
-      if (!Character.isWhitespace(str.charAt(i))) {
-        return true;
-      }
-    }
-    return false;
+    return hasLength(str) && str.chars().anyMatch(c -> !Character.isWhitespace(c));
   }
 
   public static Pattern getWeasisProtocolPattern() {
     return Pattern.compile("^weasis(-.*)?://.*?");
-  }
-
-  public static String getWeasisProtocol(String... params) {
-    Pattern pattern = getWeasisProtocolPattern();
-    for (String p : params) {
-      if (pattern.matcher(p).matches()) {
-        return p;
-      }
-    }
-    return null;
   }
 
   public static int getWeasisProtocolIndex(String... params) {
@@ -123,32 +104,10 @@ public class Utils {
     return matchList;
   }
 
-  public static byte[] getByteArrayProperty(Properties prop, String key, byte[] def) {
-    byte[] result = def;
-    if (key != null) {
-      String value = prop.getProperty(key);
-      if (Utils.hasText(value)) {
-        try {
-          result =
-              FileUtil.gzipUncompressToByte(
-                  Base64.getDecoder().decode(value.getBytes(StandardCharsets.UTF_8)));
-        } catch (IOException e) {
-          LOGGER.error("Get byte property", e);
-        }
-      }
-    }
-    return result;
-  }
-
   public static void openInDefaultBrowser(URL url) {
     if (url != null) {
       if (SystemInfo.isLinux) {
-        try {
-          String[] cmd = new String[] {"xdg-open", url.toString()}; // NON-NLS
-          Runtime.getRuntime().exec(cmd);
-        } catch (IOException e) {
-          LOGGER.error("Cannot open URL to the system browser", e);
-        }
+        openInLinuxBrowser(url);
       } else if (Desktop.isDesktopSupported()) {
         final Desktop desktop = Desktop.getDesktop();
         if (desktop.isSupported(Desktop.Action.BROWSE)) {
@@ -161,6 +120,24 @@ public class Utils {
       } else {
         LOGGER.warn("Cannot open URL to the system browser");
       }
+    }
+  }
+
+  private static void openInLinuxBrowser(URL url) {
+    try {
+      Process process =
+          new ProcessBuilder("xdg-open", url.toString()) // NON-NLS
+              .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+              .redirectError(ProcessBuilder.Redirect.DISCARD)
+              .start();
+      process.getOutputStream().close();
+      if (process.waitFor(5, TimeUnit.SECONDS) && process.exitValue() != 0) {
+        LOGGER.error("'xdg-open' failed (exit {}) for {}", process.exitValue(), url); // NON-NLS
+      }
+    } catch (IOException e) {
+      LOGGER.error("Cannot open URL to the system browser", e);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
     }
   }
 }

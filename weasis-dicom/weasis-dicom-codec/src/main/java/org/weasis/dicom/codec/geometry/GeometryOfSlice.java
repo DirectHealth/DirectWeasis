@@ -21,6 +21,8 @@ import org.joml.Vector3d;
  */
 public class GeometryOfSlice {
 
+  public static final double MIN_SPACING = 0.00001;
+
   protected Vector3d row;
   protected Vector3d column;
   protected Vector3d tlhc;
@@ -95,7 +97,7 @@ public class GeometryOfSlice {
    *     (direction cosines, unit vector) LPH+
    */
   public final Vector3d getNormal() {
-    return new Vector3d(row).cross(column).normalize();
+    return VectorUtils.computeNormalOfSurface(row, column);
   }
 
   /**
@@ -129,7 +131,7 @@ public class GeometryOfSlice {
    * @return the image 2D point of a position
    */
   public final Point2D getImagePosition(Vector3d p3) {
-    if (voxelSpacing.x < 0.00001 || voxelSpacing.y < 0.00001) {
+    if (voxelSpacing.x < MIN_SPACING || voxelSpacing.y < MIN_SPACING) {
       return null;
     }
     double ix =

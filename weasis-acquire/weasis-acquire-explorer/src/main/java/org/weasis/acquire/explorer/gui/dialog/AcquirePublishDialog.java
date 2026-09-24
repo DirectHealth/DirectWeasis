@@ -12,19 +12,21 @@ package org.weasis.acquire.explorer.gui.dialog;
 import static org.weasis.core.api.gui.Insertable.ITEM_SEPARATOR_LARGE;
 import static org.weasis.core.api.gui.Insertable.ITEM_SEPARATOR_SMALL;
 
+import com.formdev.flatlaf.util.SystemFileChooser;
 import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
-import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -222,18 +224,12 @@ public class AcquirePublishDialog extends JDialog {
           var pref = LocalPersistence.getProperties();
           String folderKey = "weasis.acquire.dicom.export.folder";
           String targetDirectoryPath = pref.getProperty(folderKey, "");
-          JFileChooser fileChooser = new JFileChooser(targetDirectoryPath);
-          fileChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+          SystemFileChooser fileChooser = new SystemFileChooser(targetDirectoryPath);
+          fileChooser.setFileSelectionMode(SystemFileChooser.DIRECTORIES_ONLY);
           fileChooser.setMultiSelectionEnabled(false);
-          if (StringUtil.hasText(targetDirectoryPath)) {
-            File targetFile = new File(targetDirectoryPath);
-            if (targetFile.exists() && targetFile.isDirectory()) {
-              fileChooser.setSelectedFile(new File("new"));
-            }
-          }
 
           if (fileChooser.showSaveDialog(WinUtil.getParentWindow(this))
-              == JFileChooser.APPROVE_OPTION) {
+              == SystemFileChooser.APPROVE_OPTION) {
             File selectedFile = fileChooser.getSelectedFile();
             if (selectedFile != null) {
               File outputFolder =
@@ -334,15 +330,15 @@ public class AcquirePublishDialog extends JDialog {
       }
     }
 
-    SwingWorker<File, AcquireMediaInfo> dicomizeTask = setupPublishingTask(toPublish, exportDir);
+    SwingWorker<Path, AcquireMediaInfo> dicomizeTask = setupPublishingTask(toPublish, exportDir);
     try (var executor = ThreadUtil.newSingleThreadExecutor("AcquireDicomize")) {
       executor.execute(dicomizeTask);
     }
   }
 
-  private SwingWorker<File, AcquireMediaInfo> setupPublishingTask(
+  private SwingWorker<Path, AcquireMediaInfo> setupPublishingTask(
       List<AcquireMediaInfo> toPublish, File exportDir) {
-    SwingWorker<File, AcquireMediaInfo> dicomizeTask = new DicomizeTask(toPublish);
+    SwingWorker<Path, AcquireMediaInfo> dicomizeTask = new DicomizeTask(toPublish);
     ActionListener taskCancelActionListener = _ -> dicomizeTask.cancel(true);
 
     dicomizeTask.addPropertyChangeListener(
@@ -361,7 +357,7 @@ public class AcquirePublishDialog extends JDialog {
               cancelButton.addActionListener(taskCancelActionListener);
 
             } else if (StateValue.DONE == evt.getNewValue()) {
-              File tempDirDicom = null;
+              Path tempDirDicom = null;
 
               if (!dicomizeTask.isCancelled()) {
                 try {
@@ -374,7 +370,7 @@ public class AcquirePublishDialog extends JDialog {
                 }
 
                 if (tempDirDicom != null) {
-                  exportProcess(toPublish, exportDir, tempDirDicom);
+                  exportProcess(toPublish, exportDir, tempDirDicom.toFile());
                 } else {
                   JOptionPane.showMessageDialog(
                       WinUtil.getValidComponent(this),
@@ -418,11 +414,12 @@ public class AcquirePublishDialog extends JDialog {
 
   private static void setZoomRatio(AcquireImageInfo imgInfo, Double ratio) {
     imgInfo.getCurrentValues().setRatio(ratio);
-    ImageOpNode node = imgInfo.getPostProcessOpManager().getNode(ZoomOp.OP_NAME);
-    if (node != null) {
-      node.clearIOCache();
-      node.setParam(ZoomOp.P_RATIO_X, ratio);
-      node.setParam(ZoomOp.P_RATIO_Y, ratio);
+    Optional<ImageOpNode> node = imgInfo.getPostProcessOpManager().getNode(ZoomOp.OP_NAME);
+    if (node.isPresent()) {
+      ImageOpNode n = node.get();
+      n.clearIOCache();
+      n.setParam(ZoomOp.P_RATIO_X, ratio);
+      n.setParam(ZoomOp.P_RATIO_Y, ratio);
     }
   }
 

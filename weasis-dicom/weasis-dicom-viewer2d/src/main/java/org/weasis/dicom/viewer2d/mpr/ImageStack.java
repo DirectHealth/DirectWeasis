@@ -10,6 +10,7 @@
 package org.weasis.dicom.viewer2d.mpr;
 
 import java.io.File;
+import java.nio.file.Path;
 import org.weasis.opencv.data.FileRawImage;
 import org.weasis.opencv.data.ImageCV;
 
@@ -20,7 +21,8 @@ public class ImageStack {
 
   public ImageStack(int width, int height, int type, int index, File dir) {
     this.index = index;
-    this.rawImage = new FileRawImage(new File(dir, "mpr_" + (index + 1) + ".wcv")); // NON-NLS
+    this.rawImage =
+        new FileRawImage(Path.of(dir.getPath(), "mpr_" + (index + 1), ".wcv")); // NON-NLS
     this.image = new ImageCV(height, width, type);
   }
 }

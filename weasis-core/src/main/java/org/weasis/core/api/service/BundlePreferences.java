@@ -9,7 +9,9 @@
  */
 package org.weasis.core.api.service;
 
-import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceReference;
@@ -25,16 +27,37 @@ public class BundlePreferences {
 
   private BundlePreferences() {}
 
-  public static File getDataFolder(BundleContext context) {
+  /**
+   * Gets a path to the data folder for the given bundle context.
+   *
+   * @param context the bundle context
+   * @return Path to the data folder for the bundle, or the default data folder if context is null
+   */
+  public static Path getDataFolder(BundleContext context) {
     if (context != null) {
-      File dataFolder =
-          new File(
-              AppProperties.WEASIS_PATH + File.separator + "data",
-              context.getBundle().getSymbolicName());
-      dataFolder.mkdirs();
+      Path dataFolder =
+          AppProperties.WEASIS_PATH.resolve("data").resolve(context.getBundle().getSymbolicName());
+      try {
+        Files.createDirectories(dataFolder);
+      } catch (IOException e) {
+        // Log error but continue, return the path anyway
+        LOGGER.warn("Failed to create data folder: {}", dataFolder, e);
+      }
       return dataFolder;
     }
-    return new File(AppProperties.WEASIS_PATH, "data");
+    return AppProperties.WEASIS_PATH.resolve("data");
+  }
+
+  /**
+   * Gets a file path within the data folder for the given bundle context.
+   *
+   * @param context the bundle context
+   * @param filename the filename to append to the data folder path
+   * @return Path to the file within the data folder
+   */
+  public static Path getFileInDataFolder(BundleContext context, String filename) {
+    Path dataFolder = getDataFolder(context);
+    return dataFolder.resolve(filename);
   }
 
   public static Preferences getDefaultPreferences(BundleContext context) {

@@ -23,6 +23,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
@@ -298,7 +299,7 @@ public class Singleton {
     private void removeSiFile() {
       File file = getSiFile(stringId, port);
       LOGGER.info("Removing SingletonFile: {}", file);
-      FileUtil.delete(file);
+      FileUtil.delete(file.toPath());
     }
 
     private static void createSingletonFile(final String id, final int port) {
@@ -310,7 +311,7 @@ public class Singleton {
         for (String file : fList) {
           if (file.startsWith(id)) {
             LOGGER.info("Remove file with same prefix {}", file);
-            FileUtil.delete(new File(SI_FILEDIR, file));
+            FileUtil.delete(Path.of(SI_FILEDIR.getPath(), file));
           }
         }
       }

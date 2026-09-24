@@ -209,8 +209,10 @@ public class DicomPrintDialog<I extends ImageElement> extends JDialog {
     getRootPane().setDefaultButton(printButton);
     JButton cancelButton = new JButton(Messages.getString("DicomPrintDialog.cancel"));
     cancelButton.addActionListener(evt -> doClose());
+    JButton helpButton = GuiUtils.createHelpButton("print/#dicom-print"); // NON-NLS
 
-    panel.add(printButton, "skip, growx 0, alignx trailing"); // NON-NLS
+    panel.add(helpButton, "newline, growx 0, alignx leading"); // NON-NLS
+    panel.add(printButton, "growx 0, alignx trailing, split 2"); // NON-NLS
     panel.add(cancelButton, "gap 15lp 0lp 10lp 10lp"); // NON-NLS
     setContentPane(panel);
   }
@@ -227,9 +229,11 @@ public class DicomPrintDialog<I extends ImageElement> extends JDialog {
 
     DicomPrint dicomPrint = new DicomPrint(node, options);
     ImageViewerPlugin<I> container = eventManager.getSelectedView2dContainer();
+    ViewCanvas<I> selectedView = eventManager.getSelectedViewPane();
+    boolean singleView = optionPane.checkboxSelectedView.isSelected();
 
-    List<ViewCanvas<I>> views = container.getImagePanels();
-    if (views.isEmpty()) {
+    List<ViewCanvas<I>> views = container == null ? List.of() : container.getImagePanels();
+    if (views.isEmpty() || (singleView && selectedView == null)) {
       JOptionPane.showMessageDialog(
           WinUtil.getValidComponent(this),
           Messages.getString("DicomPrintDialog.no_print"),
@@ -241,12 +245,8 @@ public class DicomPrintDialog<I extends ImageElement> extends JDialog {
 
     doClose();
 
-    ExportLayout<I> layout;
-    if (optionPane.checkboxSelectedView.isSelected()) {
-      layout = new ExportLayout<>(eventManager.getSelectedViewPane());
-    } else {
-      layout = new ExportLayout<>(container.getLayoutModel());
-    }
+    ExportLayout<I> layout =
+        singleView ? new ExportLayout<>(selectedView) : new ExportLayout<>(container);
 
     try {
       dicomPrint.printImage(

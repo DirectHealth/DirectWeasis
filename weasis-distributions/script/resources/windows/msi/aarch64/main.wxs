@@ -65,7 +65,7 @@
     <CustomAction Id="JpDisallowDowngrade" Error="!(loc.DowngradeErrorMessage)" />
     <?endif?>
 
-    <Binary Id="JpCaDll" SourceFile="wixhelper.dll"/>
+    <Binary Id="JpCaDll" SourceFile="msica.dll"/>
 
     <CustomAction Id="JpFindRelatedProducts" BinaryKey="JpCaDll" DllEntry="FindRelatedProductsEx" />
 
@@ -83,23 +83,6 @@
 		            <RegistryValue Type="string" Value="&quot;[INSTALLDIR]Weasis.exe&quot; &quot;%1&quot;"/>
 		          </RegistryKey>
 		        </RegistryKey>
-            <!-- Remove popup on Edge and IE for weasis protocol -->
-            <RegistryKey Root="HKLM" Key="SOFTWARE\Microsoft\Internet Explorer\ProtocolExecute\weasis">
-              <RegistryValue Type="integer" Name="WarnOnOpen" Value="0" />
-            </RegistryKey>
-            <RegistryKey Root="HKLM" Key="SOFTWARE\Policies\Microsoft\Edge\URLAllowlist">
-               <RegistryValue Name="787" Type="string" Value="weasis://*"/>
-            </RegistryKey>
-            <!-- Remove popup on Chrome for weasis protocol -->
-            <RegistryKey Root="HKLM" Key="SOFTWARE\Policies\Google\Chrome\URLAllowlist">
-               <RegistryValue Name="787" Type="string" Value="weasis://*"/>
-            </RegistryKey>
-            <RegistryKey Root="HKLM" Key="SOFTWARE\Policies\Chromium\URLAllowlist">
-               <RegistryValue Name="787" Type="string" Value="weasis://*"/>
-            </RegistryKey>
-            <RegistryKey Root="HKLM" Key="SOFTWARE\Policies\Mozilla\Firefox\WebsiteFilter\Exceptions">
-               <RegistryValue Name="787" Type="string" Value="weasis://*"/>
-            </RegistryKey>
        </Component>
   </DirectoryRef>
 
@@ -107,6 +90,7 @@
       <ComponentGroupRef Id="Shortcuts"/>
       <ComponentGroupRef Id="Files"/>
       <ComponentGroupRef Id="FileAssociations"/>
+      <ComponentGroupRef Id="FragmentOsCondition"/>
       <ComponentRef Id="URIHandlerRegistry" />
     </Feature>
 
@@ -155,6 +139,7 @@
       <?ifndef JpAllowDowngrades ?>
       <Custom Action="JpDisallowDowngrade" After="JpFindRelatedProducts">JP_DOWNGRADABLE_FOUND</Custom>
       <?endif?>
+      <LaunchConditions Before="AppSearch"/>
       <RemoveExistingProducts Before="CostInitialize"/>
       <Custom Action="JpFindRelatedProducts" After="FindRelatedProducts"/>
     </InstallExecuteSequence>

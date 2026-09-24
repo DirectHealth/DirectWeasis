@@ -23,12 +23,13 @@ import java.awt.event.MouseWheelListener;
 import java.awt.geom.AffineTransform;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
-import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JLabel;
 import javax.swing.SwingConstants;
@@ -39,6 +40,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.Messages;
 import org.weasis.core.api.gui.util.AppProperties;
+import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.image.OpManager;
 import org.weasis.core.api.util.ResourceUtil;
@@ -48,14 +50,13 @@ import org.weasis.core.util.FileUtil;
 import org.weasis.core.util.StringUtil;
 import org.weasis.opencv.data.PlanarImage;
 import org.weasis.opencv.op.ImageConversion;
-import org.weasis.opencv.op.ImageProcessor;
+import org.weasis.opencv.op.ImageIOHandler;
 
 public class Thumbnail extends JLabel implements Thumbnailable {
   private static final Logger LOGGER = LoggerFactory.getLogger(Thumbnail.class);
 
-  public static final File THUMBNAIL_CACHE_DIR =
-      AppProperties.buildAccessibleTempDirectory(
-          AppProperties.FILE_CACHE_DIR.getName(), "thumb"); // NON-NLS
+  public static final Path THUMBNAIL_CACHE_DIR =
+      AppProperties.buildAccessibleTempDirectory(AppProperties.CACHE_NAME, "thumb"); // NON-NLS
   public static final ExecutorService THUMB_LOADER =
       ThreadUtil.newManagedImageIOThreadPool("ThumbnailLoader");
 
@@ -113,7 +114,7 @@ public class Thumbnail extends JLabel implements Thumbnailable {
     if (source == null) {
       return null;
     }
-    return ImageProcessor.buildThumbnail(
+    return ImageIOHandler.buildThumbnail(
         source, new Dimension(Thumbnail.MAX_SIZE, Thumbnail.MAX_SIZE), true);
   }
 
@@ -166,8 +167,6 @@ public class Thumbnail extends JLabel implements Thumbnailable {
       final String description,
       final boolean keepMediaCache,
       OpManager opManager) {
-    this.setSize(thumbnailSize, thumbnailSize);
-
     ImageIcon imageIcon =
         new ImageIcon() {
 
@@ -179,7 +178,6 @@ public class Thumbnail extends JLabel implements Thumbnailable {
             final PlanarImage thumbnail = Thumbnail.this.getImage(media, keepMediaCache, opManager);
             if (thumbnail == null) {
               FontMetrics fm = g2d.getFontMetrics();
-              Icon icon = mimeIcon;
               int insetY = 5;
               int textLength = fm.stringWidth(description);
               int fontHeight = 0;
@@ -187,14 +185,15 @@ public class Thumbnail extends JLabel implements Thumbnailable {
               if (displayText) {
                 fontHeight = fm.getHeight();
               }
-              int fy = y + (thumbnailSize - fontHeight - icon.getIconHeight()) / 2;
-              icon.paintIcon(c, g2d, x + (thumbnailSize - icon.getIconWidth()) / 2, fy);
+              int fy = y + (thumbnailSize - fontHeight - mimeIcon.getIconHeight()) / 2;
+              mimeIcon.paintIcon(c, g2d, x + (thumbnailSize - mimeIcon.getIconWidth()) / 2, fy);
 
               if (displayText) {
                 Object[] oldRenderingHints = GuiUtils.setRenderingHints(g2d, true, false, true);
                 int startX = x + (thumbnailSize - textLength) / 2;
                 int startY = fm.getAscent() - fm.getDescent() - fm.getLeading();
-                g2d.drawString(description, startX, fy + icon.getIconHeight() + startY + insetY);
+                g2d.drawString(
+                    description, startX, fy + mimeIcon.getIconHeight() + startY + insetY);
                 GuiUtils.resetRenderingHints(g2d, oldRenderingHints);
               }
             } else {
@@ -224,7 +223,14 @@ public class Thumbnail extends JLabel implements Thumbnailable {
             return thumbnailSize;
           }
         };
-    setIcon(imageIcon);
+    // Swing mutations must not run while holding this instance monitor: setSize() and the
+    // revalidate() triggered by setIcon() take the AWT tree lock, which the EDT already owns while
+    // painting and calling getImage() on this thumbnail.
+    GuiExecutor.execute(
+        () -> {
+          setSize(thumbnailSize, thumbnailSize);
+          setIcon(imageIcon);
+        });
   }
 
   protected void drawOverIcon(Graphics2D g2d, int x, int y, int width, int height) {
@@ -236,7 +242,7 @@ public class Thumbnail extends JLabel implements Thumbnailable {
     return thumbnailPath;
   }
 
-  protected synchronized PlanarImage getImage(
+  protected PlanarImage getImage(
       final MediaElement media, final boolean keepMediaCache, final OpManager opManager) {
     PlanarImage cacheImage;
     if ((cacheImage = mCache.get(this)) == null && readable && loading.compareAndSet(false, true)) {
@@ -287,7 +293,8 @@ public class Thumbnail extends JLabel implements Thumbnailable {
             if (thumb != null) {
               try {
                 file =
-                    File.createTempFile("tumb_", ".jpg", Thumbnail.THUMBNAIL_CACHE_DIR); // NON-NLS
+                    Files.createTempFile(Thumbnail.THUMBNAIL_CACHE_DIR, "tumb_", ".jpg")
+                        .toFile(); // NON-NLS
               } catch (IOException e) {
                 LOGGER.error("Cannot create file for thumbnail!", e);
               }
@@ -295,7 +302,7 @@ public class Thumbnail extends JLabel implements Thumbnailable {
             try {
               if (thumb != null && file != null && thumb.width() > 0) {
                 MatOfInt map = new MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 80);
-                if (ImageProcessor.writeImage(thumb.toMat(), file, map)) {
+                if (ImageIOHandler.writeImage(thumb.toMat(), file.toPath(), map)) {
                   /*
                    * Write the thumbnail in temp folder, better than handling the thumbnail in memory.
                    *
@@ -336,7 +343,7 @@ public class Thumbnail extends JLabel implements Thumbnailable {
             int height = img.height();
             if (width > thumbnailSize || height > thumbnailSize) {
               thumb =
-                  ImageProcessor.buildThumbnail(
+                  ImageIOHandler.buildThumbnail(
                       img, new Dimension(thumbnailSize, thumbnailSize), true);
             } else {
               thumb = img;
@@ -372,8 +379,8 @@ public class Thumbnail extends JLabel implements Thumbnailable {
     removeImageFromCache();
 
     if (thumbnailPath != null
-        && thumbnailPath.getPath().startsWith(AppProperties.FILE_CACHE_DIR.getPath())) {
-      FileUtil.delete(thumbnailPath);
+        && thumbnailPath.getPath().startsWith(AppProperties.FILE_CACHE_DIR.toString())) {
+      FileUtil.delete(thumbnailPath.toPath());
     }
 
     removeMouseAndKeyListener();
@@ -409,7 +416,7 @@ public class Thumbnail extends JLabel implements Thumbnailable {
 
     @Override
     public PlanarImage call() throws Exception {
-      return ImageProcessor.readImageWithCvException(path, null);
+      return ImageIOHandler.readImageWithCvException(path.toPath(), null);
     }
   }
 }

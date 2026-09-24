@@ -14,12 +14,20 @@ import org.opencv.imgproc.Imgproc;
 import org.weasis.core.Messages;
 import org.weasis.core.util.MathUtil;
 import org.weasis.opencv.data.PlanarImage;
-import org.weasis.opencv.op.ImageProcessor;
+import org.weasis.opencv.op.ImageTransformer;
 
+/** Operation for scaling images with configurable zoom factors and interpolation methods. */
 public class ZoomOp extends AbstractOp {
 
   public static final String OP_NAME = Messages.getString("ZoomOperation.title");
 
+  public static final String P_RATIO_X = "ratio.x";
+  public static final String P_RATIO_Y = "ratio.y";
+  public static final String P_INTERPOLATION = "interpolation";
+  private static final double DEFAULT_ZOOM_FACTOR = 1.0;
+  private static final double DOWNSCALE_THRESHOLD = 0.1;
+
+  /** Interpolation methods for image scaling operations. */
   public enum Interpolation {
     NEAREST_NEIGHBOUR(Messages.getString("ZoomOperation.nearest"), Imgproc.INTER_NEAREST),
     BILINEAR(Messages.getString("ZoomOperation.bilinear"), Imgproc.INTER_LINEAR),
@@ -38,45 +46,20 @@ public class ZoomOp extends AbstractOp {
       return opencvValue;
     }
 
+    public String getTitle() {
+      return title;
+    }
+
     @Override
     public String toString() {
       return title;
     }
 
-    public String getTitle() {
-      return title;
-    }
-
-    public static Interpolation getInterpolation(int position) {
-      for (Interpolation v : Interpolation.values()) {
-        if (v.ordinal() == position) {
-          return v;
-        }
-      }
-      return BILINEAR;
+    public static Interpolation fromPosition(int position) {
+      Interpolation[] values = values();
+      return position >= 0 && position < values.length ? values[position] : BILINEAR;
     }
   }
-
-  /**
-   * Set a zoom factor in x-axis (Required parameter).
-   *
-   * <p>Double value.
-   */
-  public static final String P_RATIO_X = "ratio.x";
-
-  /**
-   * Set a zoom factor in y-axis (Required parameter).
-   *
-   * <p>Double value.
-   */
-  public static final String P_RATIO_Y = "ratio.y";
-
-  /**
-   * Set the interpolation type (Optional parameter).
-   *
-   * <p>Integer value. Default value is bilinear interpolation. See javax.media.jai.Interpolation.
-   */
-  public static final String P_INTERPOLATION = "interpolation"; // NON-NLS
 
   public ZoomOp() {
     setName(OP_NAME);
@@ -93,28 +76,38 @@ public class ZoomOp extends AbstractOp {
 
   @Override
   public void process() throws Exception {
-    PlanarImage source = (PlanarImage) params.get(Param.INPUT_IMG);
-    PlanarImage result = source;
-    Double zoomFactorX = (Double) params.get(P_RATIO_X);
-    Double zoomFactorY = (Double) params.get(P_RATIO_Y);
+    PlanarImage source = getSourceImage();
+    Double zoomX = (Double) params.get(P_RATIO_X);
+    Double zoomY = (Double) params.get(P_RATIO_Y);
 
-    if (zoomFactorX != null
-        && zoomFactorY != null
-        && (MathUtil.isDifferent(zoomFactorX, 1.0) || MathUtil.isDifferent(zoomFactorY, 1.0))) {
-      Dimension dim =
-          new Dimension(
-              (int) (Math.abs(zoomFactorX) * source.width()),
-              (int) (Math.abs(zoomFactorY) * source.height()));
-      ZoomOp.Interpolation interpolation = (ZoomOp.Interpolation) params.get(P_INTERPOLATION);
-      Integer inter = null;
-      if (Math.abs(zoomFactorX) < 0.1 || Math.abs(zoomFactorY) < 0.1) {
-        inter = Imgproc.INTER_AREA;
-      } else if (interpolation != null) {
-        inter = interpolation.getOpencvValue();
-      }
-      result = ImageProcessor.scale(source.toMat(), dim, inter);
-    }
+    PlanarImage result =
+        (zoomX == null || zoomY == null || !requiresScaling(zoomX, zoomY))
+            ? source
+            : scaleImage(source, zoomX, zoomY);
 
     params.put(Param.OUTPUT_IMG, result);
+  }
+
+  private boolean requiresScaling(double zoomX, double zoomY) {
+    return MathUtil.isDifferent(zoomX, DEFAULT_ZOOM_FACTOR)
+        || MathUtil.isDifferent(zoomY, DEFAULT_ZOOM_FACTOR);
+  }
+
+  private PlanarImage scaleImage(PlanarImage source, double zoomX, double zoomY) throws Exception {
+    int newWidth = (int) (Math.abs(zoomX) * source.width());
+    int newHeight = (int) (Math.abs(zoomY) * source.height());
+    Integer interpolation = selectInterpolation(zoomX, zoomY);
+
+    return ImageTransformer.scale(
+        source.toMat(), new Dimension(newWidth, newHeight), interpolation);
+  }
+
+  private Integer selectInterpolation(double zoomX, double zoomY) {
+    if (Math.abs(zoomX) < DOWNSCALE_THRESHOLD || Math.abs(zoomY) < DOWNSCALE_THRESHOLD) {
+      return Imgproc.INTER_AREA;
+    }
+
+    Interpolation interpolation = (Interpolation) params.get(P_INTERPOLATION);
+    return interpolation != null ? interpolation.getOpencvValue() : null;
   }
 }

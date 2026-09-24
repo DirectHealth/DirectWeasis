@@ -17,29 +17,35 @@ import org.opencv.core.Size;
 import org.weasis.core.Messages;
 import org.weasis.core.util.MathUtil;
 import org.weasis.opencv.data.PlanarImage;
-import org.weasis.opencv.op.ImageProcessor;
+import org.weasis.opencv.op.ImageTransformer;
 
+/**
+ * Performs affine transformation operations on images using OpenCV.
+ *
+ * <p>Supported parameters:
+ *
+ * <ul>
+ *   <li>{@link #P_AFFINE_MATRIX} - The 2x3 transformation matrix (required)
+ *   <li>{@link #P_INTERPOLATION} - Interpolation method (optional)
+ *   <li>{@link #P_DST_BOUNDS} - Destination bounds (required)
+ * </ul>
+ */
 public class AffineTransformOp extends AbstractOp {
 
   public static final String OP_NAME = Messages.getString("AffineTransformOp.affine_op");
+  public static final List<Double> IDENTITY_MATRIX = List.of(1.0, 0.0, 0.0, 0.0, 1.0, 0.0);
 
-  public static final List<Double> identityMatrix = List.of(1.0, 0.0, 0.0, 0.0, 1.0, 0.0);
-
-  /**
-   * Set an affine transformation (Required parameter).
-   *
-   * <p>Double array (length of 6).
-   */
+  /** The affine transformation matrix as a list of 6 doubles (2x3 matrix). */
   public static final String P_AFFINE_MATRIX = "affine.matrix";
 
-  /**
-   * Set the interpolation type (Optional parameter).
-   *
-   * <p>Integer value. Default value is bilinear interpolation. See javax.media.jai.Interpolation.
-   */
-  public static final String P_INTERPOLATION = "interpolation"; // NON-NLS
+  /** The interpolation type for the transformation. */
+  public static final String P_INTERPOLATION = "interpolation";
 
+  /** The destination bounds as a Rectangle2D. */
   public static final String P_DST_BOUNDS = "dest.bounds";
+
+  private static final int MATRIX_ROWS = 2;
+  private static final int MATRIX_COLS = 3;
 
   public AffineTransformOp() {
     setName(OP_NAME);
@@ -56,33 +62,67 @@ public class AffineTransformOp extends AbstractOp {
 
   @Override
   public void process() throws Exception {
-    PlanarImage source = (PlanarImage) params.get(Param.INPUT_IMG);
-    PlanarImage result = source;
-    List<Double> matrix = (List<Double>) params.get(P_AFFINE_MATRIX);
-    Rectangle2D bound = (Rectangle2D) params.get(P_DST_BOUNDS);
+    PlanarImage source = getSourceImage();
+    PlanarImage result = applyTransformIfNeeded(source);
+    params.put(Param.OUTPUT_IMG, result);
+  }
 
-    if (bound != null
-        && source != null
-        && matrix != null
-        && (!identityMatrix.equals(matrix)
-            || MathUtil.isDifferent(source.width(), bound.getWidth())
-            || MathUtil.isDifferent(source.height(), bound.getHeight()))) {
-      if (bound.getWidth() > 0 && bound.getHeight() > 0) {
-        Mat mat = new Mat(2, 3, CvType.CV_64FC1);
-        mat.put(0, 0, matrix.stream().mapToDouble(Double::doubleValue).toArray());
-        ZoomOp.Interpolation interpolation = (ZoomOp.Interpolation) params.get(P_INTERPOLATION);
-        Integer inter = null;
-        if (interpolation != null) {
-          inter = interpolation.getOpencvValue();
-        }
-        result =
-            ImageProcessor.warpAffine(
-                source.toMat(), mat, new Size(bound.getWidth(), bound.getHeight()), inter);
-      } else {
-        result = null;
-      }
+  private PlanarImage applyTransformIfNeeded(PlanarImage source) {
+    var matrix = getAffineMatrix();
+    var bounds = getDestinationBounds();
+
+    if (isTransformNotRequired(source, matrix, bounds)) {
+      return source;
     }
 
-    params.put(Param.OUTPUT_IMG, result);
+    return applyAffineTransform(source, matrix, bounds);
+  }
+
+  private boolean isTransformNotRequired(
+      PlanarImage source, List<Double> matrix, Rectangle2D bounds) {
+    if (bounds == null || matrix == null) {
+      return true;
+    }
+
+    boolean isIdentity = IDENTITY_MATRIX.equals(matrix);
+    boolean hasSameDimensions =
+        MathUtil.isEqual(source.width(), bounds.getWidth())
+            && MathUtil.isEqual(source.height(), bounds.getHeight());
+
+    return isIdentity && hasSameDimensions;
+  }
+
+  private PlanarImage applyAffineTransform(
+      PlanarImage source, List<Double> matrix, Rectangle2D bounds) {
+    if (bounds.getWidth() <= 0 || bounds.getHeight() <= 0) {
+      return null;
+    }
+
+    var transformMatrix = createTransformMatrix(matrix);
+    var interpolation = getInterpolationValue();
+    var outputSize = new Size(bounds.getWidth(), bounds.getHeight());
+
+    return ImageTransformer.warpAffine(source.toMat(), transformMatrix, outputSize, interpolation);
+  }
+
+  private Mat createTransformMatrix(List<Double> matrix) {
+    var mat = new Mat(MATRIX_ROWS, MATRIX_COLS, CvType.CV_64FC1);
+    double[] matrixArray = matrix.stream().mapToDouble(Double::doubleValue).toArray();
+    mat.put(0, 0, matrixArray);
+    return mat;
+  }
+
+  @SuppressWarnings("unchecked")
+  private List<Double> getAffineMatrix() {
+    return (List<Double>) params.get(P_AFFINE_MATRIX);
+  }
+
+  private Rectangle2D getDestinationBounds() {
+    return (Rectangle2D) params.get(P_DST_BOUNDS);
+  }
+
+  private Integer getInterpolationValue() {
+    var interpolation = (ZoomOp.Interpolation) params.get(P_INTERPOLATION);
+    return interpolation != null ? interpolation.getOpencvValue() : null;
   }
 }

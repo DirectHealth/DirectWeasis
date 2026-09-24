@@ -14,15 +14,17 @@ import org.weasis.core.api.image.cv.CvUtil;
 import org.weasis.core.api.image.util.KernelData;
 import org.weasis.opencv.data.PlanarImage;
 
-public class FilterOp extends AbstractOp {
+/**
+ * Filter operation that applies a kernel-based image filter.
+ *
+ * <p>This operation requires a {@link KernelData} parameter to be set via {@link #P_KERNEL_DATA}.
+ * If no valid kernel is provided, the source image is returned unchanged.
+ */
+public final class FilterOp extends AbstractOp {
 
   public static final String OP_NAME = Messages.getString("FilterOperation.title");
 
-  /**
-   * Set the filter kernel (Required parameter).
-   *
-   * <p>org.weasis.core.api.image.util.KernelData value.
-   */
+  /** Parameter key for filter kernel (KernelData, required). */
   public static final String P_KERNEL_DATA = "kernel"; // NON-NLS
 
   public FilterOp() {
@@ -40,12 +42,13 @@ public class FilterOp extends AbstractOp {
 
   @Override
   public void process() throws Exception {
-    PlanarImage source = (PlanarImage) params.get(Param.INPUT_IMG);
-    PlanarImage result = source;
+    PlanarImage source = getSourceImage();
     KernelData kernel = (KernelData) params.get(P_KERNEL_DATA);
-    if (kernel != null && !kernel.equals(KernelData.NONE)) {
-      result = CvUtil.filter(source.toMat(), kernel);
-    }
+
+    PlanarImage result =
+        kernel != null && !kernel.equals(KernelData.NONE)
+            ? CvUtil.filter(source.toMat(), kernel)
+            : source;
     params.put(Param.OUTPUT_IMG, result);
   }
 }

@@ -13,7 +13,6 @@ import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.lang.ref.Reference;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
@@ -65,6 +64,7 @@ import org.weasis.dicom.codec.display.Modality;
 import org.weasis.dicom.codec.display.ModalityInfoData;
 import org.weasis.dicom.codec.display.ModalityView;
 import org.weasis.dicom.codec.geometry.ImageOrientation;
+import org.weasis.dicom.codec.seg.SegSpecialElement;
 import org.weasis.dicom.codec.utils.DicomMediaUtils;
 import org.weasis.dicom.codec.utils.PatientComparator;
 import org.weasis.opencv.data.PlanarImage;
@@ -73,11 +73,10 @@ public class DicomMediaIO implements DcmMediaReader {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(DicomMediaIO.class);
 
-  public static final File DICOM_EXPORT_DIR =
+  public static final Path DICOM_EXPORT_DIR =
       AppProperties.buildAccessibleTempDirectory("dicom"); // NON-NLS
-  public static final File CACHE_UNCOMPRESSED_DIR =
-      AppProperties.buildAccessibleTempDirectory(
-          AppProperties.FILE_CACHE_DIR.getName(), "dcm-rawcv"); // NON-NLS
+  public static final Path CACHE_UNCOMPRESSED_DIR =
+      AppProperties.buildAccessibleTempDirectory(AppProperties.CACHE_NAME, "dcm-rawcv"); // NON-NLS
 
   public static final String DICOM_MIMETYPE = "application/dicom"; // NON-NLS
   public static final String IMAGE_MIMETYPE = "image/dicom"; // NON-NLS
@@ -92,8 +91,12 @@ public class DicomMediaIO implements DcmMediaReader {
   public static final String SERIES_XDSI = "xds-i/dicom"; // NON-NLS
 
   public enum Reading {
+    /** Truly unreadable/corrupted/malformed DICOM file. */
     ERROR,
+    /** Silently excluded (e.g. DICOMDIR, in-memory placeholder). */
     EXCLUDED,
+    /** Valid DICOM file but the SOP Class is not handled by Weasis. */
+    UNSUPPORTED,
     READABLE
   }
 
@@ -277,17 +280,7 @@ public class DicomMediaIO implements DcmMediaReader {
         });
   }
 
-  private static final SoftHashMap<DicomMediaIO, DicomMetaData> HEADER_CACHE =
-      new SoftHashMap<>() {
-
-        @Override
-        public void removeElement(Reference<? extends DicomMetaData> soft) {
-          DicomMediaIO key = reverseLookup.remove(soft);
-          if (key != null) {
-            hash.remove(key);
-          }
-        }
-      };
+  private static final SoftHashMap<DicomMediaIO, DicomMetaData> HEADER_CACHE = new SoftHashMap<>();
 
   // The above softReference HEADER_CACHE shall be used instead of the following dcmMetadata
   // variable to get access to
@@ -302,6 +295,7 @@ public class DicomMediaIO implements DcmMediaReader {
   private DicomImageElement[] image = null;
   private String mimeType;
   private boolean hasPixel = false;
+  private VR pixelDataVR = null;
 
   private final FileCache fileCache;
 
@@ -399,10 +393,14 @@ public class DicomMediaIO implements DcmMediaReader {
       } else {
         boolean special = setDicomSpecialType(header);
         if (!special) {
-          // Not supported DICOM file
+          // Valid DICOM file but the SOP Class is not supported by Weasis
+          String sopClassUID = header.getString(Tag.SOPClassUID);
+          LOGGER.info(
+              "Unsupported DICOM SOP Class (no pixel data, no registered handler in Weasis): {}",
+              sopClassUID);
           mimeType = UNREADABLE;
           close();
-          return Reading.ERROR;
+          return Reading.UNSUPPORTED;
         }
       }
 
@@ -504,7 +502,7 @@ public class DicomMediaIO implements DcmMediaReader {
 
     writeImageValues(md);
     writeSharedFunctionalGroupsSequence(header, md);
-    DicomMediaUtils.writePerFrameFunctionalGroupsSequence(this, md, 0);
+    DicomMediaUtils.writeFrameGeometry(this, md, 0);
 
     boolean pr = SERIES_PR_MIMETYPE.equals(mimeType);
     boolean ko = SERIES_KO_MIMETYPE.equals(mimeType);
@@ -522,7 +520,7 @@ public class DicomMediaIO implements DcmMediaReader {
       }
     }
 
-    DicomMediaUtils.computeSlicePositionVector(this);
+    DicomMediaUtils.computeSlicePosition(this);
     DicomMediaUtils.setShutter(this, header);
     DicomMediaUtils.computeSUVFactor(header, this, 0);
   }
@@ -547,8 +545,11 @@ public class DicomMediaIO implements DcmMediaReader {
 
       int pixelRepresentation = desc.getPixelRepresentation();
       setTagNoNull(TagD.get(Tag.BitsAllocated), bitsAllocated);
-      setTagNoNull(TagD.get(Tag.BitsStored), bitsStored);
-      setTagNoNull(TagD.get(Tag.PixelRepresentation), pixelRepresentation);
+      // Write BitsStored and PixelRepresentation only for integer pixel data
+      if (pixelDataVR == VR.OB || pixelDataVR == VR.OW) {
+        setTagNoNull(TagD.get(Tag.BitsStored), bitsStored);
+        setTagNoNull(TagD.get(Tag.PixelRepresentation), pixelRepresentation);
+      }
 
       TagD.get(Tag.PixelSpacing).readValue(header, this);
       TagD.get(Tag.PixelAspectRatio).readValue(header, this);
@@ -561,9 +562,7 @@ public class DicomMediaIO implements DcmMediaReader {
 
       setTag(TagW.AnatomicRegion, desc.getAnatomicRegion());
 
-      setTag(TagW.ModalityLUTData, desc.getModalityLUT());
       TagD.get(Tag.PixelIntensityRelationship).readValue(header, this);
-      setTag(TagW.VOILUTsData, desc.getVoiLUT());
 
       TagD.get(Tag.Units).readValue(header, this);
       TagD.get(Tag.NumberOfFrames).readValue(header, this);
@@ -655,16 +654,21 @@ public class DicomMediaIO implements DcmMediaReader {
       throws Exception {
     if (isReadableDicom() && frame >= 0 && frame < numberOfFrame && hasPixel) {
       FileCache cache = media.getFileCache();
-      Optional<File> original = cache.getOriginalFile();
+      Optional<Path> original = cache.getOriginalFile();
       if (original.isPresent()) {
         LOGGER.debug(
             "Start reading dicom image frame: {} sopUID: {}",
             frame,
             TagD.getTagValue(this, Tag.SOPInstanceUID));
         DicomImageReader reader = new DicomImageReader(Transcoder.dicomImageReaderSpi);
-        try (DicomFileInputStream inputStream = new DicomFileInputStream(original.get().toPath())) {
+        DicomMetaData metaData = HEADER_CACHE.get(this);
+        try (var inputStream = new DicomFileInputStream(original.get(), metaData)) {
           reader.setInput(inputStream);
-          ImageDescriptor desc = reader.getImageDescriptor();
+          if (metaData == null) {
+            metaData = reader.getStreamMetadata();
+            HEADER_CACHE.put(this, metaData);
+          }
+          ImageDescriptor desc = metaData.getImageDescriptor();
           DicomImageReadParam param = new DicomImageReadParam();
           param.setAllowFloatImageConversion(true);
           PlanarImage img = reader.getPlanarImage(frame, param);
@@ -773,18 +777,13 @@ public class DicomMediaIO implements DcmMediaReader {
       if (numberOfFrame > 1) {
         buildMultiframe();
       }
-      if (factory != null) {
-        return buildSpecialElement.apply(factory);
-      }
-    } else {
-      if (factory == null) {
-        // Corrupted image => should have one frame
-        image = new DicomImageElement[0];
-      } else {
-        return buildSpecialElement.apply(factory);
-      }
+    } else if (factory == null) {
+      // Corrupted image => should have one frame
+      image = new DicomImageElement[0];
     }
-    return null;
+    return factory == null || buildSpecialElement == null
+        ? null
+        : buildSpecialElement.apply(factory);
   }
 
   private void buildMultiframe() {
@@ -851,9 +850,8 @@ public class DicomMediaIO implements DcmMediaReader {
       // Clone the shared tag
       Map<TagW, Object> tagList = new HashMap<>(tags);
       SimpleTaggable taggable = new SimpleTaggable(tagList);
-      if (DicomMediaUtils.writePerFrameFunctionalGroupsSequence(
-          taggable, getDicomMetaData(), val)) {
-        DicomMediaUtils.computeSlicePositionVector(taggable);
+      if (DicomMediaUtils.writeFrameGeometry(taggable, getDicomMetaData(), val)) {
+        DicomMediaUtils.computeSlicePosition(taggable);
       }
       return tagList;
     }
@@ -932,11 +930,11 @@ public class DicomMediaIO implements DcmMediaReader {
       return dcmMetadata;
     }
 
-    Optional<File> file = fileCache.getOriginalFile();
+    Optional<Path> file = fileCache.getOriginalFile();
     if (file.isEmpty()) {
       throw new IllegalArgumentException("No file found!");
     }
-    Path path = file.get().toPath();
+    Path path = file.get();
 
     DicomImageReader reader = new DicomImageReader(Transcoder.dicomImageReaderSpi);
     try (DicomFileInputStream inputStream = new DicomFileInputStream(path)) {
@@ -954,6 +952,7 @@ public class DicomMediaIO implements DcmMediaReader {
       }
 
       if (pixelData != null) {
+        pixelDataVR = pixelatedVR.vr;
         hasPixel = true;
       }
 

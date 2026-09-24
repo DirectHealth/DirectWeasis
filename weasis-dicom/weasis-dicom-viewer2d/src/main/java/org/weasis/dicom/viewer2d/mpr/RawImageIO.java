@@ -11,7 +11,7 @@ package org.weasis.dicom.viewer2d.mpr;
 
 import java.io.File;
 import java.io.IOException;
-import java.lang.ref.Reference;
+import java.io.RandomAccessFile;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -25,7 +25,9 @@ import org.dcm4che3.data.Tag;
 import org.dcm4che3.data.UID;
 import org.dcm4che3.data.VR;
 import org.dcm4che3.img.DicomMetaData;
+import org.dcm4che3.img.util.PixelDataUtils;
 import org.dcm4che3.io.DicomOutputStream;
+import org.opencv.core.CvType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.explorer.model.DataExplorerModel;
@@ -47,17 +49,7 @@ public class RawImageIO implements DcmMediaReader {
 
   private static final String MIME_TYPE = "image/raw"; // NON-NLS
 
-  private static final SoftHashMap<RawImageIO, DicomMetaData> HEADER_CACHE =
-      new SoftHashMap<>() {
-
-        @Override
-        public void removeElement(Reference<? extends DicomMetaData> soft) {
-          RawImageIO key = reverseLookup.remove(soft);
-          if (key != null) {
-            hash.remove(key);
-          }
-        }
-      };
+  private static final SoftHashMap<RawImageIO, DicomMetaData> HEADER_CACHE = new SoftHashMap<>();
 
   protected FileRawImage imageCV;
   private final FileCache fileCache;
@@ -79,16 +71,8 @@ public class RawImageIO implements DcmMediaReader {
 
   public File getDicomFile() {
     Attributes dcm = getDicomObject();
-
-    File file = imageCV.file();
-    BulkData bdl =
-        new BulkData(
-            file.toURI().toString(),
-            FileRawImage.HEADER_LENGTH,
-            file.length() - FileRawImage.HEADER_LENGTH,
-            false);
-    dcm.setValue(Tag.PixelData, VR.OW, bdl);
-    File tmpFile = new File(DicomMediaIO.DICOM_EXPORT_DIR, dcm.getString(Tag.SOPInstanceUID));
+    File tmpFile =
+        new File(DicomMediaIO.DICOM_EXPORT_DIR.toFile(), dcm.getString(Tag.SOPInstanceUID));
     try (DicomOutputStream out = new DicomOutputStream(tmpFile)) {
       out.writeDataset(dcm.createFileMetaInformation(UID.ImplicitVRLittleEndian), dcm);
     } catch (IOException e) {
@@ -100,7 +84,7 @@ public class RawImageIO implements DcmMediaReader {
 
   @Override
   public PlanarImage getImageFragment(MediaElement media) throws Exception {
-    if (media != null && media.getFile() != null) {
+    if (media != null && media.getFilePath() != null) {
       return imageCV.read();
     }
     return null;
@@ -230,15 +214,41 @@ public class RawImageIO implements DcmMediaReader {
     DicomMediaUtils.fillAttributes(tags, dcm);
     dcm.addAll(attributes);
     File file = imageCV.file();
+
+    // Read header to determine pixel data type
+    int pixelDataType = getPixelDataTypeFromHeader(file);
     BulkData bdl =
         new BulkData(
             file.toURI().toString(),
             FileRawImage.HEADER_LENGTH,
             file.length() - FileRawImage.HEADER_LENGTH,
             false);
-    dcm.setValue(Tag.PixelData, VR.OW, bdl);
+
+    // Set appropriate pixel data tag based on header information
+    switch (CvType.depth(pixelDataType)) {
+      case CvType.CV_32F -> dcm.setValue(Tag.FloatPixelData, VR.OF, bdl);
+      case CvType.CV_64F -> dcm.setValue(Tag.DoubleFloatPixelData, VR.OD, bdl);
+      default -> {
+        VR pixelVR = PixelDataUtils.getAppropriateVR(pixelDataType);
+        dcm.setValue(Tag.PixelData, pixelVR, bdl);
+      }
+    }
+
     header = new DicomMetaData(dcm, UID.ImplicitVRLittleEndian);
     HEADER_CACHE.put(this, header);
     return header;
+  }
+
+  private int getPixelDataTypeFromHeader(File file) {
+    try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+      // Skip magic number (6 bytes)
+      raf.seek(6);
+
+      // Read type (4 bytes, little-endian)
+      return Integer.reverseBytes(raf.readInt());
+    } catch (IOException e) {
+      LOGGER.error("Error reading file header", e);
+      return 0; // Default to standard pixel data on error
+    }
   }
 }

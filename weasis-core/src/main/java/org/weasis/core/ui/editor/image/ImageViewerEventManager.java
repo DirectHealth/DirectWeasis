@@ -15,6 +15,7 @@ import java.awt.event.KeyListener;
 import java.awt.event.MouseWheelEvent;
 import java.awt.geom.Point2D;
 import java.beans.PropertyChangeListener;
+import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -22,20 +23,25 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import javax.swing.BoundedRangeModel;
+import javax.swing.JCheckBoxMenuItem;
+import javax.swing.JMenu;
+import javax.swing.JSeparator;
 import javax.swing.SwingUtilities;
 import javax.swing.event.SwingPropertyChangeSupport;
 import org.weasis.core.Messages;
+import org.weasis.core.api.gui.layout.MigLayoutModel;
 import org.weasis.core.api.gui.util.ActionState;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.ComboItemListener;
 import org.weasis.core.api.gui.util.DecFormatter;
 import org.weasis.core.api.gui.util.Feature;
 import org.weasis.core.api.gui.util.Filter;
+import org.weasis.core.api.gui.util.GuiUtils;
+import org.weasis.core.api.gui.util.ShortcutManager;
 import org.weasis.core.api.gui.util.SliderChangeListener;
 import org.weasis.core.api.gui.util.SliderCineListener;
 import org.weasis.core.api.gui.util.SliderCineListener.TIME;
 import org.weasis.core.api.gui.util.ToggleButtonListener;
-import org.weasis.core.api.image.GridBagLayoutModel;
 import org.weasis.core.api.image.util.Unit;
 import org.weasis.core.api.media.data.ImageElement;
 import org.weasis.core.api.media.data.MediaSeries;
@@ -44,7 +50,7 @@ import org.weasis.core.api.service.WProperties;
 import org.weasis.core.ui.editor.SeriesViewerEvent;
 import org.weasis.core.ui.editor.SeriesViewerEvent.EVENT;
 import org.weasis.core.ui.editor.SeriesViewerListener;
-import org.weasis.core.ui.editor.image.SynchData.Mode;
+import org.weasis.core.ui.editor.image.SynchData.SyncState;
 import org.weasis.core.ui.editor.image.dockable.MeasureTool;
 import org.weasis.core.ui.launcher.Launcher;
 import org.weasis.core.ui.model.graphic.Graphic;
@@ -69,12 +75,14 @@ public abstract class ImageViewerEventManager<E extends ImageElement> implements
   // Manages all PropertyChangeListeners in EDT
   protected final SwingPropertyChangeSupport propertySupport = new SwingPropertyChangeSupport(this);
   protected final HashMap<Feature<? extends ActionState>, ActionState> actions = new HashMap<>();
+  protected final SynchManager<E> synchManager;
 
   protected volatile boolean enabledAction = true;
   protected ImageViewerPlugin<E> selectedView2dContainer;
 
   protected ImageViewerEventManager() {
     super();
+    this.synchManager = createSynchManager();
   }
 
   public void setAction(ActionState action) {
@@ -83,6 +91,14 @@ public abstract class ImageViewerEventManager<E extends ImageElement> implements
 
   public void removeAction(Feature<?> action) {
     actions.remove(action);
+  }
+
+  /**
+   * Factory method to create the appropriate SynchManager for this event manager. Subclasses can
+   * override this to provide specialized synchronization behavior.
+   */
+  protected SynchManager<E> createSynchManager() {
+    return new DefaultSynchManager<>(this);
   }
 
   protected SliderCineListener getMoveTroughSliceAction(
@@ -98,7 +114,7 @@ public abstract class ImageViewerEventManager<E extends ImageElement> implements
         ImageElement image = null;
 
         if (selectedView2dContainer != null) {
-          view2d = (ViewCanvas<ImageElement>) selectedView2dContainer.getSelectedImagePane();
+          view2d = (ViewCanvas<ImageElement>) selectedView2dContainer.getSelectedViewCanvas();
         }
 
         if (view2d != null && view2d.getSeries() instanceof Series) {
@@ -119,7 +135,11 @@ public abstract class ImageViewerEventManager<E extends ImageElement> implements
           }
         }
 
-        firePropertyChange(ActionW.SYNCH.cmd(), null, mediaEvent);
+        SynchData synchData =
+            (SynchData) getSelectedViewPane().getActionsInView().get(ActionW.SYNCH_LINK.cmd());
+        if (synchData != null && synchData.isSynchActivated()) {
+          firePropertyChange(ActionW.SYNCH.cmd(), null, mediaEvent);
+        }
         if (image != null) {
           fireSeriesViewerListeners(
               new SeriesViewerEvent(selectedView2dContainer, series, image, EVENT.SELECT));
@@ -344,20 +364,19 @@ public abstract class ImageViewerEventManager<E extends ImageElement> implements
     };
   }
 
-  protected ComboItemListener<GridBagLayoutModel> newLayoutAction(GridBagLayoutModel[] layouts) {
+  protected ComboItemListener<MigLayoutModel> newLayoutAction(MigLayoutModel[] layouts) {
     return new ComboItemListener<>(
-        ActionW.LAYOUT, Optional.ofNullable(layouts).orElseGet(() -> new GridBagLayoutModel[0])) {
+        ActionW.LAYOUT, Optional.ofNullable(layouts).orElseGet(() -> new MigLayoutModel[0])) {
 
       @Override
       public void itemStateChanged(Object object) {
-        if (selectedView2dContainer != null
-            && object instanceof GridBagLayoutModel gridBagLayoutModel) {
+        if (selectedView2dContainer != null && object instanceof MigLayoutModel layoutModel) {
           // change layout
           clearAllPropertyChangeListeners();
-          ViewCanvas<E> view = selectedView2dContainer.getSelectedImagePane();
-          selectedView2dContainer.setLayoutModel(gridBagLayoutModel);
+          ViewCanvas<E> view = selectedView2dContainer.getSelectedViewCanvas();
+          selectedView2dContainer.setLayoutModel(layoutModel);
           if (!selectedView2dContainer.isContainingView(view)) {
-            view = selectedView2dContainer.getSelectedImagePane();
+            view = selectedView2dContainer.getSelectedViewCanvas();
           }
           selectedView2dContainer.setSelectedImagePane(view);
           getAction(ActionW.SYNCH)
@@ -368,9 +387,8 @@ public abstract class ImageViewerEventManager<E extends ImageElement> implements
     };
   }
 
-  protected ComboItemListener<SynchView> newSynchAction(SynchView[] synchViewList) {
-    return new ComboItemListener<>(
-        ActionW.SYNCH, Optional.ofNullable(synchViewList).orElseGet(() -> new SynchView[0])) {
+  protected ComboItemListener<SynchView> newSynchAction(SynchView defaultSynchView) {
+    return new ComboItemListener<>(ActionW.SYNCH, new SynchView[] {defaultSynchView}) {
 
       @Override
       public void itemStateChanged(Object object) {
@@ -379,6 +397,53 @@ public abstract class ImageViewerEventManager<E extends ImageElement> implements
         }
       }
     };
+  }
+
+  protected ToggleButtonListener newSynchModeAction() {
+    return new ToggleButtonListener(ActionW.SYNCH_MODE, false) {
+      @Override
+      public void actionPerformed(boolean selected) {
+        getAction(ActionW.SYNCH)
+            .ifPresent(
+                a -> {
+                  if (a.getSelectedItem() instanceof SynchView sel) {
+                    // If selected is false, deactivate manual sync, if selected is true, manual
+                    // sync is deactivated as well since it must be set from the view
+                    sel.getSynchData().setManualSyncState(SyncState.OFF);
+                    sel.getSynchData().setAutoSyncState(SyncState.OFF);
+                    sel.getSynchData().setOriginal(selected);
+                    refreshAllContainers(sel);
+                  }
+                });
+      }
+    };
+  }
+
+  /**
+   * Re-register property change listeners and refresh per-view sync button state across every open
+   * container served by this event manager — needed because the SYNCH toggle is global state but
+   * each container's views must be re-wired and repainted, not just the selected container's.
+   */
+  private void refreshAllContainers(SynchView sel) {
+    clearAllPropertyChangeListeners();
+    ImageViewerPlugin<E> selectedContainer = getSelectedView2dContainer();
+    if (selectedContainer != null) {
+      synchManager.updateAllListeners(selectedContainer, sel);
+      restoreTiledPaneSynch(selectedContainer);
+    }
+    List<ViewerPlugin<?>> plugins = GuiUtils.getUICore().getViewerPlugins();
+    synchronized (plugins) {
+      for (ViewerPlugin<?> p : plugins) {
+        if (p instanceof ImageViewerPlugin<?> ivp
+            && ivp != selectedContainer
+            && ivp.getEventManager() == this) {
+          @SuppressWarnings("unchecked")
+          ImageViewerPlugin<E> typed = (ImageViewerPlugin<E>) ivp;
+          synchManager.updateAllListeners(typed, sel);
+          restoreTiledPaneSynch(typed);
+        }
+      }
+    }
   }
 
   protected ToggleButtonListener newInverseStackAction() {
@@ -504,10 +569,7 @@ public abstract class ImageViewerEventManager<E extends ImageElement> implements
   }
 
   public <T> Optional<T> getAction(Feature<T> feature) {
-    if (feature != null) {
-      return Optional.ofNullable((T) actions.get(feature));
-    }
-    return Optional.empty();
+    return Optional.ofNullable((T) actions.get(feature));
   }
 
   public boolean isActionRegistered(Feature<?> feature) {
@@ -633,58 +695,107 @@ public abstract class ImageViewerEventManager<E extends ImageElement> implements
   public ViewCanvas<E> getSelectedViewPane() {
     ImageViewerPlugin<E> container = selectedView2dContainer;
     if (container != null) {
-      return container.getSelectedImagePane();
+      return container.getSelectedViewCanvas();
     }
     return null;
+  }
+
+  public ViewportPane<E> getSelectedViewPortPane() {
+    ImageViewerPlugin<E> container = selectedView2dContainer;
+    if (container != null) {
+      return container.getSelectedViewportPane();
+    }
+    return null;
+  }
+
+  /**
+   * Builds a "Viewport Layout" submenu that lets the user switch the selected {@link ViewportPane}
+   * between STACK mode and various TILED presets.
+   *
+   * @param prop preference key enabling the menu; {@code null} to always show it
+   * @return the menu, or {@code null} when the selected container does not support viewport panes
+   *     or the menu is disabled by the preference
+   */
+  public JMenu getViewportLayoutMenu(String prop) {
+    ImageViewerPlugin<E> container = getSelectedView2dContainer();
+    ViewportPane<E> pane = getSelectedViewPortPane();
+    if (container == null
+        || !container.supportsViewportPanes()
+        || pane == null
+        || !GuiUtils.getUICore().getSystemPreferences().getBooleanProperty(prop, true)) {
+      return null;
+    }
+
+    JMenu menu = new JMenu(Messages.getString("ImageViewerEventManager.viewport_layout"));
+
+    boolean isTiled = pane.isTiled();
+    JCheckBoxMenuItem stackItem =
+        new JCheckBoxMenuItem(
+            Messages.getString("ImageViewerEventManager.viewport_stack"), !isTiled);
+    stackItem.addActionListener(
+        e -> {
+          pane.switchToStack();
+          updateComponentsListener(pane.getSelectedCanvas());
+        });
+    menu.add(stackItem);
+    menu.add(new JSeparator());
+
+    int[][] presets = {{1, 2}, {2, 1}, {2, 2}, {2, 3}, {3, 2}, {3, 3}, {4, 4}};
+    for (int[] preset : presets) {
+      int cols = preset[0];
+      int rows = preset[1];
+      boolean isCurrent = isTiled && pane.getTiledCols() == cols && pane.getTiledRows() == rows;
+
+      String label =
+          MessageFormat.format(
+              Messages.getString("ImageViewerEventManager.viewport_tiled"), cols, rows);
+      JCheckBoxMenuItem item = new JCheckBoxMenuItem(label, isCurrent);
+      item.addActionListener(
+          e -> {
+            if (!isCurrent) {
+              pane.switchToTiled(cols, rows, () -> container.createDefaultView(null));
+              updateComponentsListener(pane.getSelectedCanvas());
+            }
+          });
+      menu.add(item);
+    }
+    return menu;
   }
 
   public ImageViewerPlugin<E> getSelectedView2dContainer() {
     return selectedView2dContainer;
   }
 
-  public boolean isSelectedView2dContainerInTileMode() {
-    ImageViewerPlugin<E> container = selectedView2dContainer;
-    if (container != null) {
-      return SynchData.Mode.TILE.equals(container.getSynchView().getSynchData().getMode());
-    }
-    return false;
-  }
-
   public void updateAllListeners(ImageViewerPlugin<E> viewerPlugin, SynchView synchView) {
     clearAllPropertyChangeListeners();
-    if (viewerPlugin != null) {
-      ViewCanvas<E> viewPane = viewerPlugin.getSelectedImagePane();
-      if (viewPane == null) {
-        return;
-      }
-      if (viewPane.getSeries() != null) {
-        SynchData synch = synchView.getSynchData();
-        viewPane.setActionsInView(ActionW.SYNCH_LINK.cmd(), null);
-        addPropertyChangeListener(ActionW.SYNCH.cmd(), viewPane);
+    synchManager.updateAllListeners(viewerPlugin, synchView);
+    restoreTiledPaneSynch(viewerPlugin);
+  }
 
-        final List<ViewCanvas<E>> panes = viewerPlugin.getImagePanels();
-        panes.remove(viewPane);
-        if (SynchView.NONE.equals(synchView)) {
-          for (ViewCanvas<E> pane : panes) {
-            pane.setActionsInView(ActionW.SYNCH_LINK.cmd(), synch);
-          }
-        } else if (Mode.STACK.equals(synch.getMode())) {
-          // TODO if Pan is activated than rotation is required
-          boolean hasLink = false;
-          for (ViewCanvas<E> pane : panes) {
-            boolean synchByDefault = isCompatible(viewPane.getSeries(), pane.getSeries());
-            pane.setActionsInView(ActionW.SYNCH_LINK.cmd(), synchByDefault ? synch.copy() : null);
-            if (synchByDefault) {
-              hasLink = true;
-              addPropertyChangeListener(ActionW.SYNCH.cmd(), pane);
-            }
-          }
-        } else if (Mode.TILE.equals(synch.getMode())) {
-          for (ViewCanvas<E> pane : panes) {
-            pane.setActionsInView(ActionW.SYNCH_LINK.cmd(), synch.copy());
-            addPropertyChangeListener(ActionW.SYNCH.cmd(), pane);
-          }
-        }
+  /**
+   * Restores the TILE synchronization of every tiled {@link ViewportPane} after the global listener
+   * rebuild (which removes all SYNCH listeners), and adapts the scroll range when the selected
+   * canvas belongs to a tiled pane so the last tiles cannot run past the series end.
+   */
+  private void restoreTiledPaneSynch(ImageViewerPlugin<E> viewerPlugin) {
+    if (viewerPlugin == null) {
+      return;
+    }
+    for (ViewportPane<E> pane : viewerPlugin.getViewportPanes()) {
+      pane.updateSynchRegistration();
+    }
+
+    ViewportPane<E> selectedPane = viewerPlugin.getSelectedViewportPane();
+    if (selectedPane != null && selectedPane.isTiled()) {
+      ViewCanvas<E> canvas = selectedPane.getSelectedCanvas();
+      MediaSeries<E> series = canvas.getSeries();
+      if (series != null) {
+        @SuppressWarnings("unchecked")
+        Filter<E> filter = (Filter<E>) canvas.getActionValue(ActionW.FILTERED_SERIES.cmd());
+        int maxShift = series.size(filter) - selectedPane.getAllViewCanvases().size();
+        int value = Math.max(1, canvas.getFrameIndex() - canvas.getTileOffset() + 1);
+        getAction(ActionW.SCROLL_SERIES)
+            .ifPresent(a -> a.setSliderMinMaxValue(1, Math.max(maxShift, 1), value, false));
       }
     }
   }
@@ -692,8 +803,9 @@ public abstract class ImageViewerEventManager<E extends ImageElement> implements
   protected boolean commonDisplayShortcuts(KeyEvent e) {
     int keyEvent = e.getKeyCode();
     int modifiers = e.getModifiers();
+    ShortcutManager sm = ShortcutManager.getInstance();
 
-    if (keyEvent == KeyEvent.VK_ESCAPE) {
+    if (sm.matches(ShortcutManager.ID_VIEWER_ESCAPE, keyEvent, modifiers)) {
       resetDisplay();
     } else if (keyEvent == ActionW.CINESTART.getKeyCode()
         && ActionW.CINESTART.getModifier() == modifiers) {
@@ -705,7 +817,7 @@ public abstract class ImageViewerEventManager<E extends ImageElement> implements
           cineAction.get().start();
         }
       }
-    } else if (keyEvent == KeyEvent.VK_P && modifiers == 0) {
+    } else if (sm.matches(ShortcutManager.ID_VIEWER_PRINT, keyEvent, modifiers)) {
       ImageViewerPlugin<? extends ImageElement> view = getSelectedView2dContainer();
       if (view != null) {
         ColorLayerUI layer = ColorLayerUI.createTransparentLayerUI(view);
@@ -716,21 +828,23 @@ public abstract class ImageViewerEventManager<E extends ImageElement> implements
                 this);
         ColorLayerUI.showCenterScreen(dialog, layer);
       }
-    } else if (keyEvent == KeyEvent.VK_UP && !e.isAltDown() && !e.isControlDown()) {
-      int shift = e.isShiftDown() ? 10 : 1;
-      getAction(ActionW.SCROLL_SERIES).ifPresent(a -> a.setSliderValue(a.getSliderValue() - shift));
-    } else if (keyEvent == KeyEvent.VK_DOWN && !e.isAltDown() && !e.isControlDown()) {
-      int shift = e.isShiftDown() ? 10 : 1;
-      getAction(ActionW.SCROLL_SERIES).ifPresent(a -> a.setSliderValue(a.getSliderValue() + shift));
-    } else if (keyEvent == KeyEvent.VK_HOME && !e.isControlDown()) {
+    } else if (sm.matches(ShortcutManager.ID_VIEWER_SCROLL_UP, keyEvent, modifiers)) {
+      getAction(ActionW.SCROLL_SERIES).ifPresent(a -> a.setSliderValue(a.getSliderValue() - 1));
+    } else if (sm.matches(ShortcutManager.ID_VIEWER_SCROLL_UP_FAST, keyEvent, modifiers)) {
+      getAction(ActionW.SCROLL_SERIES).ifPresent(a -> a.setSliderValue(a.getSliderValue() - 10));
+    } else if (sm.matches(ShortcutManager.ID_VIEWER_SCROLL_DOWN, keyEvent, modifiers)) {
+      getAction(ActionW.SCROLL_SERIES).ifPresent(a -> a.setSliderValue(a.getSliderValue() + 1));
+    } else if (sm.matches(ShortcutManager.ID_VIEWER_SCROLL_DOWN_FAST, keyEvent, modifiers)) {
+      getAction(ActionW.SCROLL_SERIES).ifPresent(a -> a.setSliderValue(a.getSliderValue() + 10));
+    } else if (sm.matches(ShortcutManager.ID_VIEWER_SCROLL_FIRST, keyEvent, modifiers)) {
       getAction(ActionW.SCROLL_SERIES).ifPresent(a -> a.setSliderValue(a.getSliderMin()));
-    } else if (keyEvent == KeyEvent.VK_END && !e.isControlDown()) {
+    } else if (sm.matches(ShortcutManager.ID_VIEWER_SCROLL_LAST, keyEvent, modifiers)) {
       getAction(ActionW.SCROLL_SERIES).ifPresent(a -> a.setSliderValue(a.getSliderMax()));
-    } else if (keyEvent == KeyEvent.VK_SUBTRACT && e.isControlDown()) {
+    } else if (sm.matches(ShortcutManager.ID_VIEWER_ZOOM_OUT, keyEvent, modifiers)) {
       getAction(ActionW.ZOOM).ifPresent(a -> a.setSliderValue(a.getSliderValue() - 1));
-    } else if (keyEvent == KeyEvent.VK_ADD && e.isControlDown()) {
+    } else if (sm.matches(ShortcutManager.ID_VIEWER_ZOOM_IN, keyEvent, modifiers)) {
       getAction(ActionW.ZOOM).ifPresent(a -> a.setSliderValue(a.getSliderValue() + 1));
-    } else if (keyEvent == KeyEvent.VK_ENTER && e.isControlDown()) {
+    } else if (sm.matches(ShortcutManager.ID_VIEWER_BEST_FIT, keyEvent, modifiers)) {
       firePropertyChange(
           ActionW.SYNCH.cmd(),
           null,

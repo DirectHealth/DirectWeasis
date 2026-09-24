@@ -376,7 +376,7 @@ public abstract class Series<E extends MediaElement> extends MediaSeriesGroupNod
 
   @Override
   public boolean isSelected() {
-    return LangUtil.getNULLtoFalse((Boolean) getTagValue(TagW.SeriesSelected));
+    return LangUtil.nullToFalse((Boolean) getTagValue(TagW.SeriesSelected));
   }
 
   @Override
@@ -392,7 +392,7 @@ public abstract class Series<E extends MediaElement> extends MediaSeriesGroupNod
 
   @Override
   public boolean isFocused() {
-    return LangUtil.getNULLtoFalse((Boolean) getTagValue(TagW.SeriesFocused));
+    return LangUtil.nullToFalse((Boolean) getTagValue(TagW.SeriesFocused));
   }
 
   @Override

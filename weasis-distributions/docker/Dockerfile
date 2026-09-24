@@ -1,8 +1,8 @@
-# Based on image: https://github.com/adoptium/containers/blob/main/24/jdk/ubuntu/noble/Dockerfile
-# Additional packages: https://github.com/adoptium/temurin24-binaries/releases/
+# Based on image: https://github.com/adoptium/containers/blob/main/26/jdk/ubuntu/resolute/Dockerfile
+# Additional packages: https://github.com/adoptium/temurin26-binaries/releases/
 # Add libraries required by weasis build: bzip2 unzip xz-utils fakeroot rpm
 
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH=$JAVA_HOME/bin:$PATH
@@ -18,26 +18,53 @@ RUN set -eux; \
     locale-gen en_US.UTF-8; \
     rm -rf /var/lib/apt/lists/*
 
-ENV JAVA_VERSION=jdk-24+36
+ENV JAVA_VERSION=jdk-26.0.2+10
 
 RUN set -eux; \
     ARCH="$(dpkg --print-architecture)"; \
     case "${ARCH}" in \
        amd64) \
-         ESUM='aea1cc55e51cf651c85f2f00ad021603fe269c4bb6493fa97a321ad770c9b096'; \
-         BINARY_URL='https://github.com/adoptium/temurin24-binaries/releases/download/jdk-24.0.2%2B12/OpenJDK24U-jdk_x64_linux_hotspot_24.0.2_12.tar.gz'; \
+         ESUM='56f768372f6ca1e2eb4c5f46b78f627949e8dcfe9c9723926cf45a45faf35802'; \
+         BINARY_URL='https://github.com/adoptium/temurin26-binaries/releases/download/jdk-26.0.2%2B10/OpenJDK26U-jdk_x64_linux_hotspot_26.0.2_10.tar.gz'; \
          ;; \
        arm64) \
-         ESUM='6f8725d186d05c627176db9c46c732a6ef3ba41d9e9b3775c4727fc8ac642bb2'; \
-         BINARY_URL='https://github.com/adoptium/temurin24-binaries/releases/download/jdk-24.0.2%2B12/OpenJDK24U-jdk_aarch64_linux_hotspot_24.0.2_12.tar.gz'; \
+         ESUM='f82aeb1d5b0ddb93d3bd81c20948bc560c0758993157202424c17e805e2effbb'; \
+         BINARY_URL='https://github.com/adoptium/temurin26-binaries/releases/download/jdk-26.0.2%2B10/OpenJDK26U-jdk_aarch64_linux_hotspot_26.0.2_10.tar.gz'; \
          ;; \
        *) \
          echo "Unsupported arch: ${ARCH}"; \
          exit 1; \
          ;; \
     esac; \
-    wget --progress=dot:giga -O /tmp/openjdk.tar.gz ${BINARY_URL}; \
+    savedAptMark="$(apt-mark showmanual)"; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends wget gnupg; \
+    wget --progress=dot:giga --tries=3 --timeout=30 -O /tmp/openjdk.tar.gz ${BINARY_URL}; \
+    wget --progress=dot:giga --tries=3 --timeout=30 -O /tmp/openjdk.tar.gz.sig ${BINARY_URL}.sig; \
+    # The pinned checksum is the authoritative integrity check; verify it first so
+    # the build never depends on a keyserver being reachable.
     echo "${ESUM} */tmp/openjdk.tar.gz" | sha256sum -c -; \
+    export GNUPGHOME="$(mktemp -d)"; \
+    # gpg: key 843C48A565F8F04B: "Adoptium GPG Key (DEB/RPM Signing Key) <temurin-dev@eclipse.org>" imported.
+    # Keyservers time out intermittently (notably under QEMU emulation), so try
+    # several and treat a total failure as a warning rather than a build error.
+    KEY='3B04D753C9050D9A5D343F39843C48A565F8F04B'; \
+    gpg_ok=0; \
+    for ks in keyserver.ubuntu.com keys.openpgp.org pgp.mit.edu; do \
+      for attempt in 1 2; do \
+        if gpg --batch --keyserver "${ks}" --keyserver-options timeout=20 --recv-keys "${KEY}"; then \
+          gpg_ok=1; break; \
+        fi; \
+        sleep 5; \
+      done; \
+      if [ "${gpg_ok}" = 1 ]; then break; fi; \
+    done; \
+    if [ "${gpg_ok}" = 1 ]; then \
+      gpg --batch --verify /tmp/openjdk.tar.gz.sig /tmp/openjdk.tar.gz; \
+    else \
+      echo "WARNING: could not fetch the Adoptium GPG key from any keyserver; relying on the pinned SHA-256 (already verified)."; \
+    fi; \
+    rm -rf "${GNUPGHOME}" /tmp/openjdk.tar.gz.sig; \
     mkdir -p "$JAVA_HOME"; \
     tar --extract \
         --file /tmp/openjdk.tar.gz \
@@ -46,6 +73,10 @@ RUN set -eux; \
         --no-same-owner \
     ; \
     rm -f /tmp/openjdk.tar.gz ${JAVA_HOME}/lib/src.zip; \
+    apt-mark auto '.*' > /dev/null; \
+    apt-mark manual $savedAptMark > /dev/null; \
+    apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
+    rm -rf /var/lib/apt/lists/*; \
     # https://github.com/docker-library/openjdk/issues/331#issuecomment-498834472
     find "$JAVA_HOME/lib" -name '*.so' -exec dirname '{}' ';' | sort -u > /etc/ld.so.conf.d/docker-openjdk.conf; \
     ldconfig; \

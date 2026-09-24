@@ -7,12 +7,8 @@
 REVISON_INC="1"
 PACKAGE=YES
 
-# Options
-# jdk.localedata => other locale (en_us) data are included in the jdk.localedata
-# jdk.jdwp.agent => package for debugging agent
-
-# Base modules for all platforms
-JDK_MODULES_BASE="java.base,java.compiler,java.datatransfer,java.net.http,java.desktop,java.logging,java.management,java.prefs,java.xml,jdk.localedata,jdk.charsets,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.jdwp.agent,java.sql"
+# The JDK modules and the launch options are defined in launch-options.sh, shared with the
+# GitHub workflow building the macOS and Windows installers.
 NAME="DirectViewer"
 IDENTIFIER="org.weasis.launcher"
 
@@ -33,7 +29,7 @@ do
 echo "Usage: package-weasis.sh <options>"
 echo "Sample usages:"
 echo "    Build an installer for the current platform with the minimal required parameters"
-echo "        package-weasis.sh --jdk /home/user/jdk-20"
+echo "        package-weasis.sh --jdk /home/user/jdk-25"
 echo ""
 echo "Options:"
 echo " --help -h
@@ -111,7 +107,7 @@ fi
 
 cp "$INPUT_PATH/weasis/bundle/weasis-core-img-"* weasis-core-img.jar.xz
 xz --decompress weasis-core-img.jar.xz
-ARC_OS=$("$JDK_PATH_UNIX/bin/java" -cp "weasis-core-img.jar" org.weasis.core.util.NativeLibrary)
+ARC_OS=$("$JDK_PATH_UNIX/bin/java" -cp "weasis-core-img.jar" org.weasis.opencv.natives.NativeLibrary)
 rm -f weasis-core-img.jar
 if [ -z "$ARC_OS" ] ; then
   die "Cannot get Java system architecture"
@@ -119,12 +115,9 @@ fi
 machine=$(echo "${ARC_OS}" | cut -d'-' -f1)
 arc=$(echo "${ARC_OS}" | cut -d'-' -f2-3)
 
-# Set JDK modules based on the platform
-if [ "$machine" = "windows" ] ; then
-  JDK_MODULES="${JDK_MODULES_BASE},jdk.crypto.mscapi"
-else
-  JDK_MODULES="${JDK_MODULES_BASE}"
-fi
+# Set the JDK modules and the launch options (JDK_MODULES, customOptions, commonOptions)
+# shellcheck source=launch-options.sh
+source "${curPath}/launch-options.sh" "$machine" || die "Cannot read the launch options"
 
 echo "Platform: $machine"
 echo "JDK Modules: $JDK_MODULES"
@@ -189,6 +182,10 @@ fi
 if [ "$machine" = "windows" ] ; then
   INPUT_DIR="$INPUT_PATH\weasis"
   IMAGE_PATH="$OUTPUT_PATH\\${NAME}"
+  # JDK 26+ requires WiX 4+ (wix.exe) for MSI packaging.
+  if ! command -v wix &> /dev/null ; then
+    die "WiX 4+ is required for Windows packaging with JDK 26+.\nInstall the latest version from https://github.com/wixtoolset/wix/releases\nor run: dotnet tool install --global wix"
+  fi
 else
   IMAGE_PATH="$OUTPUT_PATH/$NAME"
   INPUT_DIR="$INPUT_PATH_UNIX/weasis"
@@ -204,14 +201,33 @@ rm -f "$INPUT_DIR"/*.jar.pack.gz
 find "$INPUT_DIR"/bundle/weasis-opencv-core-* -type f ! -name '*-'"${ARC_OS}"'-*'  -exec rm -f {} \;
 find "$INPUT_DIR"/bundle/jogamp-* -type f ! -name '*-'"${ARC_OS}"'-*' ! -name 'jogamp-[0-9]*' -exec rm -f {} \;
 
-if [ "$machine" = "macosx" ] ; then
-    mkdir jar_contents
-    unzip "$INPUT_DIR"/weasis-launcher.jar -d jar_contents
-    codesign --force --deep --timestamp --sign "$CERTIFICATE" -vvv jar_contents/com/formdev/flatlaf/natives/libflatlaf-macos-arm64.dylib
-    codesign --force --deep --timestamp --sign "$CERTIFICATE" -vvv jar_contents/com/formdev/flatlaf/natives/libflatlaf-macos-x86_64.dylib
-    jar cfv weasis-launcher.jar -C jar_contents .
-    mv -f weasis-launcher.jar "$INPUT_DIR"/weasis-launcher.jar
-    rm -rf jar_contents
+# Optional deployment specific preparation of the input directory, absent from the public distribution
+siteHook="${curPath}/prepare-input-site.sh"
+if [[ -f "$siteHook" ]] ; then
+  bash "$siteHook" "$INPUT_PATH_UNIX/weasis" || die "Cannot prepare the input directory"
+fi
+
+# Pre-sign ALL native libraries embedded in JARs (macOS only).
+# jpackage --mac-sign will sign the extracted content of the app image,
+# but dylibs INSIDE jars must be signed before jpackage repackages them.
+if [ "$machine" = "macosx" ] && [[ -n "$CERTIFICATE" ]] ; then
+    for jar_file in "$INPUT_DIR"/*.jar "$INPUT_DIR"/bundle/*.jar; do
+      [ -f "$jar_file" ] || continue
+      if unzip -l "$jar_file" 2>/dev/null | grep -qE '\.(dylib|jnilib)$'; then
+        echo "--- Signing native libs in: $jar_file"
+        tmpdir=$(mktemp -d)
+        unzip -q "$jar_file" -d "$tmpdir"
+        while IFS= read -r -d '' lib; do
+          echo "  Signing: $lib"
+          codesign --force --options runtime --timestamp \
+            --sign "$CERTIFICATE" "$lib"
+        done < <(find "$tmpdir" \( -name "*.dylib" -o -name "*.jnilib" \) -print0)
+        jar_name=$(basename "$jar_file")
+        (cd "$tmpdir" && jar cf "/tmp/$jar_name" .)
+        mv -f "/tmp/$jar_name" "$jar_file"
+        rm -rf "$tmpdir"
+      fi
+    done
 fi
 
 # Remove previous package
@@ -229,36 +245,30 @@ if [ -d "${TEMP_PATH}" ] ; then
   rm -rf "${TEMP_PATH}"
 fi
 
-if [ "$machine" = "macosx" ] ; then
-  DICOMIZER_CONFIG="Dicomizer=$RES/dicomizer-launcher.properties"
-  declare -a customOptions=("--java-options" "-splash:\$APPDIR/resources/images/about-round.png" "--java-options" "-Dapple.laf.useScreenMenuBar=true" "--java-options" "-Dapple.awt.application.appearance=NSAppearanceNameDarkAqua")
-  if [[ -n "$CERTIFICATE" ]] ; then
-    declare -a signArgs=("--mac-package-identifier" "$IDENTIFIER" "--mac-signing-key-user-name" "$CERTIFICATE"  "--mac-sign")
-  else
-    declare -a signArgs=("--mac-package-identifier" "$IDENTIFIER")
-  fi
-elif [ "$machine" = "windows" ] ; then
+declare -a signArgs=()
+if [ "$machine" = "windows" ] ; then
   DICOMIZER_CONFIG="Dicomizer=$RES\dicomizer-launcher.properties"
-  declare -a customOptions=("--java-options" "-splash:\$APPDIR\resources\images\about-round.png" )
-  declare -a signArgs=()
 else
   DICOMIZER_CONFIG="Dicomizer=$RES/dicomizer-launcher.properties"
-  declare -a customOptions=("--java-options" "-splash:\$APPDIR/resources/images/about-round.png" )
-  declare -a signArgs=()
+  if [ "$machine" = "macosx" ] ; then
+    if [[ -n "$CERTIFICATE" ]] ; then
+      signArgs=("--mac-package-identifier" "$IDENTIFIER" "--mac-signing-key-user-name" "$CERTIFICATE" "--mac-sign")
+    else
+      signArgs=("--mac-package-identifier" "$IDENTIFIER")
+    fi
+  fi
 fi
-declare -a commonOptions=("--java-options" "-Dgosh.port=17179" \
-"--java-options" "--enable-native-access=ALL-UNNAMED" \
-"--java-options" "-Djavax.accessibility.assistive_technologies=org.weasis.launcher.EmptyAccessibilityProvider" \
-"--java-options" "-Djavax.accessibility.screen_magnifier_present=false");
 
-$JPKGCMD --type app-image --input "$INPUT_DIR" --dest "$OUTPUT_PATH" --name "$NAME" \
---main-jar weasis-launcher.jar --main-class org.weasis.launcher.AppLauncher --add-modules "$JDK_MODULES" \
---add-launcher "${DICOMIZER_CONFIG}" --resource-dir "$RES"  --app-version "$WEASIS_CLEAN_VERSION" \
-"${tmpArgs[@]}" --verbose "${signArgs[@]}" "${customOptions[@]}" "${commonOptions[@]}"
-
-if [ "$machine" = "macosx" ] && [[ -n "$CERTIFICATE" ]] ; then
-    codesign --timestamp --entitlements "$RES/uri-launcher.entitlements" --options runtime --force -vvv --sign "$CERTIFICATE" "$RES/$NAME.app"
+# On Linux the deb/rpm are built in a single jpackage step from --input (see below), so the
+# standalone app-image is only needed for the other platforms or for --no-installer builds.
+if [ "$machine" != "linux" ] || [ "$PACKAGE" = "NO" ] ; then
+  # shellcheck disable=SC2154 # customOptions and commonOptions come from launch-options.sh
+  $JPKGCMD --type app-image --input "$INPUT_DIR" --dest "$OUTPUT_PATH" --name "$NAME" \
+  --main-jar weasis-launcher.jar --main-class org.weasis.launcher.AppLauncher --add-modules "$JDK_MODULES" \
+  --add-launcher "${DICOMIZER_CONFIG}" --resource-dir "$RES"  --app-version "$WEASIS_CLEAN_VERSION" \
+  "${tmpArgs[@]}" --verbose "${signArgs[@]}" "${customOptions[@]}" "${commonOptions[@]}"
 fi
+
 
 if [ "$PACKAGE" = "YES" ] ; then
   VENDOR="DirectHealth"
@@ -273,20 +283,50 @@ if [ "$PACKAGE" = "YES" ] ; then
   elif [ "$machine" = "linux" ] ; then
     declare -a installerTypes=("deb" "rpm")
     for installerType in "${installerTypes[@]}"; do
-      [ "${installerType}" = "rpm" ] && DEPENDENCIES="" || DEPENDENCIES="libstdc++6, libgcc1"
-      $JPKGCMD --type "$installerType" --app-image "$IMAGE_PATH" --dest "$OUTPUT_PATH"  --name "$NAME" --resource-dir "$RES" \
+      if [ "${installerType}" = "rpm" ]; then
+        DEPENDENCIES=""
+        declare -a typeArgs=("--linux-rpm-license-type" "EPL-2.0")
+      else
+        DEPENDENCIES="libstdc++6, libgcc1"
+        declare -a typeArgs=("--linux-deb-maintainer" "Nicolas Roduit")
+      fi
+      # Build the deb/rpm in a single step directly from --input (not from a prebuilt --app-image).
+      # On JDK 26+ the two-step "--type deb --app-image <image>" path fails to resolve the launcher
+      # icons from --resource-dir and falls back to the default JavaApp.png, so both the main and the
+      # Dicomizer launchers end up with the generic Java icon. The single-step build resolves them.
+      # shellcheck disable=SC2154 # customOptions and commonOptions come from launch-options.sh
+      $JPKGCMD --type "$installerType" --input "$INPUT_DIR" --dest "$OUTPUT_PATH" --name "$NAME" \
+      --main-jar weasis-launcher.jar --main-class org.weasis.launcher.AppLauncher --add-modules "$JDK_MODULES" \
+      --add-launcher "${DICOMIZER_CONFIG}" --resource-dir "$RES" \
       --license-file "$INPUT_PATH/Licence.txt" --description "Weasis DICOM viewer" --vendor "$VENDOR" \
       --copyright "$COPYRIGHT" --app-version "$WEASIS_CLEAN_VERSION" --file-associations "${curPath}/file-associations.properties" \
-      --linux-app-release "$REVISON_INC" --linux-package-name "weasis" --linux-deb-maintainer "Nicolas Roduit" --linux-rpm-license-type "EPL-2.0" \
+      --linux-app-release "$REVISON_INC" --linux-package-name "weasis" \
+      "${typeArgs[@]}" \
       --linux-menu-group "Viewer;MedicalSoftware;Graphics;" --linux-app-category "science" --linux-package-deps "${DEPENDENCIES}" \
-      --linux-shortcut "${tmpArgs[@]}" --verbose
+      --linux-shortcut "${customOptions[@]}" "${commonOptions[@]}" "${tmpArgs[@]}" --verbose
       if [ -d "${TEMP_PATH}" ] ; then
         rm -rf "${TEMP_PATH}"
       fi
     done
   elif [ "$machine" = "macosx" ] ; then
+    # Do NOT pass --mac-sign here: the app bundle was already signed with proper
+    # --options runtime + --timestamp in the app-image step above.
+    # Using --mac-sign at the pkg stage causes jpackage to re-sign every dylib
+    # without --timestamp, which breaks Apple notarization.
     $JPKGCMD --type "pkg" --app-image "$IMAGE_PATH.app" --dest "$OUTPUT_PATH" --name "$NAME" --resource-dir "$RES" \
     --license-file "$INPUT_PATH/Licence.txt" --copyright "$COPYRIGHT" --app-version "$WEASIS_CLEAN_VERSION" \
-    "${tmpArgs[@]}" --verbose "${signArgs[@]}"
+    --mac-package-identifier "$IDENTIFIER" "${tmpArgs[@]}" --verbose
+
+    if [[ -n "$CERTIFICATE" ]] ; then
+      UNSIGNED_PKG="$OUTPUT_PATH/$NAME-$WEASIS_CLEAN_VERSION.pkg"
+      SIGNED_PKG="$OUTPUT_PATH/$NAME-$WEASIS_CLEAN_VERSION-${arc}.pkg"
+      # Sign the unsigned .pkg with the Developer ID Installer certificate.
+      # productsign only wraps the outer package; it does not touch the app contents.
+      INSTALLER_ID=$(security find-identity -v -p basic \
+        | grep "Developer ID Installer" | head -1 | awk -F'"' '{print $2}')
+      echo "Signing pkg with installer identity: $INSTALLER_ID"
+      productsign --sign "$INSTALLER_ID" --timestamp "$UNSIGNED_PKG" "$SIGNED_PKG"
+      rm -f "$UNSIGNED_PKG"
+    fi
   fi
 fi

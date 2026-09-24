@@ -100,7 +100,7 @@ public class ThumbnailRenderer<E extends MediaElement> extends JPanel
         Dimension dim = GuiUtils.getDimension(ICON_DIM.width / 2, ICON_DIM.height / 2);
         icon = ResourceUtil.getIcon(fileIcon, dim.width, dim.height);
       }
-      if (LangUtil.getNULLtoFalse((Boolean) value.getTagValue(TagW.Checked))) {
+      if (LangUtil.nullToFalse((Boolean) value.getTagValue(TagW.Checked))) {
         iconCheckedLabel.setIcon(ResourceUtil.getToolBarIcon(OtherIcon.TICK_ON));
       } else {
         iconCheckedLabel.setIcon(null);

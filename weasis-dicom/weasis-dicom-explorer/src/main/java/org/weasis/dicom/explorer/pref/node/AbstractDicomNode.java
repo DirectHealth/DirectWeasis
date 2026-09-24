@@ -36,7 +36,7 @@ import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.service.BundlePreferences;
 import org.weasis.core.api.service.WProperties;
 import org.weasis.core.api.util.ResourceUtil;
-import org.weasis.core.util.FileUtil;
+import org.weasis.core.util.StreamUtil;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.TransferSyntax;
 import org.weasis.dicom.codec.utils.DicomResource;
@@ -219,7 +219,7 @@ public abstract class AbstractDicomNode {
     final BundleContext context = AppProperties.getBundleContext(AbstractDicomNode.class);
     loadDicomNodes(
         list,
-        new File(BundlePreferences.getDataFolder(context), type.getFilename()),
+        BundlePreferences.getFileInDataFolder(context, type.getFilename()).toFile(),
         type,
         true,
         usage,
@@ -236,7 +236,7 @@ public abstract class AbstractDicomNode {
       writer =
           factory.createXMLStreamWriter(
               new FileOutputStream(
-                  new File(BundlePreferences.getDataFolder(context), type.getFilename())),
+                  BundlePreferences.getFileInDataFolder(context, type.getFilename()).toString()),
               "UTF-8"); // NON-NLS
 
       writer.writeStartDocument("UTF-8", "1.0"); // NON-NLS
@@ -255,7 +255,7 @@ public abstract class AbstractDicomNode {
     } catch (Exception e) {
       LOGGER.error("Error on writing DICOM node file", e);
     } finally {
-      FileUtil.safeClose(writer);
+      StreamUtil.safeClose(writer);
     }
   }
 
@@ -284,7 +284,7 @@ public abstract class AbstractDicomNode {
       } catch (Exception e) {
         LOGGER.error("Error on reading DICOM node file", e);
       } finally {
-        FileUtil.safeClose(xmler);
+        StreamUtil.safeClose(xmler);
       }
     }
   }

@@ -15,7 +15,7 @@ import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.ActionIcon;
 import org.weasis.core.ui.editor.image.ImageViewerPlugin;
 import org.weasis.core.ui.util.WtoolBar;
-import org.weasis.dicom.explorer.DicomFieldsView;
+import org.weasis.dicom.explorer.tag.DicomFieldsView;
 
 public class SrToolBar extends WtoolBar {
 

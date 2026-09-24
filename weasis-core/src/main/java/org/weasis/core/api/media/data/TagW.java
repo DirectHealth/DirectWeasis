@@ -26,7 +26,6 @@ import java.util.stream.Collectors;
 import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
-import javax.xml.stream.XMLStreamReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.Messages;
@@ -148,7 +147,7 @@ public class TagW {
       new TagW("WadoInstanceReferenceList", TagType.LIST);
   public static final TagW DicomSpecialElementList =
       new TagW("DicomSpecialElementList", TagType.LIST);
-  public static final TagW SlicePosition = new TagW("SlicePosition", TagType.DOUBLE, 3, 3);
+  public static final TagW SlicePosition = new TagW("SlicePosition", TagType.DOUBLE);
   public static final TagW SuvFactor = new TagW("SUVFactor", TagType.DOUBLE);
 
   public static final TagW RootElement = new TagW("RootElement", TagType.STRING);
@@ -160,17 +159,6 @@ public class TagW {
 
   /** DICOM common tags */
   public static final TagW SubseriesInstanceUID = new TagW("SubseriesInstanceUID", TagType.STRING);
-
-  // One or more Items shall be included in this sequence
-  public static final TagW VOILUTsExplanation =
-      new TagW("VOILUTsExplanation", TagType.STRING, 1, Integer.MAX_VALUE);
-  public static final TagW VOILUTsData = new TagW("VOILUTsData", TagType.OBJECT);
-
-  // Only a single Item shall be included in this sequence
-  public static final TagW ModalityLUTExplanation =
-      new TagW("ModalityLUTExplanation", TagType.STRING);
-  public static final TagW ModalityLUTType = new TagW("ModalityLUTType", TagType.STRING);
-  public static final TagW ModalityLUTData = new TagW("ModalityLUTData", TagType.OBJECT);
 
   // Only a single Item shall be included in this sequence
   public static final TagW PRLUTsExplanation = new TagW("PRLUTsExplanation", TagType.STRING);
@@ -218,11 +206,6 @@ public class TagW {
 
     // DICOM
     addTag(SubseriesInstanceUID);
-    addTag(VOILUTsExplanation);
-    addTag(VOILUTsData);
-    addTag(ModalityLUTExplanation);
-    addTag(ModalityLUTType);
-    addTag(ModalityLUTData);
     addTag(PRLUTsExplanation);
     addTag(PrDicomObject);
     addTag(MonoChrome);
@@ -394,42 +377,47 @@ public class TagW {
   }
 
   public Object getValue(Object data) {
-    Object value = null;
-    if (data instanceof XMLStreamReader xmler) {
-      if (isStringFamilyType()) {
-        value =
-            vmMax > 1
-                ? TagUtil.getStringArrayTagAttribute(xmler, keyword, (String[]) defaultValue)
-                : TagUtil.getTagAttribute(xmler, keyword, (String) defaultValue);
-      } else if (TagType.DATE.equals(type)
-          || TagType.TIME.equals(type)
-          || TagType.DATETIME.equals(type)) {
-        value =
-            vmMax > 1
-                ? TagUtil.getDatesFromElement(
-                    xmler, keyword, type, (TemporalAccessor[]) defaultValue)
-                : TagUtil.getDateFromElement(xmler, keyword, type, (TemporalAccessor) defaultValue);
-      } else if (TagType.INTEGER.equals(type)) {
-        value =
-            vmMax > 1
-                ? TagUtil.getIntArrayTagAttribute(xmler, keyword, (int[]) defaultValue)
-                : TagUtil.getIntegerTagAttribute(xmler, keyword, (Integer) defaultValue);
-      } else if (TagType.FLOAT.equals(type)) {
-        value =
-            vmMax > 1
-                ? TagUtil.getFloatArrayTagAttribute(xmler, keyword, (float[]) defaultValue)
-                : TagUtil.getFloatTagAttribute(xmler, keyword, (Float) defaultValue);
-      } else if (TagType.DOUBLE.equals(type)) {
-        value =
-            vmMax > 1
-                ? TagUtil.getDoubleArrayTagAttribute(xmler, keyword, (double[]) defaultValue)
-                : TagUtil.getDoubleTagAttribute(xmler, keyword, (Double) defaultValue);
-      } else {
-        value =
-            vmMax > 1
-                ? TagUtil.getStringArrayTagAttribute(xmler, keyword, (String[]) defaultValue)
-                : TagUtil.getTagAttribute(xmler, keyword, (String) defaultValue);
-      }
+    if (data instanceof AttributeSource source) {
+      return getValue(source);
+    }
+    return null;
+  }
+
+  protected Object getValue(AttributeSource source) {
+    Object value;
+    if (isStringFamilyType()) {
+      value =
+          vmMax > 1
+              ? TagUtil.getStringArrayTagAttribute(source, keyword, (String[]) defaultValue)
+              : TagUtil.getTagAttribute(source, keyword, (String) defaultValue);
+    } else if (TagType.DATE.equals(type)
+        || TagType.TIME.equals(type)
+        || TagType.DATETIME.equals(type)) {
+      value =
+          vmMax > 1
+              ? TagUtil.getDatesFromElement(
+                  source, keyword, type, (TemporalAccessor[]) defaultValue)
+              : TagUtil.getDateFromElement(source, keyword, type, (TemporalAccessor) defaultValue);
+    } else if (TagType.INTEGER.equals(type)) {
+      value =
+          vmMax > 1
+              ? TagUtil.getIntArrayTagAttribute(source, keyword, (int[]) defaultValue)
+              : TagUtil.getIntegerTagAttribute(source, keyword, (Integer) defaultValue);
+    } else if (TagType.FLOAT.equals(type)) {
+      value =
+          vmMax > 1
+              ? TagUtil.getFloatArrayTagAttribute(source, keyword, (float[]) defaultValue)
+              : TagUtil.getFloatTagAttribute(source, keyword, (Float) defaultValue);
+    } else if (TagType.DOUBLE.equals(type)) {
+      value =
+          vmMax > 1
+              ? TagUtil.getDoubleArrayTagAttribute(source, keyword, (double[]) defaultValue)
+              : TagUtil.getDoubleTagAttribute(source, keyword, (Double) defaultValue);
+    } else {
+      value =
+          vmMax > 1
+              ? TagUtil.getStringArrayTagAttribute(source, keyword, (String[]) defaultValue)
+              : TagUtil.getTagAttribute(source, keyword, (String) defaultValue);
     }
     return value;
   }

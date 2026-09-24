@@ -9,10 +9,13 @@
  */
 package org.weasis.core.api.image.op;
 
-import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Scanner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,67 +23,161 @@ import org.weasis.core.util.FileUtil;
 import org.weasis.opencv.op.lut.ByteLut;
 
 /**
- * <code>ByteLutCollection</code> contains a collection of lookup tables (LUT) stored in BGR for
- * OpenCV.
+ * Utility class for managing and manipulating byte lookup tables (LUTs) used in image processing.
+ * Provides methods to read, invert, and validate LUTs stored in BGR format (Blue-Green-Red).
  */
-public class ByteLutCollection {
+public final class ByteLutCollection {
+
   private static final Logger LOGGER = LoggerFactory.getLogger(ByteLutCollection.class);
+
+  private static final int BGR_BANDS = 3;
+  private static final int STANDARD_LUT_SIZE = 256;
+  private static final int BLUE_CHANNEL = 0;
+  private static final int GREEN_CHANNEL = 1;
+  private static final int RED_CHANNEL = 2;
+  private static final int RGB_COMPONENTS = 3;
+  private static final String WHITESPACE_PATTERN = "\\s+"; // NON-NLS
 
   private ByteLutCollection() {}
 
+  /**
+   * Inverts a lookup table by reversing the order of entries in each band.
+   *
+   * @param lut the lookup table to invert
+   * @return inverted lookup table, or null if input is null
+   * @throws IllegalArgumentException if LUT format is invalid
+   */
   public static byte[][] invert(byte[][] lut) {
     if (lut == null) {
       return null;
     }
-    int bands = lut.length;
-    int dynamic = lut[0].length - 1;
-    byte[][] invertLut = new byte[bands][dynamic + 1];
-    for (int j = 0; j < bands; j++) {
-      for (int i = 0; i <= dynamic; i++) {
-        invertLut[j][i] = lut[j][dynamic - i];
+    validateLutFormat(lut);
+
+    byte[][] invertedLut = new byte[lut.length][lut[0].length];
+    for (int band = 0; band < lut.length; band++) {
+      for (int i = 0; i < lut[band].length; i++) {
+        invertedLut[band][i] = lut[band][lut[band].length - 1 - i];
       }
     }
-    return invertLut;
+    return invertedLut;
   }
 
-  public static void readLutFilesFromResourcesDir(List<ByteLut> luts, File lutFolder) {
-    if (luts != null && lutFolder != null && lutFolder.exists() && lutFolder.isDirectory()) {
-      File[] files = lutFolder.listFiles();
-      if (files != null) {
-        for (File file : files) {
-          if (file.isFile() && file.canRead()) {
-            try (Scanner scan = new Scanner(file, StandardCharsets.UTF_8)) {
-              byte[][] lut = readLutFile(scan);
-              luts.add(new ByteLut(FileUtil.nameWithoutExtension(file.getName()), lut));
-            } catch (Exception e) {
-              LOGGER.error("Reading LUT file {}", file, e);
-            }
-          }
-        }
-        luts.sort(Comparator.comparing(ByteLut::name));
-      }
+  /**
+   * Reads LUT files from a directory and adds them to the provided list. Files are sorted
+   * alphabetically by name.
+   *
+   * @param lutEntries the list to add loaded LUTs to
+   * @param lutFolder the directory containing LUT files
+   * @throws IllegalArgumentException if lutEntries is null
+   */
+  public static void readLutFilesFromResourcesDir(List<ByteLut> lutEntries, Path lutFolder) {
+    Objects.requireNonNull(lutEntries, "LUT list cannot be null");
+
+    if (lutFolder == null || !Files.isDirectory(lutFolder)) {
+      LOGGER.debug("Invalid or non-existent LUT directory: {}", lutFolder);
+      return;
+    }
+    try (var paths = Files.walk(lutFolder, 1)) {
+      paths
+          .filter(Files::isRegularFile)
+          .filter(Files::isReadable)
+          .forEach(path -> loadLutFile(lutEntries, path));
+
+      lutEntries.sort(Comparator.comparing(ByteLut::name));
+    } catch (IOException e) {
+      LOGGER.error("Error reading LUT directory: {}", lutFolder, e);
     }
   }
 
+  /**
+   * Reads a LUT file from a Scanner and returns the parsed lookup table in BGR format. Lines
+   * starting with '#' are treated as comments. Missing entries are filled with the last valid value
+   * or identity mapping.
+   *
+   * @param scan the Scanner to read from
+   * @return parsed lookup table in BGR format (3 bands × 256 entries)
+   * @throws IllegalArgumentException if scanner is null
+   */
   public static byte[][] readLutFile(Scanner scan) {
-    final byte[][] lut = new byte[3][256];
+    Objects.requireNonNull(scan, "Scanner cannot be null");
+
+    byte[][] lut = new byte[BGR_BANDS][STANDARD_LUT_SIZE];
     int lineIndex = 0;
 
-    while (scan.hasNext()) {
-      if (lineIndex >= 256) {
-        break;
+    while (scan.hasNext() && lineIndex < STANDARD_LUT_SIZE) {
+      String line = scan.nextLine().trim();
+
+      if (line.isEmpty() || line.startsWith("#")) {
+        continue;
       }
 
-      String[] line = scan.nextLine().split("\\s+"); // NON-NLS
-      if (line.length == 3) {
-        // Convert rgb to bgr
-        lut[2][lineIndex] = (byte) Integer.parseInt(line[0]);
-        lut[1][lineIndex] = (byte) Integer.parseInt(line[1]);
-        lut[0][lineIndex] = (byte) Integer.parseInt(line[2]);
+      if (parseLutLine(line, lut, lineIndex)) {
+        lineIndex++;
       }
-
-      lineIndex++;
     }
+
+    fillRemainingEntries(lut, lineIndex);
     return lut;
+  }
+
+  private static void validateLutFormat(byte[][] lut) {
+    if (lut.length == 0) {
+      throw new IllegalArgumentException("LUT must have at least one band");
+    }
+
+    int expectedLength = lut[0].length;
+    for (byte[] band : lut) {
+      if (band.length != expectedLength) {
+        throw new IllegalArgumentException("All LUT bands must have the same length");
+      }
+    }
+  }
+
+  private static void loadLutFile(List<ByteLut> lutEntries, Path filePath) {
+    try (var scanner = new Scanner(filePath, StandardCharsets.UTF_8)) {
+      byte[][] lut = readLutFile(scanner);
+      String name = FileUtil.nameWithoutExtension(filePath.getFileName().toString());
+      lutEntries.add(new ByteLut(name, lut));
+    } catch (Exception e) {
+      LOGGER.error("Error reading LUT file: {}", filePath, e);
+    }
+  }
+
+  private static boolean parseLutLine(String line, byte[][] lut, int lineIndex) {
+    String[] components = line.split(WHITESPACE_PATTERN);
+
+    if (components.length != RGB_COMPONENTS) {
+      LOGGER.debug("Invalid LUT line format at index {}: {}", lineIndex, line);
+      return false;
+    }
+
+    try {
+      lut[RED_CHANNEL][lineIndex] = parseColorComponent(components[0]);
+      lut[GREEN_CHANNEL][lineIndex] = parseColorComponent(components[1]);
+      lut[BLUE_CHANNEL][lineIndex] = parseColorComponent(components[2]);
+      return true;
+    } catch (NumberFormatException e) {
+      LOGGER.debug("Invalid number format in LUT line at index {}: {}", lineIndex, line);
+      return false;
+    }
+  }
+
+  private static byte parseColorComponent(String component) {
+    int value = Integer.parseInt(component.trim());
+    return (byte) Math.clamp(value, 0, 255);
+  }
+
+  private static void fillRemainingEntries(byte[][] lut, int startIndex) {
+    if (startIndex >= STANDARD_LUT_SIZE) {
+      return;
+    }
+
+    for (int band = 0; band < BGR_BANDS; band++) {
+      byte fillValue = startIndex > 0 ? lut[band][startIndex - 1] : 0;
+
+      for (int i = startIndex; i < STANDARD_LUT_SIZE; i++) {
+        lut[band][i] = startIndex > 0 ? fillValue : (byte) i;
+      }
+    }
   }
 }

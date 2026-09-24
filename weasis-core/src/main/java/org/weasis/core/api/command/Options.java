@@ -291,7 +291,7 @@ public class Options implements Option {
 
     if (gopt != null) {
       for (Entry<String, Boolean> e : gopt.optSet.entrySet()) {
-        if (LangUtil.getNULLtoFalse(e.getValue())) {
+        if (LangUtil.nullToFalse(e.getValue())) {
           myOptSet.put(e.getKey(), true);
         }
       }
@@ -509,7 +509,7 @@ public class Options implements Option {
 
     // remove long option aliases
     for (Entry<String, String> alias : optAlias.entrySet()) {
-      if (LangUtil.getNULLtoFalse(optSet.get(alias.getKey()))) {
+      if (LangUtil.nullToFalse(optSet.get(alias.getKey()))) {
         optSet.put(alias.getValue(), true);
         if (optArg.containsKey(alias.getKey())) {
           optArg.put(alias.getValue(), optArg.get(alias.getKey()));

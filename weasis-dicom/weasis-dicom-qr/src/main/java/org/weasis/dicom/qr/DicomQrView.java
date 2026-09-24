@@ -10,21 +10,17 @@
 package org.weasis.dicom.qr;
 
 import com.formdev.flatlaf.FlatClientProperties;
-import com.github.lgooddatepicker.components.DatePicker;
-import com.github.lgooddatepicker.components.DatePickerSettings;
-import com.github.lgooddatepicker.optionalusertools.DateChangeListener;
 import java.awt.FlowLayout;
 import java.awt.event.ActionListener;
 import java.awt.event.ItemEvent;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.nio.file.Path;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-import java.time.format.FormatStyle;
+import java.time.ZoneId;
 import java.time.temporal.TemporalAdjusters;
 import java.time.temporal.WeekFields;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -40,6 +36,7 @@ import javax.swing.ComboBoxModel;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JFormattedTextField;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -64,8 +61,6 @@ import org.dcm4che3.net.service.QueryRetrieveLevel;
 import org.osgi.framework.BundleContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.weasis.core.api.auth.AuthMethod;
-import org.weasis.core.api.auth.OAuth2ServiceFactory;
 import org.weasis.core.api.explorer.DataExplorerView;
 import org.weasis.core.api.gui.util.AbstractItemDialogPage;
 import org.weasis.core.api.gui.util.AppProperties;
@@ -77,25 +72,29 @@ import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.gui.util.WinUtil;
 import org.weasis.core.api.media.data.MediaSeriesGroup;
+import org.weasis.core.api.media.data.Series;
 import org.weasis.core.api.media.data.TagW;
+import org.weasis.core.api.net.auth.AuthMethod;
+import org.weasis.core.api.net.auth.OAuth2ServiceFactory;
 import org.weasis.core.api.service.BundlePreferences;
 import org.weasis.core.api.service.WProperties;
-import org.weasis.core.api.util.ResourceUtil;
-import org.weasis.core.api.util.ResourceUtil.OtherIcon;
 import org.weasis.core.api.util.ThreadUtil;
 import org.weasis.core.ui.pref.PreferenceDialog;
+import org.weasis.core.ui.tp.raven.datetime.DatePicker;
+import org.weasis.core.ui.tp.raven.datetime.event.DateSelectionListener;
 import org.weasis.core.ui.tp.raven.spinner.SpinnerProgress;
-import org.weasis.core.ui.util.CalendarUtil;
 import org.weasis.core.util.FileUtil;
+import org.weasis.core.util.StreamUtil;
 import org.weasis.core.util.StringUtil;
+import org.weasis.dicom.codec.DicomSeries;
 import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.display.CharsetEncoding;
 import org.weasis.dicom.codec.display.Modality;
-import org.weasis.dicom.explorer.DicomExplorer;
 import org.weasis.dicom.explorer.DicomModel;
-import org.weasis.dicom.explorer.ImportDicom;
 import org.weasis.dicom.explorer.LoadLocalDicom;
 import org.weasis.dicom.explorer.PluginOpeningStrategy;
+import org.weasis.dicom.explorer.imp.ImportDicom;
+import org.weasis.dicom.explorer.main.DicomExplorer;
 import org.weasis.dicom.explorer.pref.node.AbstractDicomNode;
 import org.weasis.dicom.explorer.pref.node.AbstractDicomNode.RetrieveType;
 import org.weasis.dicom.explorer.pref.node.AbstractDicomNode.UsageType;
@@ -104,6 +103,7 @@ import org.weasis.dicom.explorer.pref.node.DefaultDicomNode;
 import org.weasis.dicom.explorer.pref.node.DicomWebNode;
 import org.weasis.dicom.explorer.pref.node.DicomWebNode.WebType;
 import org.weasis.dicom.explorer.rs.RsQueryParams;
+import org.weasis.dicom.explorer.rs.RsQueryResult;
 import org.weasis.dicom.explorer.wado.DownloadManager;
 import org.weasis.dicom.op.CFind;
 import org.weasis.dicom.param.AdvancedParams;
@@ -116,78 +116,62 @@ import org.weasis.dicom.tool.DicomListener;
 public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(DicomQrView.class);
+
+  /** Depth of a study path in the result tree: root, patient, study. */
+  private static final int STUDY_LEVEL = 3;
+
+  private static final int SERIES_LEVEL = 4;
+
   private DicomWebNode retrieveNode;
 
   public enum Period {
     ALL(Messages.getString("DicomQrView.all_dates"), () -> null),
 
-    TODAY(Messages.getString("DicomQrView.today"), LocalDate::now),
+    TODAY(Messages.getString("DicomQrView.today"), Period::today),
 
-    YESTERDAY(Messages.getString("DicomQrView.yesterday"), () -> LocalDate.now().minusDays(1)),
+    YESTERDAY(Messages.getString("DicomQrView.yesterday"), () -> today().minusDays(1)),
 
-    BEFORE_YESTERDAY(
-        Messages.getString("DicomQrView.day_before_yest"), () -> LocalDate.now().minusDays(2)),
+    BEFORE_YESTERDAY(Messages.getString("DicomQrView.day_before_yest"), () -> today().minusDays(2)),
 
     CUR_WEEK(
         Messages.getString("DicomQrView.this_week"),
-        () ->
-            LocalDate.now().with(WeekFields.of(Locale.getDefault(Category.FORMAT)).dayOfWeek(), 1),
-        LocalDate::now),
+        () -> today().with(WeekFields.of(Locale.getDefault(Category.FORMAT)).dayOfWeek(), 1),
+        Period::today),
 
     CUR_MONTH(
         Messages.getString("DicomQrView.this_month"),
-        () -> LocalDate.now().with(TemporalAdjusters.firstDayOfMonth()),
-        LocalDate::now),
+        () -> today().with(TemporalAdjusters.firstDayOfMonth()),
+        Period::today),
 
     CUR_YEAR(
         Messages.getString("DicomQrView.this_year"),
-        () -> LocalDate.now().with(TemporalAdjusters.firstDayOfYear()),
-        LocalDate::now),
+        () -> today().with(TemporalAdjusters.firstDayOfYear()),
+        Period::today),
 
-    LAST_DAY(
-        Messages.getString("DicomQrView.last_24h"),
-        () -> LocalDate.now().minusDays(1),
-        LocalDate::now),
+    LAST_DAY(Messages.getString("DicomQrView.last_24h"), () -> today().minusDays(1), Period::today),
 
     LAST_2_DAYS(
-        Messages.getString("DicomQrView.last_2_d"),
-        () -> LocalDate.now().minusDays(2),
-        LocalDate::now),
+        Messages.getString("DicomQrView.last_2_d"), () -> today().minusDays(2), Period::today),
 
     LAST_3_DAYS(
-        Messages.getString("DicomQrView.last_3_d"),
-        () -> LocalDate.now().minusDays(3),
-        LocalDate::now),
+        Messages.getString("DicomQrView.last_3_d"), () -> today().minusDays(3), Period::today),
 
-    LAST_WEEK(
-        Messages.getString("DicomQrView.last_w"),
-        () -> LocalDate.now().minusWeeks(1),
-        LocalDate::now),
+    LAST_WEEK(Messages.getString("DicomQrView.last_w"), () -> today().minusWeeks(1), Period::today),
 
     LAST_2_WEEKS(
-        Messages.getString("DicomQrView.last_2_w"),
-        () -> LocalDate.now().minusWeeks(2),
-        LocalDate::now),
+        Messages.getString("DicomQrView.last_2_w"), () -> today().minusWeeks(2), Period::today),
 
     LAST_MONTH(
-        Messages.getString("DicomQrView.last_m"),
-        () -> LocalDate.now().minusMonths(1),
-        LocalDate::now),
+        Messages.getString("DicomQrView.last_m"), () -> today().minusMonths(1), Period::today),
 
     LAST_3_MONTHS(
-        Messages.getString("DicomQrView.last_3_m"),
-        () -> LocalDate.now().minusMonths(3),
-        LocalDate::now),
+        Messages.getString("DicomQrView.last_3_m"), () -> today().minusMonths(3), Period::today),
 
     LAST_6_MONTHS(
-        Messages.getString("DicomQrView.last_6_m"),
-        () -> LocalDate.now().minusMonths(6),
-        LocalDate::now),
+        Messages.getString("DicomQrView.last_6_m"), () -> today().minusMonths(6), Period::today),
 
     LAST_YEAR(
-        Messages.getString("DicomQrView.last_year"),
-        () -> LocalDate.now().minusYears(1),
-        LocalDate::now);
+        Messages.getString("DicomQrView.last_year"), () -> today().minusYears(1), Period::today);
 
     private final String displayName;
     private final Supplier<LocalDate> startSupplier;
@@ -211,6 +195,10 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
 
     public LocalDate getEnd() {
       return endSupplier.get();
+    }
+
+    private static LocalDate today() {
+      return LocalDate.now(ZoneId.systemDefault());
     }
 
     @Override
@@ -276,12 +264,12 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
           super.contentsChanged(e);
           currentPeriod = getSelectedItem();
           if (currentPeriod != null) {
-            startDatePicker.removeDateChangeListener(dateChangeListener);
-            endDatePicker.removeDateChangeListener(dateChangeListener);
-            startDatePicker.setDate(currentPeriod.getStart());
-            endDatePicker.setDate(currentPeriod.getEnd());
-            startDatePicker.addDateChangeListener(dateChangeListener);
-            endDatePicker.addDateChangeListener(dateChangeListener);
+            startDatePicker.removeDateSelectionListener(dateChangeListener);
+            endDatePicker.removeDateSelectionListener(dateChangeListener);
+            startDatePicker.setSelectedDate(currentPeriod.getStart());
+            endDatePicker.setSelectedDate(currentPeriod.getEnd());
+            startDatePicker.addDateSelectionListener(dateChangeListener);
+            endDatePicker.addDateSelectionListener(dateChangeListener);
           }
         }
       };
@@ -299,7 +287,7 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
           return menu;
         }
       };
-  private final DateChangeListener dateChangeListener = a -> groupDate.setSelected(null);
+  private final DateSelectionListener dateChangeListener = a -> groupDate.setSelected(null);
   private final ActionListener destNodeListener = evt -> applySelectedArchive();
   private final ChangeListener queryListener = e -> dicomQuery();
   private final DatePicker startDatePicker = buildDatePicker();
@@ -340,10 +328,14 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
         DicomProgress progress = new DicomProgress();
         progress.addProgressListener(
             p -> {
-              File current = p.getProcessedFile();
+              Path current = p.getProcessedFile();
               if (current != null && p.getAttributes() == null) {
+                // The series this object belongs to is resolved from the object itself: a C-MOVE
+                // sends it here instead of through the retrieve association
+                LoadQrSeries.applyIdentityOverrides(current, model, null);
                 LoadLocalDicom task =
-                    new LoadLocalDicom(new File[] {current}, false, model, openingStrategy);
+                    new LoadLocalDicom(
+                        new File[] {current.toFile()}, false, model, openingStrategy);
                 DicomModel.LOADING_EXECUTOR.execute(task);
               }
             });
@@ -362,12 +354,13 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
     return GuiUtils.getUICore().getPluginPersistence(DicomQrView.class.getPackageName());
   }
 
-  public static File getSessionTempFolder() {
+  public static Path getSessionTempFolder() {
     return FileUtil.createTempDir(
-        AppProperties.buildAccessibleTempDirectory("tmp", "qr")); // NON-NLS
+        AppProperties.buildAccessibleTempDirectory("tmp", "qr")); // NON-NLS;
   }
 
   public void initGUI() {
+    tree.setSeriesLoader(this::loadSeriesInTree);
     JTabbedPane tabbedPane = new JTabbedPane();
     tabbedPane.setBorder(GuiUtils.getEmptyBorder(5));
     tabbedPane.putClientProperty(FlatClientProperties.TABBED_PANE_HAS_FULL_BORDER, true);
@@ -499,10 +492,10 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
             dateButton,
             GuiUtils.boxXLastElement(ITEM_SEPARATOR_LARGE),
             labelFrom,
-            startDatePicker.getComponentDateTextField(),
+            startDatePicker.getEditor(),
             GuiUtils.boxXLastElement(ITEM_SEPARATOR),
             labelTo,
-            endDatePicker.getComponentDateTextField());
+            endDatePicker.getEditor());
 
     comboTags.setMaximumRowCount(15);
     GuiUtils.setPreferredWidth(comboTags, 230, 150);
@@ -624,8 +617,8 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
             end = DicomObjectUtil.getDicomDate(range[1]);
           }
 
-          startDatePicker.setDate(start);
-          endDatePicker.setDate(end);
+          startDatePicker.setSelectedDate(start);
+          endDatePicker.setSelectedDate(end);
         } else {
           comboTags.setSelectedItem(TagD.get(dicomParam.getTag()));
           tfSearch.setText(dicomParam.getValues()[0]);
@@ -639,35 +632,23 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
   }
 
   private DatePicker buildDatePicker() {
+
     DatePicker picker = new DatePicker();
-    DatePickerSettings settings = picker.getSettings();
-    CalendarUtil.adaptCalendarColors(settings);
+    picker.setStartWeekOnMonday(true);
+    JFormattedTextField editor = new JFormattedTextField();
+    picker.setEditor(editor);
 
-    JTextField textField = picker.getComponentDateTextField();
-    settings.setFormatForDatesCommonEra(DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT));
-    settings.setFormatForDatesBeforeCommonEra(DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT));
+    JTextField textField = picker.getEditor();
     GuiUtils.setPreferredWidth(textField, 145);
-    picker.addDateChangeListener(dateChangeListener);
-
-    textField.putClientProperty(FlatClientProperties.TEXT_FIELD_SHOW_CLEAR_BUTTON, true);
-    JButton calendarButton = picker.getComponentToggleCalendarButton();
-    calendarButton.setMargin(null);
-    calendarButton.setText(null);
-    calendarButton.setIcon(ResourceUtil.getIcon(OtherIcon.CALENDAR));
-    calendarButton.setFocusPainted(true);
-    calendarButton.setFocusable(true);
-    calendarButton.revalidate();
-    Arrays.stream(calendarButton.getMouseListeners()).forEach(calendarButton::removeMouseListener);
-    calendarButton.addActionListener(e -> picker.openPopup());
-    textField.putClientProperty(FlatClientProperties.TEXT_FIELD_TRAILING_COMPONENT, calendarButton);
+    picker.addDateSelectionListener(dateChangeListener);
     return picker;
   }
 
   private void clearItems() {
     tfSearch.setText(null);
     groupMod.selectAll();
-    startDatePicker.setDate(null);
-    endDatePicker.setDate(null);
+    startDatePicker.setSelectedDate(null);
+    endDatePicker.setSelectedDate(null);
     currentPeriod = null;
     pageSpinner.removeChangeListener(queryListener);
     pageSpinner.setValue(1);
@@ -792,7 +773,7 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
       process.start();
     } else if (selectedItem instanceof final DicomWebNode node) {
       AuthMethod auth = AuthenticationPersistence.getAuthMethod(node.getAuthMethodUid());
-      if (!OAuth2ServiceFactory.noAuth.equals(auth)) {
+      if (!OAuth2ServiceFactory.NO_AUTH.equals(auth)) {
         String oldCode = auth.getCode();
         authMethod = auth;
         if (authMethod.getToken() == null) {
@@ -962,8 +943,8 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
     }
     p.getParameters().add(new DicomParam(Tag.ModalitiesInStudy, list));
 
-    LocalDate sDate = startDatePicker.getDate();
-    LocalDate eDate = endDatePicker.getDate();
+    LocalDate sDate = startDatePicker.getSelectedDate();
+    LocalDate eDate = endDatePicker.getSelectedDate();
     String range = "";
     if (sDate != null || eDate != null) {
       range = TagD.formatDicomDate(sDate) + "-" + TagD.formatDicomDate(eDate);
@@ -1007,7 +988,8 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
       writer =
           factory.createXMLStreamWriter(
               new FileOutputStream(
-                  new File(BundlePreferences.getDataFolder(context), SearchParameters.FILENAME)),
+                  BundlePreferences.getFileInDataFolder(context, SearchParameters.FILENAME)
+                      .toFile()),
               "UTF-8"); // NON-NLS
 
       writer.writeStartDocument("UTF-8", "1.0"); // NON-NLS
@@ -1024,7 +1006,7 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
     } catch (Exception e) {
       LOGGER.error("Error on writing DICOM node file", e);
     } finally {
-      FileUtil.safeClose(writer);
+      StreamUtil.safeClose(writer);
     }
   }
 
@@ -1056,24 +1038,159 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
   @Override
   public void resetToDefaultValues() {}
 
-  private List<String> getCheckedStudies(TreePath[] paths) {
-    List<String> studies = new ArrayList<>();
+  /**
+   * Collects the checked studies and series. The checkbox tree propagates the state, so a fully
+   * checked study is reported as a study path and a partial one only through its series paths.
+   */
+  private RetrieveSelection getSelection(TreePath[] paths) {
+    RetrieveSelection selection = new RetrieveSelection();
     for (TreePath treePath : paths) {
-      DefaultMutableTreeNode node = (DefaultMutableTreeNode) treePath.getLastPathComponent();
-      if (node.getUserObject() instanceof MediaSeriesGroup study) {
-        String uid = TagD.getTagValue(study, Tag.StudyInstanceUID, String.class);
+      if (!(treePath.getLastPathComponent() instanceof DefaultMutableTreeNode node)
+          || !(node.getUserObject() instanceof MediaSeriesGroup group)) {
+        continue;
+      }
+      if (treePath.getPathCount() == STUDY_LEVEL) {
+        String uid = TagD.getTagValue(group, Tag.StudyInstanceUID, String.class);
         if (StringUtil.hasText(uid)) {
-          studies.add(uid);
+          selection.addStudy(uid);
         }
+      } else if (treePath.getPathCount() == SERIES_LEVEL) {
+        addSeriesSelection(selection, treePath, group);
       }
     }
-    return studies;
+    return selection;
+  }
+
+  private static void addSeriesSelection(
+      RetrieveSelection selection, TreePath seriesPath, MediaSeriesGroup series) {
+    String seriesUid = TagD.getTagValue(series, Tag.SeriesInstanceUID, String.class);
+    if (!StringUtil.hasText(seriesUid)
+        || !(seriesPath.getParentPath().getLastPathComponent()
+            instanceof DefaultMutableTreeNode studyNode)
+        || !(studyNode.getUserObject() instanceof MediaSeriesGroup study)) {
+      return;
+    }
+    String studyUid = TagD.getTagValue(study, Tag.StudyInstanceUID, String.class);
+    if (StringUtil.hasText(studyUid)) {
+      selection.addSeries(studyUid, seriesUid);
+    }
+  }
+
+  /** Queries the series of an expanded study and adds them to the tree. */
+  private void loadSeriesInTree(RetrieveTreeModel treeModel, DefaultMutableTreeNode studyNode) {
+    MediaSeriesGroup study = (MediaSeriesGroup) studyNode.getUserObject();
+    String studyUid = TagD.getTagValue(study, Tag.StudyInstanceUID, String.class);
+    Object selectedItem = comboDestinationNode.getSelectedItem();
+    if (!StringUtil.hasText(studyUid)) {
+      treeModel.removePlaceholder(studyNode);
+      return;
+    }
+    treeModel.setPlaceholderLoading(studyNode, true);
+    executor.execute(
+        () -> {
+          List<Attributes> datasets = querySeries(selectedItem, studyUid);
+          GuiExecutor.execute(
+              () -> {
+                if (tree.getRetrieveTreeModel() != treeModel) {
+                  return; // A new query has replaced the result
+                }
+                if (datasets == null) {
+                  // The query failed: leave the placeholder so it can be tried again
+                  treeModel.setPlaceholderLoading(studyNode, false);
+                } else if (datasets.isEmpty()) {
+                  treeModel.removePlaceholder(studyNode);
+                } else {
+                  treeModel.setSeriesNodes(
+                      studyNode, buildQuerySeries(treeModel.getDicomModel(), study, datasets));
+                }
+              });
+        });
+  }
+
+  /** Runs the series level query matching the archive type, null when it failed. */
+  private List<Attributes> querySeries(Object selectedItem, String studyUid) {
+    try {
+      if (selectedItem instanceof DefaultDicomNode node) {
+        return findSeries(node, studyUid);
+      }
+      if (selectedItem instanceof DicomWebNode node) {
+        String url = RsQueryResult.seriesQueryUrl(node.getUrl().toString(), studyUid, null);
+        LOGGER.debug(RsQueryResult.QIDO_REQUEST, url);
+        return RsQueryResult.parseJSON(
+            url, authMethod, RsQueryResult.jsonQueryParameters(node.getHeaders()));
+      }
+    } catch (Exception e) {
+      LOGGER.error("Query the series of study {}", studyUid, e);
+    }
+    return null;
+  }
+
+  private List<Attributes> findSeries(DefaultDicomNode node, String studyUid) {
+    DefaultDicomNode callingNode = (DefaultDicomNode) comboCallingNode.getSelectedItem();
+    if (callingNode == null) {
+      return null;
+    }
+    AdvancedParams params = new AdvancedParams();
+    ConnectOptions connectOptions = new ConnectOptions();
+    connectOptions.setConnectTimeout(3000);
+    connectOptions.setAcceptTimeout(5000);
+    params.setConnectOptions(connectOptions);
+
+    DicomParam[] keys = {
+      new DicomParam(Tag.StudyInstanceUID, studyUid),
+      CFind.SeriesInstanceUID,
+      CFind.Modality,
+      CFind.SeriesNumber,
+      CFind.SeriesDescription,
+      new DicomParam(Tag.NumberOfSeriesRelatedInstances)
+    };
+    DicomState state =
+        CFind.process(
+            params,
+            callingNode.getDicomNodeWithOnlyAET(),
+            node.getDicomNode(),
+            0,
+            QueryRetrieveLevel.SERIES,
+            keys);
+    if (state.getStatus() != Status.Success && state.getDicomRSP() == null) {
+      LOGGER.error("Dicom C-FIND series error: {}", state.getMessage());
+    }
+    return state.getDicomRSP();
+  }
+
+  /** Adds the queried series to the result model and returns them in query order. */
+  private static List<Series<?>> buildQuerySeries(
+      DicomModel queryModel, MediaSeriesGroup study, List<Attributes> datasets) {
+    List<Series<?>> list = new ArrayList<>(datasets.size());
+    for (Attributes dataset : datasets) {
+      String seriesUid = dataset.getString(Tag.SeriesInstanceUID);
+      if (!StringUtil.hasText(seriesUid)) {
+        continue;
+      }
+      if (queryModel.getHierarchyNode(study, seriesUid) instanceof Series<?> existing) {
+        list.add(existing);
+        continue;
+      }
+      DicomSeries series = new DicomSeries(seriesUid);
+      series.setTag(TagD.get(Tag.SeriesInstanceUID), seriesUid);
+      for (TagW tag :
+          TagD.getTagFromIDs(
+              Tag.Modality,
+              Tag.SeriesNumber,
+              Tag.SeriesDescription,
+              Tag.NumberOfSeriesRelatedInstances)) {
+        tag.readValue(dataset, series);
+      }
+      queryModel.addHierarchyNode(study, series);
+      list.add(series);
+    }
+    return list;
   }
 
   @Override
   public void importDICOM(DicomModel explorerDcmModel, JProgressBar info) {
-    List<String> studies = getCheckedStudies(tree.getCheckboxTree().getCheckingPaths());
-    if (!studies.isEmpty()) {
+    RetrieveSelection selection = getSelection(tree.getCheckboxTree().getCheckingPaths());
+    if (!selection.isEmpty()) {
       Object selectedItem = getComboDestinationNode().getSelectedItem();
       if (selectedItem instanceof DicomWebNode webNode && webNode.getWebType() == WebType.QIDORS) {
         List<AbstractDicomNode> webNodes =
@@ -1086,7 +1203,7 @@ public class DicomQrView extends AbstractItemDialogPage implements ImportDicom {
           this.retrieveNode = wnode;
         }
       }
-      executor.execute(new RetrieveTask(studies, explorerDcmModel, this));
+      executor.execute(new RetrieveTask(selection, explorerDcmModel, this));
     }
   }
 

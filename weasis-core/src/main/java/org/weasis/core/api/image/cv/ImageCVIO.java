@@ -21,6 +21,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -61,23 +62,29 @@ import org.weasis.core.util.MathUtil;
 import org.weasis.core.util.StringUtil;
 import org.weasis.opencv.data.FileRawImage;
 import org.weasis.opencv.data.PlanarImage;
+import org.weasis.opencv.op.ImageAnalyzer;
 import org.weasis.opencv.op.ImageConversion;
-import org.weasis.opencv.op.ImageProcessor;
+import org.weasis.opencv.op.ImageIOHandler;
 
+/** Media reader for non-DICOM image files supporting reading, metadata extraction, and caching. */
 public class ImageCVIO implements MediaReader<ImageElement> {
   private static final Logger LOGGER = LoggerFactory.getLogger(ImageCVIO.class);
 
   public static final int TILE_SIZE = 512;
-  public static final File CACHE_UNCOMPRESSED_DIR =
-      AppProperties.buildAccessibleTempDirectory(
-          AppProperties.FILE_CACHE_DIR.getName(), "uncompressed"); // NON-NLS
+  public static final Path CACHE_UNCOMPRESSED_DIR =
+      AppProperties.buildAccessibleTempDirectory(AppProperties.CACHE_NAME, "uncompressed");
+
+  private static final String WCV_EXTENSION = ".wcv";
+  private static final String JPEG_EXTENSION = ".jpg";
+  private static final String DICOM_MIME_TYPE = "dicom";
+  private static final double MIN_MAX_EQUAL_OFFSET = 1.0;
 
   private final URI uri;
   private final String mimeType;
 
   private final FileCache fileCache;
   private final Codec codec;
-  private ImageElement image = null;
+  private ImageElement image;
 
   public ImageCVIO(URI media, String mimeType, Codec codec) {
     this.uri = Objects.requireNonNull(media);
@@ -89,108 +96,20 @@ public class ImageCVIO implements MediaReader<ImageElement> {
   @Override
   public PlanarImage getImageFragment(MediaElement media) throws Exception {
     Objects.requireNonNull(media);
-    FileCache cache = media.getFileCache();
 
-    Path imgCachePath = null;
-    File file;
-    if (cache.isRequireTransformation()) {
-      file = cache.getTransformedFile();
-      if (file == null) {
-        String filename =
-            StringUtil.bytesToMD5(media.getMediaURI().toString().getBytes(StandardCharsets.UTF_8));
-        imgCachePath = CACHE_UNCOMPRESSED_DIR.toPath().resolve(filename + ".wcv");
-        if (Files.isReadable(imgCachePath)) {
-          file = imgCachePath.toFile();
-          cache.setTransformedFile(file);
-          imgCachePath = null;
-        } else {
-          file = cache.getOriginalFile().orElse(null);
-        }
-      }
-    } else {
-      file = cache.getOriginalFile().orElse(null);
-    }
-
-    if (file != null) {
-      PlanarImage img = readImage(file, imgCachePath == null);
-      if (imgCachePath != null) {
-        File rawFile = uncompress(imgCachePath, img, media);
-        if (rawFile != null) {
-          file = rawFile;
-        }
-        cache.setTransformedFile(file);
-        img = readImage(file, true);
-      }
-      return img;
-    }
-    return null;
-  }
-
-  private static void applyExifTags(ImageElement img, List<String> exifTags) {
-    if (exifTags.size() >= Imgcodecs.POS_COPYRIGHT) {
-      applyExifTag(img, TagW.ExifImageDescription, exifTags.get(Imgcodecs.POS_IMAGE_DESCRIPTION));
-      applyExifTag(img, TagW.ExifMake, exifTags.get(Imgcodecs.POS_MAKE));
-      applyExifTag(img, TagW.ExifModel, exifTags.get(Imgcodecs.POS_MODEL));
-      applyExifTag(img, TagW.ExifOrientation, exifTags.get(Imgcodecs.POS_ORIENTATION));
-      applyExifTag(img, TagW.ExifXResolution, exifTags.get(Imgcodecs.POS_XRESOLUTION));
-      applyExifTag(img, TagW.ExifYResolution, exifTags.get(Imgcodecs.POS_YRESOLUTION));
-      applyExifTag(img, TagW.ExifResolutionUnit, exifTags.get(Imgcodecs.POS_RESOLUTION_UNIT));
-      applyExifTag(img, TagW.ExifSoftware, exifTags.get(Imgcodecs.POS_SOFTWARE));
-      applyExifTag(img, TagW.ExifDateTime, exifTags.get(Imgcodecs.POS_DATE_TIME));
-      applyExifTag(img, TagW.ExifCopyright, exifTags.get(Imgcodecs.POS_COPYRIGHT));
-    }
-  }
-
-  private static void applyExifTag(ImageElement img, TagW tagW, String val) {
-    if (StringUtil.hasText(val)) {
-      img.setTag(tagW, val);
-    }
-  }
-
-  private PlanarImage readImage(File file, boolean createTiledLayout) throws Exception {
-    PlanarImage img;
-    if (file.getPath().endsWith(".wcv")) {
-      img = new FileRawImage(file).read();
-    } else if (codec instanceof NativeOpenCVCodec) {
-      List<String> exifTags = new ArrayList<>();
-      img = ImageProcessor.readImageWithCvException(file, exifTags);
-      applyExifTags(image, exifTags);
-      if (img == null) {
-        // Try ImageIO
-        img = readImageIOImage(file);
-      }
-    } else {
-      img = readImageIOImage(file);
-    }
-
-    if (img != null && image != null) {
-      image.setTag(TagW.ImageWidth, img.width());
-      image.setTag(TagW.ImageHeight, img.height());
-    }
-    return img;
-  }
-
-  private PlanarImage readImageIOImage(File file) throws IOException {
-    ImageReader reader = getDefaultReader(mimeType);
-    if (reader == null) {
-      LOGGER.info("Cannot find a reader for the mime type: {}", mimeType);
+    Path imagePath = resolveImagePath(media);
+    if (imagePath == null) {
       return null;
     }
 
-    ImageInputStream stream = new FileImageInputStream(new RandomAccessFile(file, "r"));
-    ImageReadParam param = reader.getDefaultReadParam();
-    reader.setInput(stream, true, true);
-    RenderedImage bi;
-    try {
-      bi = reader.read(0, param);
-    } finally {
-      reader.dispose();
-      stream.close();
+    Path cachePath = getCachePathIfNeeded(media);
+    PlanarImage img = readImage(imagePath);
+
+    if (cachePath != null && img != null) {
+      return processCachedImage(media, img, cachePath);
     }
 
-    // to avoid problem with alpha channel and png encoded in 24 and 32 bits
-    bi = getReadableImage(bi);
-    return ImageConversion.toMat(bi);
+    return img;
   }
 
   @Override
@@ -215,52 +134,11 @@ public class ImageCVIO implements MediaReader<ImageElement> {
 
   @Override
   public MediaSeries<ImageElement> getMediaSeries() {
-    String sUID;
-    MediaElement element = getSingleImage();
-    sUID = (String) element.getTagValue(TagW.get("SeriesInstanceUID"));
-    if (sUID == null) {
-      sUID = uri.toString();
-    }
-    MediaSeries<ImageElement> series =
-        new Series<>(TagW.SubseriesInstanceUID, sUID, AbstractFileModel.series.tagView()) {
-
-          @Override
-          public String getMimeType() {
-            if (!medias.isEmpty()) {
-              synchronized (this) {
-                MediaElement img = medias.getFirst();
-                if (img != null) {
-                  return img.getMimeType();
-                }
-              }
-            }
-            return null;
-          }
-
-          @Override
-          public void addMedia(ImageElement media) {
-            if (media != null) {
-              this.add(media);
-              DataExplorerModel model = (DataExplorerModel) getTagValue(TagW.ExplorerModel);
-              if (model != null) {
-                model.firePropertyChange(
-                    new ObservableEvent(
-                        ObservableEvent.BasicAction.ADD,
-                        model,
-                        null,
-                        new SeriesEvent(SeriesEvent.Action.ADD_IMAGE, this, media)));
-              }
-            }
-          }
-
-          @Override
-          public MediaElement getFirstSpecialElement() {
-            return null;
-          }
-        };
+    String seriesUID = getSeriesUID();
+    MediaSeries<ImageElement> series = createMediaSeries(seriesUID);
 
     ImageElement img = getSingleImage();
-    series.add(getSingleImage());
+    series.add(img);
     series.setTag(TagW.FileName, img.getName());
     return series;
   }
@@ -268,15 +146,6 @@ public class ImageCVIO implements MediaReader<ImageElement> {
   @Override
   public int getMediaElementNumber() {
     return 1;
-  }
-
-  private ImageElement getSingleImage() {
-    ImageElement img = image;
-    if (img == null) {
-      img = new ImageElement(this, 0);
-      image = img;
-    }
-    return img;
   }
 
   @Override
@@ -291,7 +160,7 @@ public class ImageCVIO implements MediaReader<ImageElement> {
 
   @Override
   public void close() {
-    // Do nothing
+    // No resources to close
   }
 
   @Override
@@ -306,23 +175,9 @@ public class ImageCVIO implements MediaReader<ImageElement> {
     };
   }
 
-  public ImageReader getDefaultReader(String mimeType) {
-    if (mimeType != null) {
-      Iterator<ImageReader> readers = ImageIO.getImageReadersByMIMEType(mimeType);
-      if (readers.hasNext()) {
-        return readers.next();
-      }
-    }
-    return null;
-  }
-
   @Override
   public Object getTagValue(TagW tag) {
-    MediaElement element = getSingleImage();
-    if (tag != null) {
-      return element.getTagValue(tag);
-    }
-    return null;
+    return tag != null ? getSingleImage().getTagValue(tag) : null;
   }
 
   @Override
@@ -355,85 +210,266 @@ public class ImageCVIO implements MediaReader<ImageElement> {
     return fileCache;
   }
 
-  private File uncompress(Path imgCachePath, PlanarImage img, MediaElement media) {
-    /*
-     * Make an image cache with its thumbnail when the image size is larger than a tile size and if not DICOM file
-     */
-    if (img != null
-        && (img.width() > TILE_SIZE || img.height() > TILE_SIZE)
-        && !mimeType.contains("dicom")) { // NON-NLS
-      File outFile = imgCachePath.toFile();
-      try {
-        new FileRawImage(outFile).write(img);
-        PlanarImage img8 = img;
-        if (CvType.depth(img.type()) > CvType.CV_8S && media instanceof ImageElement imgElement) {
-          Map<String, Object> params = null;
-          if (!imgElement.isImageAvailable()) {
-            // Ensure to load image before calling the preset that requires pixel min and max
-            params = new HashMap<>(2);
-            double min = 0;
-            double max = 65536;
-            MinMaxLocResult val = ImageProcessor.findMinMaxValues(img.toMat());
-            if (val != null) {
-              min = val.minVal;
-              max = val.maxVal;
-            }
-
-            // Handle special case when min and max are equal, ex. black image
-            // + 1 to max enables to display the correct value
-            if (MathUtil.isEqual(min, max)) {
-              max += 1.0;
-            }
-
-            params.put(ActionW.WINDOW.cmd(), max - min);
-            params.put(ActionW.LEVEL.cmd(), min + (max - min) / 2.0);
-          }
-          img8 = imgElement.getRenderedImage(img, params);
-        }
-        ImageProcessor.writeThumbnail(
-            img8.toMat(), new File(changeExtension(outFile.getPath(), ".jpg")), Thumbnail.MAX_SIZE);
-        return outFile;
-      } catch (Exception e) {
-        FileUtil.delete(outFile);
-        LOGGER.error("Uncompress temporary image", e);
-      }
-    }
-    return null;
-  }
-
   @Override
   public boolean buildFile(File output) {
     return false;
   }
 
-  public static RenderedImage getReadableImage(RenderedImage source) {
-    if (source != null && source.getSampleModel() != null) {
-      int numBands = source.getSampleModel().getNumBands();
-      if (ImageConversion.isBinary(source.getSampleModel())) {
-        return ImageConversion.convertTo(source, BufferedImage.TYPE_BYTE_GRAY);
+  private Path resolveImagePath(MediaElement media) throws NoSuchAlgorithmException {
+    FileCache cache = media.getFileCache();
+
+    if (!cache.isRequireTransformation()) {
+      return cache.getOriginalFile().orElse(null);
+    }
+
+    Path transformed = cache.getTransformedFile();
+    if (transformed != null) {
+      return transformed;
+    }
+
+    Path cachePath = buildCachePath(media);
+
+    if (Files.isReadable(cachePath)) {
+      cache.setTransformedFile(cachePath);
+      return cachePath;
+    }
+
+    return cache.getOriginalFile().orElse(null);
+  }
+
+  private Path getCachePathIfNeeded(MediaElement media) throws NoSuchAlgorithmException {
+    FileCache cache = media.getFileCache();
+    if (!cache.isRequireTransformation() || cache.getTransformedFile() != null) {
+      return null;
+    }
+
+    Path cachePath = buildCachePath(media);
+    return Files.isReadable(cachePath) ? null : cachePath;
+  }
+
+  private Path buildCachePath(MediaElement media) throws NoSuchAlgorithmException {
+    String filename =
+        StringUtil.bytesToMD5(media.getMediaURI().toString().getBytes(StandardCharsets.UTF_8));
+    return CACHE_UNCOMPRESSED_DIR.resolve(filename + WCV_EXTENSION);
+  }
+
+  private PlanarImage processCachedImage(MediaElement media, PlanarImage img, Path cachePath)
+      throws Exception {
+    Path rawFile = uncompressIfNeeded(img, cachePath, media);
+
+    if (rawFile != null) {
+      media.getFileCache().setTransformedFile(rawFile);
+      return readImage(rawFile);
+    }
+
+    return img;
+  }
+
+  private PlanarImage readImage(Path path) throws Exception {
+    if (path.getFileName().toString().endsWith(WCV_EXTENSION)) {
+      return new FileRawImage(path).read();
+    }
+
+    if (codec instanceof NativeOpenCVCodec) {
+      return readWithOpenCV(path);
+    }
+
+    return readWithImageIO(path);
+  }
+
+  private PlanarImage readWithOpenCV(Path path) throws Exception {
+    List<String> exifTags = new ArrayList<>();
+    PlanarImage img = ImageIOHandler.readImageWithCvException(path, exifTags);
+
+    if (img != null) {
+      applyExifTags(getSingleImage(), exifTags);
+      updateImageDimensions(img);
+      return img;
+    }
+
+    return readWithImageIO(path);
+  }
+
+  private PlanarImage readWithImageIO(Path path) throws IOException {
+    ImageReader reader = ImageIO.getImageReadersByMIMEType(mimeType).next();
+    if (reader == null) {
+      LOGGER.info("Cannot find a reader for the mime type: {}", mimeType);
+      return null;
+    }
+
+    try (ImageInputStream stream =
+        new FileImageInputStream(new RandomAccessFile(path.toFile(), "r"))) {
+      reader.setInput(stream, true, true);
+      ImageReadParam param = reader.getDefaultReadParam();
+
+      RenderedImage bi;
+      try {
+        bi = reader.read(0, param);
+      } finally {
+        reader.dispose();
       }
 
-      if (source.getColorModel() instanceof PackedColorModel
-          || source.getColorModel() instanceof IndexColorModel
-          || numBands == 2
-          || numBands > 3
-          || (source.getSampleModel() instanceof BandedSampleModel && numBands > 1)) {
-        int imageType = numBands >= 3 ? BufferedImage.TYPE_3BYTE_BGR : BufferedImage.TYPE_BYTE_GRAY;
-        return ImageConversion.convertTo(source, imageType);
-      }
+      bi = convertToReadableImage(bi);
+      PlanarImage result = ImageConversion.toMat(bi);
+      updateImageDimensions(result);
+
+      return result;
     }
+  }
+
+  private void updateImageDimensions(PlanarImage img) {
+    if (img != null && image != null) {
+      image.setTag(TagW.ImageWidth, img.width());
+      image.setTag(TagW.ImageHeight, img.height());
+    }
+  }
+
+  private ImageElement getSingleImage() {
+    if (image == null) {
+      image = new ImageElement(this, 0);
+    }
+    return image;
+  }
+
+  private String getSeriesUID() {
+    MediaElement element = getSingleImage();
+    String sUID = (String) element.getTagValue(TagW.get("SeriesInstanceUID"));
+    return sUID != null ? sUID : uri.toString();
+  }
+
+  private MediaSeries<ImageElement> createMediaSeries(String seriesUID) {
+    return new Series<>(TagW.SubseriesInstanceUID, seriesUID, AbstractFileModel.series.tagView()) {
+      @Override
+      public String getMimeType() {
+        synchronized (this) {
+          return medias.isEmpty() ? null : medias.getFirst().getMimeType();
+        }
+      }
+
+      @Override
+      public void addMedia(ImageElement media) {
+        if (media != null) {
+          this.add(media);
+          notifyDataExplorerModel(media);
+        }
+      }
+
+      @Override
+      public MediaElement getFirstSpecialElement() {
+        return null;
+      }
+
+      private void notifyDataExplorerModel(ImageElement media) {
+        DataExplorerModel model = (DataExplorerModel) getTagValue(TagW.ExplorerModel);
+        if (model != null) {
+          model.firePropertyChange(
+              new ObservableEvent(
+                  ObservableEvent.BasicAction.ADD,
+                  model,
+                  null,
+                  new SeriesEvent(SeriesEvent.Action.ADD_IMAGE, this, media)));
+        }
+      }
+    };
+  }
+
+  private Path uncompressIfNeeded(PlanarImage img, Path cachePath, MediaElement media) {
+    if (!shouldUncompress(img)) {
+      return null;
+    }
+    try {
+      new FileRawImage(cachePath).write(img);
+      writeThumbnail(cachePath, img, media);
+      return cachePath;
+    } catch (Exception e) {
+      FileUtil.delete(cachePath);
+      LOGGER.error("Failed to uncompress temporary image", e);
+      return null;
+    }
+  }
+
+  private boolean shouldUncompress(PlanarImage img) {
+    return img != null
+        && (img.width() > TILE_SIZE || img.height() > TILE_SIZE)
+        && !mimeType.contains(DICOM_MIME_TYPE);
+  }
+
+  private void writeThumbnail(Path outFile, PlanarImage img, MediaElement media) {
+    PlanarImage thumbnailImg = prepareThumbnailImage(img, media);
+    Path thumbnailPath = Path.of(changeExtension(outFile.toString(), JPEG_EXTENSION));
+    ImageIOHandler.writeThumbnail(thumbnailImg.toMat(), thumbnailPath, Thumbnail.MAX_SIZE);
+  }
+
+  private PlanarImage prepareThumbnailImage(PlanarImage img, MediaElement media) {
+    if (CvType.depth(img.type()) <= CvType.CV_8S || !(media instanceof ImageElement imgElement)) {
+      return img;
+    }
+
+    Map<String, Object> params = imgElement.isImageAvailable() ? null : createRenderingParams(img);
+    return imgElement.getRenderedImage(img, params);
+  }
+
+  private Map<String, Object> createRenderingParams(PlanarImage img) {
+    MinMaxLocResult val = ImageAnalyzer.findMinMaxValues(img.toMat());
+    double min = val.minVal;
+    double max = MathUtil.isEqual(min, val.maxVal) ? val.maxVal + MIN_MAX_EQUAL_OFFSET : val.maxVal;
+
+    return Map.of(ActionW.WINDOW.cmd(), max - min, ActionW.LEVEL.cmd(), min + (max - min) / 2.0);
+  }
+
+  private static void applyExifTags(ImageElement img, List<String> exifTags) {
+    if (exifTags.size() < Imgcodecs.POS_COPYRIGHT) {
+      return;
+    }
+
+    setTagIfPresent(img, TagW.ExifImageDescription, exifTags.get(Imgcodecs.POS_IMAGE_DESCRIPTION));
+    setTagIfPresent(img, TagW.ExifMake, exifTags.get(Imgcodecs.POS_MAKE));
+    setTagIfPresent(img, TagW.ExifModel, exifTags.get(Imgcodecs.POS_MODEL));
+    setTagIfPresent(img, TagW.ExifOrientation, exifTags.get(Imgcodecs.POS_ORIENTATION));
+    setTagIfPresent(img, TagW.ExifXResolution, exifTags.get(Imgcodecs.POS_XRESOLUTION));
+    setTagIfPresent(img, TagW.ExifYResolution, exifTags.get(Imgcodecs.POS_YRESOLUTION));
+    setTagIfPresent(img, TagW.ExifResolutionUnit, exifTags.get(Imgcodecs.POS_RESOLUTION_UNIT));
+    setTagIfPresent(img, TagW.ExifSoftware, exifTags.get(Imgcodecs.POS_SOFTWARE));
+    setTagIfPresent(img, TagW.ExifDateTime, exifTags.get(Imgcodecs.POS_DATE_TIME));
+    setTagIfPresent(img, TagW.ExifCopyright, exifTags.get(Imgcodecs.POS_COPYRIGHT));
+  }
+
+  private static void setTagIfPresent(ImageElement img, TagW tag, String value) {
+    if (StringUtil.hasText(value)) {
+      img.setTag(tag, value);
+    }
+  }
+
+  public static RenderedImage convertToReadableImage(RenderedImage source) {
+    if (source == null || source.getSampleModel() == null) {
+      return source;
+    }
+    if (ImageConversion.isBinary(source.getSampleModel())) {
+      return ImageConversion.convertTo(source, BufferedImage.TYPE_BYTE_GRAY);
+    }
+
+    int numBands = source.getSampleModel().getNumBands();
+    if (requiresConversion(source, numBands)) {
+      int imageType = numBands >= 3 ? BufferedImage.TYPE_3BYTE_BGR : BufferedImage.TYPE_BYTE_GRAY;
+      return ImageConversion.convertTo(source, imageType);
+    }
+
     return source;
+  }
+
+  private static boolean requiresConversion(RenderedImage source, int numBands) {
+    return source.getColorModel() instanceof PackedColorModel
+        || source.getColorModel() instanceof IndexColorModel
+        || numBands == 2
+        || numBands > 3
+        || (source.getSampleModel() instanceof BandedSampleModel && numBands > 1);
   }
 
   public static String changeExtension(String filename, String ext) {
     if (filename == null) {
       return "";
     }
-    // replace extension after the last point
     int pointPos = filename.lastIndexOf('.');
-    if (pointPos == -1) {
-      pointPos = filename.length();
-    }
-    return filename.substring(0, pointPos) + ext;
+    return filename.substring(0, pointPos == -1 ? filename.length() : pointPos) + ext;
   }
 }

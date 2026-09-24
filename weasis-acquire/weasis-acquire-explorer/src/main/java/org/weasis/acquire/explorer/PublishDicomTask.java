@@ -9,9 +9,9 @@
  */
 package org.weasis.acquire.explorer;
 
-import java.io.File;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -35,7 +35,7 @@ import org.weasis.dicom.param.DicomState;
  *
  * @version $Rev$ $Date$
  */
-public class PublishDicomTask extends SwingWorker<DicomState, File> {
+public class PublishDicomTask extends SwingWorker<DicomState, Path> {
   private static final Logger LOGGER = LoggerFactory.getLogger(PublishDicomTask.class);
 
   private final Supplier<DicomState> publish;
@@ -66,11 +66,11 @@ public class PublishDicomTask extends SwingWorker<DicomState, File> {
   }
 
   @Override
-  protected void process(List<File> chunks) {
+  protected void process(List<Path> chunks) {
     if (!dicomProgress.isLastFailed()) {
       chunks.stream()
           .filter(Objects::nonNull)
-          .map(imageFile -> AcquireManager.findByUId(imageFile.getName()))
+          .map(imageFile -> AcquireManager.findByUId(imageFile.getFileName().toString()))
           .filter(Objects::nonNull)
           .forEach(AcquireManager::updateFinalStatus);
     }

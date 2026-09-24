@@ -1,0 +1,26 @@
+version: 2
+updates:
+  # Keep pinned GitHub Actions SHAs (and their version comments) up to date.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Maven dependencies for the multi-module reactor (discovered from the root pom).
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+    groups:
+      maven:
+        patterns:
+          - "*"

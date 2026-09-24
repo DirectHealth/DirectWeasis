@@ -24,12 +24,12 @@ import org.dcm4che3.data.Tag;
 import org.dcm4che3.util.TagUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.weasis.core.api.auth.AuthMethod;
 import org.weasis.core.api.media.data.MediaSeriesGroup;
 import org.weasis.core.api.media.data.MediaSeriesGroupNode;
 import org.weasis.core.api.media.data.TagUtil;
 import org.weasis.core.api.media.data.TagW;
-import org.weasis.core.api.util.URLParameters;
+import org.weasis.core.api.net.URLParameters;
+import org.weasis.core.api.net.auth.AuthMethod;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.TagD.Level;
@@ -64,7 +64,7 @@ public class RsQuery implements Callable<Boolean> {
         properties.setProperty(RsQueryParams.P_DICOMWEB_URL, url.substring(0, url.length() - 1));
       }
     } else {
-      throw new IllegalArgumentException("DICOMWeb URL cannot be null");
+      throw new IllegalArgumentException("DICOMweb URL cannot be null");
     }
     this.authMethod = authMethod;
     this.queryHeaders = queryHeaders == null ? Collections.emptyMap() : queryHeaders;

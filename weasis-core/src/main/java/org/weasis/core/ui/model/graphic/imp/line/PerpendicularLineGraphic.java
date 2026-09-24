@@ -72,7 +72,7 @@ public class PerpendicularLineGraphic extends AbstractDragGraphic {
     super(POINTS_NUMBER);
   }
 
-  public PerpendicularLineGraphic(PerpendicularLineGraphic graphic) {
+  public PerpendicularLineGraphic(PerpendicularLineGraphic graphic) { // NOSONAR see initCopy()
     super(graphic);
   }
 
@@ -225,7 +225,7 @@ public class PerpendicularLineGraphic extends AbstractDragGraphic {
         if (LINE_LENGTH.getComputed()) {
           measVal.add(
               new MeasureItem(
-                  LINE_LENGTH, ptC.distance(ptD) * adapter.getCalibRatio(), adapter.getUnit()));
+                  LINE_LENGTH, ptC.distance(ptD) * adapter.calibrationRatio(), adapter.unit()));
         }
         if (ORIENTATION.getComputed()) {
           measVal.add(

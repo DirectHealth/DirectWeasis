@@ -9,6 +9,7 @@
  */
 package org.weasis.launcher;
 
+import com.formdev.flatlaf.util.SystemInfo;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -38,11 +39,14 @@ public class RemotePrefService {
   public RemotePrefService(
       String url, Map<String, String> serverProp, String user, String profile) {
     this.remotePrefURL = Objects.requireNonNull(url);
-    this.user = Objects.requireNonNull(user);
-    this.localSessionUser = Utils.getEmptyToFalse(serverProp.get("weasis.pref.local.session"));
-    this.storeLocalSession =
-        Utils.getEmptyToFalse(serverProp.get("weasis.pref.store.local.session"));
+    this.user = getUserName(Objects.requireNonNull(user));
+    this.localSessionUser = Utils.emptyToFalse(serverProp.get("weasis.pref.local.session"));
+    this.storeLocalSession = Utils.emptyToFalse(serverProp.get("weasis.pref.store.local.session"));
     this.profile = Objects.requireNonNull(profile);
+  }
+
+  private static String getUserName(String user) {
+    return SystemInfo.isWindows ? user.trim().toUpperCase() : user.trim();
   }
 
   public final String getUser() {

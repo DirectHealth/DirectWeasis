@@ -10,10 +10,6 @@
 package org.weasis.dicom.viewer2d.dockable;
 
 import bibliothek.gui.dock.common.CLocation;
-import eu.essilab.lablib.checkboxtree.CheckboxTree;
-import eu.essilab.lablib.checkboxtree.TreeCheckingEvent;
-import eu.essilab.lablib.checkboxtree.TreeCheckingModel;
-import eu.essilab.lablib.checkboxtree.TreeCheckingModel.CheckingMode;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.FlowLayout;
@@ -49,6 +45,10 @@ import org.weasis.core.ui.model.layer.LayerAnnotation;
 import org.weasis.core.ui.model.layer.LayerItem;
 import org.weasis.core.ui.model.layer.LayerType;
 import org.weasis.core.ui.util.TreeBuilder;
+import org.weasis.core.ui.util.tree.CheckboxTree;
+import org.weasis.core.ui.util.tree.TreeCheckingEvent;
+import org.weasis.core.ui.util.tree.TreeCheckingModel;
+import org.weasis.core.ui.util.tree.TreeCheckingModel.CheckingMode;
 import org.weasis.core.util.LangUtil;
 import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.codec.display.OverlayOp;
@@ -103,6 +103,7 @@ public class DisplayTool extends PluginTool implements SeriesViewerListener {
     dicomInfo.add(new DefaultMutableTreeNode(LayerItem.ANONYM_ANNOTATIONS, false));
     dicomInfo.add(new DefaultMutableTreeNode(LayerItem.SCALE, true));
     dicomInfo.add(new DefaultMutableTreeNode(LayerItem.LUT, true));
+    dicomInfo.add(new DefaultMutableTreeNode(LayerItem.FUSION_LUT, true));
     dicomInfo.add(new DefaultMutableTreeNode(LayerItem.IMAGE_ORIENTATION, true));
     dicomInfo.add(new DefaultMutableTreeNode(LayerItem.WINDOW_LEVEL, true));
     dicomInfo.add(new DefaultMutableTreeNode(LayerItem.ZOOM, true));
@@ -156,8 +157,8 @@ public class DisplayTool extends PluginTool implements SeriesViewerListener {
 
   private void treeValueChanged(TreeCheckingEvent e) {
     if (!initPathSelection) {
-      TreePath path = e.getPath();
-      boolean selected = e.isCheckedPath();
+      TreePath path = e.path();
+      boolean selected = e.checked();
       Object selObject = path.getLastPathComponent();
       Object parent = null;
       if (path.getParentPath() != null) {
@@ -224,7 +225,7 @@ public class DisplayTool extends PluginTool implements SeriesViewerListener {
           }
           if (LayerItem.ANONYM_ANNOTATIONS.equals(item)) {
             // Send message to listeners, only selected view
-            ViewCanvas<?> v = container.getSelectedImagePane();
+            ViewCanvas<?> v = container.getSelectedViewCanvas();
             Series<?> series = (Series<?>) v.getSeries();
             EventManager.getInstance()
                 .fireSeriesViewerListeners(
@@ -260,7 +261,7 @@ public class DisplayTool extends PluginTool implements SeriesViewerListener {
   private void iniDicomView(OpManager disOp, String op, String param, int index) {
     TreeNode treeNode = imageNode.getChildAt(index);
     if (treeNode != null) {
-      Boolean val = (Boolean) disOp.getParamValue(op, param);
+      Boolean val = disOp.getParamValue(op, param, Boolean.class).orElse(null);
       TreeBuilder.setPathSelection(tree, getTreePath(treeNode), val != null && val);
     }
   }
@@ -304,11 +305,11 @@ public class DisplayTool extends PluginTool implements SeriesViewerListener {
     TreeBuilder.setPathSelection(
         tree,
         getTreePath(drawings),
-        LangUtil.getNULLtoTrue((Boolean) view.getActionValue(ActionW.DRAWINGS.cmd())));
+        LangUtil.nullToTrue((Boolean) view.getActionValue(ActionW.DRAWINGS.cmd())));
     TreeBuilder.setPathSelection(
         tree,
         getTreePath(crosslines),
-        LangUtil.getNULLtoTrue((Boolean) view.getActionValue(LayerType.CROSSLINES.name())));
+        LangUtil.nullToTrue((Boolean) view.getActionValue(LayerType.CROSSLINES.name())));
   }
 
   private static TreePath getTreePath(TreeNode node) {
@@ -338,7 +339,7 @@ public class DisplayTool extends PluginTool implements SeriesViewerListener {
     // TODO should received layer changes
     EVENT e = event.getEventType();
     if (EVENT.SELECT_VIEW.equals(e) && event.getSeriesViewer() instanceof ImageViewerPlugin) {
-      iniTreeValues(((ImageViewerPlugin<?>) event.getSeriesViewer()).getSelectedImagePane());
+      iniTreeValues(((ImageViewerPlugin<?>) event.getSeriesViewer()).getSelectedViewCanvas());
     } else if (EVENT.TOGGLE_INFO.equals(e)) {
       TreeCheckingModel model = tree.getCheckingModel();
       TreePath path = new TreePath(dicomInfo.getPath());

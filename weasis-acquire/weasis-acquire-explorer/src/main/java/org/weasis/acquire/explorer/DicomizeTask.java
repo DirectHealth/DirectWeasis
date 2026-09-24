@@ -9,7 +9,7 @@
  */
 package org.weasis.acquire.explorer;
 
-import java.io.File;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
@@ -28,7 +28,7 @@ import org.weasis.core.util.FileUtil;
  *
  * @version $Rev$ $Date$
  */
-public class DicomizeTask extends SwingWorker<File, AcquireMediaInfo> {
+public class DicomizeTask extends SwingWorker<Path, AcquireMediaInfo> {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(DicomizeTask.class);
 
@@ -39,12 +39,12 @@ public class DicomizeTask extends SwingWorker<File, AcquireMediaInfo> {
   }
 
   @Override
-  protected File doInBackground() {
+  protected Path doInBackground() {
 
-    File exportDirDicom =
+    Path exportDirDicom =
         FileUtil.createTempDir(
             AppProperties.buildAccessibleTempDirectory("tmp", "dicomize", "dcm")); // NON-NLS
-    File exportDirImage =
+    Path exportDirImage =
         FileUtil.createTempDir(
             AppProperties.buildAccessibleTempDirectory("tmp", "dicomize", "img")); // NON-NLS
 

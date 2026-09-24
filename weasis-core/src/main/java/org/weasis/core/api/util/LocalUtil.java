@@ -36,12 +36,12 @@ public class LocalUtil {
    * @return the <code>Locale</code> value
    */
   public static Locale textToLocale(String value) {
-    if (!StringUtil.hasText(value)) {
+    if (!StringUtil.hasText(value)) { // NOSONAR hasText does the job
       return Locale.ENGLISH;
     }
 
     if (!"system".equals(value)) { // NON-NLS
-      return Locale.forLanguageTag(value.replace("_", "-"));
+      return Locale.forLanguageTag(value.replace("_", "-")); // NOSONAR
     }
     return Locale.getDefault();
   }

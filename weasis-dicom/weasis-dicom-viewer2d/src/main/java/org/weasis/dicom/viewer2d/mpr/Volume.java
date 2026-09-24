@@ -9,31 +9,33 @@
  */
 package org.weasis.dicom.viewer2d.mpr;
 
+import static org.weasis.dicom.viewer2d.mpr.SplatContext.WEIGHT_EPSILON;
+
+import java.awt.Dimension;
+import java.beans.PropertyChangeListener;
+import java.beans.PropertyChangeSupport;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.MappedByteBuffer;
-import java.nio.channels.FileChannel;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.lang.reflect.Array;
+import java.util.*;
 import java.util.concurrent.CompletionService;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.Future;
 import java.util.concurrent.RecursiveAction;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.BiConsumer;
+import java.util.function.IntBinaryOperator;
 import javax.swing.JProgressBar;
 import org.joml.Matrix4d;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
 import org.joml.Vector3i;
 import org.joml.Vector4d;
+import org.opencv.core.Core;
+import org.opencv.core.Core.MinMaxLocResult;
 import org.opencv.core.CvType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,354 +43,622 @@ import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.image.cv.CvUtil;
+import org.weasis.core.api.util.ResourceMonitor;
 import org.weasis.core.api.util.ThreadUtil;
+import org.weasis.core.api.vol.ChunkedArray;
+import org.weasis.core.api.vol.ChunkedMappedBuffer;
 import org.weasis.core.ui.editor.image.ViewerPlugin;
-import org.weasis.core.util.FileUtil;
-import org.weasis.core.util.Pair;
+import org.weasis.core.util.MathUtil;
 import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.codec.geometry.GeometryOfSlice;
+import org.weasis.opencv.data.ImageCV;
 import org.weasis.opencv.data.PlanarImage;
-import org.weasis.opencv.op.ImageProcessor;
 
-public abstract class Volume<T extends Number> {
+public abstract sealed class Volume<T extends Number, A>
+    permits VolumeByte, VolumeDouble, VolumeFloat, VolumeInt, VolumeShort {
+
   private static final Logger LOGGER = LoggerFactory.getLogger(Volume.class);
-
-  private static final java.util.concurrent.ExecutorService VOLUME_BUILD_POOL =
+  private static final Matrix4d IDENTITY_MATRIX = new Matrix4d();
+  private static final ExecutorService VOLUME_BUILD_POOL =
       ThreadUtil.newManagedImageProcessingThreadPool("mpr-volume-build");
+
+  // Unified data storage — chunked 1D array for long-indexable volumes
+  protected ChunkedArray<A> data;
 
   protected final Vector3d translation;
   protected final Quaterniond rotation;
   protected final Vector3i size;
-  protected Vector3d pixelRatio;
-  protected boolean negativeDirRow;
-  protected boolean negativeDirCol;
-  protected double minValue;
-  protected double maxValue;
+  protected final Vector3d pixelRatio;
+  protected T minValue;
+  protected T maxValue;
   protected OriginalStack stack;
   protected int cvType;
   protected int byteDepth = 1;
-  protected MappedByteBuffer mappedBuffer;
-  protected File dataFile;
+  protected int channels;
+  protected ChunkedMappedBuffer mappedBuffer;
   protected final JProgressBar progressBar;
   protected final boolean isSigned;
   protected boolean isTransformed = false;
+  protected boolean isBasic = false;
+  protected boolean skipRectification = false;
+  protected long sliceStride;
 
-  Volume(Volume<?> volume, int sizeX, int sizeY, int sizeZ, Vector3d originalPixelRatio) {
+  /**
+   * Physical position (LPS mm) of voxel (0,0,0) in the volume. Set during volume construction and
+   * used to convert voxel coordinates back to patient space in getSlice().
+   */
+  protected Vector3d volumeOrigin = new Vector3d(0, 0, 0);
+
+  /**
+   * Patient-space (LPS) unit direction vectors corresponding to the volume's X, Y, Z voxel axes.
+   * For a rectified volume these are the canonical LPS axes (1,0,0), (0,1,0), (0,0,1). For a
+   * skipRectification volume they follow the plane-dependent axis ordering from VolumeBounds.
+   */
+  protected Vector3d volumeAxisX = new Vector3d(1, 0, 0);
+
+  protected Vector3d volumeAxisY = new Vector3d(0, 1, 0);
+  protected Vector3d volumeAxisZ = new Vector3d(0, 0, 1);
+
+  private final PropertyChangeSupport crossHairChangeSupport = new PropertyChangeSupport(this);
+
+  @SuppressWarnings("unchecked")
+  Volume(Volume<?, ?> volume, int sizeX, int sizeY, int sizeZ, Vector3d originalPixelRatio) {
     this.progressBar = volume.progressBar;
     this.translation = new Vector3d(0, 0, 0);
     this.rotation = new Quaterniond();
     this.size = new Vector3i(sizeX, sizeY, sizeZ);
-    this.pixelRatio = originalPixelRatio;
-    this.negativeDirRow = volume.negativeDirRow;
-    this.negativeDirCol = volume.negativeDirCol;
-    this.minValue = volume.minValue;
-    this.maxValue = volume.maxValue;
+    this.sliceStride = (long) size.x * size.y;
+    this.pixelRatio = new Vector3d(originalPixelRatio);
     this.stack = volume.stack;
     this.cvType = volume.cvType;
     this.byteDepth = volume.byteDepth;
     this.isSigned = volume.isSigned;
+    this.channels = volume.channels;
+    this.minValue = (T) volume.minValue;
+    this.maxValue = (T) volume.maxValue;
     createData(size.x, size.y, size.z);
   }
 
-  Volume(int sizeX, int sizeY, int sizeZ, JProgressBar progressBar) {
-    this(sizeX, sizeY, sizeZ, true, progressBar);
-  }
-
-  Volume(int sizeX, int sizeY, int sizeZ, boolean isSigned, JProgressBar progressBar) {
+  Volume(int sizeX, int sizeY, int sizeZ, int cvType, JProgressBar progressBar) {
     this.progressBar = progressBar;
     this.translation = new Vector3d(0, 0, 0);
     this.rotation = new Quaterniond();
     this.size = new Vector3i(sizeX, sizeY, sizeZ);
+    this.sliceStride = (long) size.x * size.y;
     this.pixelRatio = new Vector3d(1.0, 1.0, 1.0);
-    this.negativeDirRow = false;
-    this.negativeDirCol = false;
-    this.minValue = -Double.MAX_VALUE;
-    this.maxValue = Double.MAX_VALUE;
     this.stack = null;
-    this.cvType = initCVType(isSigned);
-    this.isSigned = isSigned;
+    int depth = CvType.depth(cvType);
+    this.isSigned = isSigned(depth);
+    this.channels = CvType.channels(cvType);
+    this.cvType = cvType;
+    this.byteDepth = CvType.ELEM_SIZE(cvType) / channels;
+    this.minValue = initMinValue();
+    this.maxValue = initMaxValue();
     createData(size.x, size.y, size.z);
   }
 
-  Volume(OriginalStack stack, JProgressBar progressBar) {
+  Volume(OriginalStack stack, JProgressBar progressBar, boolean isBasic) {
     this.progressBar = progressBar;
     this.translation = new Vector3d(0, 0, 0);
     this.rotation = new Quaterniond();
     this.size = new Vector3i(0, 0, 0);
     this.pixelRatio = new Vector3d(1.0, 1.0, 1.0);
-    this.negativeDirRow = false;
-    this.negativeDirCol = false;
     this.stack = stack;
-    int depth = stack.getFirstImage().getImage().depth();
-    this.isSigned = depth == CvType.CV_8S || depth == CvType.CV_16S || depth == CvType.CV_32S;
-    this.cvType = initCVType(isSigned);
-    this.byteDepth = CvType.ELEM_SIZE(cvType); // FIXME: color image
-    switch (stack.getPlane()) {
-      case AXIAL:
-        copyFromAxial();
-        break;
-      case CORONAL:
-        copyFromCoronalToAxial();
-        break;
-      case SAGITTAL:
-        copyFromSagittalTaAxial();
-        break;
-    }
+    int type = stack.getMiddleImage().getModalityLutImage(null, null).type();
+    int depth = CvType.depth(type);
+    this.isSigned = isSigned(depth);
+    this.channels = CvType.channels(type);
+    this.cvType = initCVType(isSigned, channels);
+    this.byteDepth = CvType.ELEM_SIZE(cvType) / channels;
+    this.minValue = initMinValue();
+    this.maxValue = initMaxValue();
+    this.isBasic = isBasic;
+    if (isBasic) copyFromAnyOrientationWithoutRectification();
+    else copyFromAnyOrientationWithRectification();
+    ResourceMonitor.getInstance().recordVolume(getSizeZ());
   }
 
-  private int initCVType(boolean isSigned) {
-    int type;
-    switch (this) {
-      case VolumeByte _ -> type = isSigned ? CvType.CV_8SC1 : CvType.CV_8UC1;
-      case VolumeShort _ -> type = isSigned ? CvType.CV_16SC1 : CvType.CV_16UC1;
-      case VolumeInt _ -> type = CvType.CV_32SC1;
-      case VolumeFloat _ -> type = CvType.CV_32FC1;
-      case VolumeDouble _ -> type = CvType.CV_64FC1;
-      default -> throw new IllegalArgumentException("Unsupported data type");
-    }
-    return type;
+  private static boolean isSigned(int depth) {
+    return depth == CvType.CV_8S
+        || depth == CvType.CV_16S
+        || depth == CvType.CV_32S
+        || depth == CvType.CV_32F
+        || depth == CvType.CV_64F;
   }
+
+  public void addCrossHairChangeListener(PropertyChangeListener listener) {
+    if (listener == null) {
+      return;
+    }
+
+    for (PropertyChangeListener l : crossHairChangeSupport.getPropertyChangeListeners()) {
+      if (l == listener) {
+        return;
+      }
+    }
+    crossHairChangeSupport.addPropertyChangeListener(listener);
+  }
+
+  public void removeCrossHairChangeListener(PropertyChangeListener listener) {
+    crossHairChangeSupport.removePropertyChangeListener(listener);
+  }
+
+  public void fireCrossHairChanged(Vector3d normalizedPosition, Quaterniond globalRotation) {
+    crossHairChangeSupport.firePropertyChange(
+        "mpr.crosshair",
+        null,
+        new Object[] {new Vector3d(normalizedPosition), new Quaterniond(globalRotation)});
+  }
+
+  protected abstract T initMinValue();
+
+  protected abstract T initMaxValue();
+
+  protected abstract int initCVType(boolean isSigned, int channels);
 
   private void createData(int sizeX, int sizeY, int sizeZ) {
+    long totalElements = (long) sizeX * sizeY * sizeZ * channels;
     try {
-      createDataArray(sizeX, sizeY, sizeZ);
+      this.data = createChunkedArray(totalElements);
     } catch (OutOfMemoryError e) {
       CvUtil.runGarbageCollectorAndWait(100);
       try {
-        createDataArray(sizeX, sizeY, sizeZ);
+        this.data = createChunkedArray(totalElements);
       } catch (OutOfMemoryError ex) {
         createDataFile(sizeX, sizeY, sizeZ);
       }
+    }
+
+    if (data == null) {
+      initValueMappedBuffer(minValue);
+    } else {
+      initValue(minValue);
     }
   }
 
   private void createDataFile(int sizeX, int sizeY, int sizeZ) {
     try {
       removeData();
-      dataFile = File.createTempFile("volume_data", ".tmp", AppProperties.FILE_CACHE_DIR);
-      long fileSize;
-      FileChannel fileChannel;
-      try (RandomAccessFile raf = new RandomAccessFile(dataFile, "rw")) {
-        fileSize = (long) sizeX * sizeY * sizeZ * byteDepth;
-        raf.setLength(fileSize);
-        fileChannel = raf.getChannel();
-        this.mappedBuffer = fileChannel.map(FileChannel.MapMode.READ_WRITE, 0, fileSize);
-      }
+      File dataFile =
+          File.createTempFile("volume_data", ".tmp", AppProperties.FILE_CACHE_DIR.toFile());
+      long totalBytes = (long) sizeX * sizeY * sizeZ * byteDepth * channels;
+      this.mappedBuffer = new ChunkedMappedBuffer(dataFile, totalBytes);
+      ResourceMonitor.getInstance().recordVolumeDiskFallback();
     } catch (IOException ioException) {
       throw new RuntimeException("Failed to create a 3D volume file!", ioException);
     }
   }
 
-  protected void copyFromAxial() {
+  protected void copyFromAnyOrientationWithoutRectification() {
+    VolumeBounds bounds = stack.computeVolumeBounds();
+    if (bounds == null) {
+      return;
+    }
+    Vector3i volumeSize = bounds.size();
+    this.size.set(volumeSize);
+    this.sliceStride = (long) volumeSize.x * volumeSize.y;
+    this.pixelRatio.set(bounds.spacing());
+    this.isTransformed = false;
+    // Physical origin = TLHC of the starting image (translation is zero in the basic path)
+    this.volumeOrigin.set(stack.getFirstSliceGeometry().getTLHC());
+    // Volume voxel axes follow the plane-dependent ordering from VolumeBounds
+    this.volumeAxisX.set(bounds.rowDir());
+    this.volumeAxisY.set(bounds.colDir());
+    this.volumeAxisZ.set(bounds.normalDir());
+
     List<DicomImageElement> medias = new ArrayList<>(stack.getSourceStack());
-    Collections.reverse(medias);
-    DicomImageElement img = medias.getFirst();
-    this.size.x = stack.getWidth();
-    this.size.y = stack.getHeight();
-    this.size.z = medias.size();
-    pixelRatio.set(img.getPixelSize(), img.getPixelSize(), stack.getSliceSpace());
-    coyImageToVolume(medias);
+    // For axial, we need to reverse to go from inferior to superior
+    if (stack.getPlane() == MprView.Plane.AXIAL) {
+      Collections.reverse(medias);
+    }
+
+    copyImageToVolume(medias, new Vector3d(0, 0, 0));
   }
 
-  private void coyImageToVolume(List<DicomImageElement> dicomImages) {
+  /**
+   * Unified method to copy pixels from any orientation directly into the volume. Uses DICOM
+   * geometry (Image Position Patient and Image Orientation Patient) to place voxels in the correct
+   * 3D position.
+   */
+  protected void copyFromAnyOrientationWithRectification() {
+    VolumeBounds bounds = stack.computeVolumeBounds();
+    if (bounds == null) {
+      return;
+    }
+
+    GeometryOfSlice firstGeometry = stack.getFirstImage().getSliceGeometry();
+    GeometryOfSlice lastGeometry = stack.getLastImage().getSliceGeometry();
+    if (firstGeometry == null || lastGeometry == null) {
+      return;
+    }
+    Vector3d firstTlhc = firstGeometry.getTLHC();
+    Vector3d lastTlhc = lastGeometry.getTLHC();
+
+    // Calculate the new bounds after rectification
+    Vector3d[] transformedBounds = calculateBoundsForSize(firstTlhc, lastTlhc);
+    Vector3d min = transformedBounds[0];
+    Vector3d max = transformedBounds[1];
+    // Store the translation needed during transformation because of negative coordinates
+    Vector3d translation = new Vector3d();
+
+    if (stack.getPlane().equals(MprView.Plane.AXIAL)) {
+      // When the plane is Axial, the stack is reversed
+      translation.z = -(max.z() - firstTlhc.z());
+    } else {
+      translation.z = -(min.z() - firstTlhc.z());
+    }
+    translation.y = -(min.y() - firstTlhc.y());
+    translation.x = -(min.x() - firstTlhc.x());
+
+    // Get the origin position in millimeters (first pixel of the volume)
+    Vector3d origin = new Vector3d(firstTlhc);
+    // Adapt the origin according to the modifications applied on the volume (geometric
+    // rectification)
+    origin.sub(translation);
+    // Store as the physical LPS origin of voxel (0,0,0) for use by getSlice()
+
+    this.volumeOrigin.set(origin);
+    // For the rectified volume the voxel X/Y/Z axes are remapped to absolute LPS axes.
+    this.volumeAxisX.set(1, 0, 0);
+    this.volumeAxisY.set(0, 1, 0);
+    this.volumeAxisZ.set(0, 0, -1);
+
+    // Compare the new size needed with the actual size of the images without transformation
+    // and set the volume size accordingly
+    Vector3d size = new Vector3d();
+    max.sub(min, size);
+    size.div(bounds.spacing());
+    Vector3i volumeSize =
+        new Vector3i(
+            (int) Math.ceil(size.x()), (int) Math.ceil(size.y()), (int) Math.ceil(size.z()));
+    this.size.set(volumeSize);
+    this.sliceStride = (long) volumeSize.x * volumeSize.y;
+    this.pixelRatio.set(bounds.spacing());
+
+    // Compute the distance in pixels between the size of the images' stack and the transformed size
+    this.isTransformed = volumeSize.distance(bounds.size()) > 2.0;
+
+    List<DicomImageElement> medias = new ArrayList<>(stack.getSourceStack());
+    // For axial, we need to reverse to go from inferior to superior
+    if (stack.getPlane() == MprView.Plane.AXIAL) {
+      Collections.reverse(medias);
+    }
+
+    copyImageToVolume(medias, origin);
+  }
+
+  /**
+   * Computes the basis matrix using the actual in-plane pixel spacings from the slice geometry. <a
+   * href="https://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_C.7.6.2.html#sect_C.7.6.2.1.1">DICOM
+   * patient geometry</a>
+   *
+   * @return the matrix corresponding to the row and column vectors
+   */
+  private Matrix4d getBasisMatrix() {
+    GeometryOfSlice geom = stack.getFirstSliceGeometry();
+    Vector3d col = geom.getColumn();
+    Vector3d row = geom.getRow();
+    double rowSpacing = geom.getVoxelSpacing().x();
+    double colSpacing = geom.getVoxelSpacing().y();
+    Matrix4d transformMatrix = new Matrix4d();
+    transformMatrix.set(0, 0, row.x() * rowSpacing);
+    transformMatrix.set(0, 1, row.y() * rowSpacing);
+    transformMatrix.set(0, 2, row.z() * rowSpacing);
+
+    transformMatrix.set(1, 0, col.x() * colSpacing);
+    transformMatrix.set(1, 1, col.y() * colSpacing);
+    transformMatrix.set(1, 2, col.z() * colSpacing);
+
+    return transformMatrix;
+  }
+
+  /**
+   * Computes the matrix including the position column based on the position vector given as an
+   * argument.
+   *
+   * @return the matrix corresponding to the row and column vectors with the position column
+   */
+  private Matrix4d getTransformMatrix(Vector3d position) {
+    Matrix4d matrix = getBasisMatrix();
+    matrix.set(3, 0, position.x());
+    matrix.set(3, 1, position.y());
+    matrix.set(3, 2, position.z());
+    return matrix;
+  }
+
+  /**
+   * Enforces orthonormality on a 4x4 matrix using Gram-Schmidt orthogonalization. This removes any
+   * shear component that may have been introduced by numerical errors. Only affects the upper-left
+   * 3x3 rotation/scale part; preserves translation.
+   */
+  private void enforceOrthonormality(Matrix4d m) {
+    Vector3d c0 = new Vector3d();
+    Vector3d c1 = new Vector3d();
+    Vector3d c2 = new Vector3d();
+
+    m.getColumn(0, c0);
+    m.getColumn(1, c1);
+    m.getColumn(2, c2);
+
+    // Gram-Schmidt orthogonalization
+    c0.normalize();
+    c1.sub(new Vector3d(c0).mul(c1.dot(c0))).normalize();
+    c2 = new Vector3d(c0).cross(c1).normalize();
+
+    m.setColumn(0, new Vector4d(c0, 1.0));
+    m.setColumn(1, new Vector4d(c1, 1.0));
+    m.setColumn(2, new Vector4d(c2, 1.0));
+  }
+
+  /** Calculates transformed bounds for a given size and transform matrix. */
+  private Vector3d[] calculateBoundsForSize(Vector3d firstImgTlhc, Vector3d lastImgTlhc) {
+    Vector4d[] cornersFirstImg = {
+      new Vector4d(0.0, 0.0, 0.0, 1.0),
+      new Vector4d(stack.getWidth(), 0.0, 0.0, 1.0),
+      new Vector4d(stack.getWidth(), stack.getHeight(), 0.0, 1.0),
+      new Vector4d(0.0, stack.getHeight(), 0.0, 1.0)
+    };
+
+    Vector4d[] cornersLastImg = {
+      new Vector4d(0.0, 0.0, 0.0, 1.0),
+      new Vector4d(stack.getWidth(), 0.0, 0.0, 1.0),
+      new Vector4d(stack.getWidth(), stack.getHeight(), 0.0, 1.0),
+      new Vector4d(0.0, stack.getHeight(), 0.0, 1.0)
+    };
+
+    Matrix4d firstImgTransform = getTransformMatrix(firstImgTlhc);
+    Matrix4d lastImgTransform = getTransformMatrix(lastImgTlhc);
+
+    for (Vector4d corner : cornersLastImg) {
+      lastImgTransform.transform(corner);
+    }
+    for (Vector4d corner : cornersFirstImg) {
+      firstImgTransform.transform(corner);
+    }
+
+    Vector3d min = new Vector3d(Integer.MAX_VALUE);
+    Vector3d max = new Vector3d(Integer.MIN_VALUE);
+
+    minMaxCorner(cornersFirstImg, min, max);
+    minMaxCorner(cornersLastImg, min, max);
+
+    return new Vector3d[] {min, max};
+  }
+
+  private void minMaxCorner(Vector4d[] corners, Vector3d min, Vector3d max) {
+    for (Vector4d corner : corners) {
+      min.x = Math.min(min.x, corner.x);
+      min.y = Math.min(min.y, corner.y);
+      min.z = Math.min(min.z, corner.z);
+      max.x = Math.max(max.x, corner.x);
+      max.y = Math.max(max.y, corner.y);
+      max.z = Math.max(max.z, corner.z);
+    }
+  }
+
+  private void copyImageToVolume(List<DicomImageElement> dicomImages, Vector3d translation) {
     createData(size.x, size.y, size.z);
-    adaptPlaneOrientation();
 
     final int n = dicomImages.size();
-    final boolean flipRow = negativeDirRow;
-    final boolean flipCol = negativeDirCol;
 
-    // Submit per-slice tasks with bounded concurrency
-    CompletionService<Pair<Double, Double>> ecs =
-        new ExecutorCompletionService<>(VOLUME_BUILD_POOL);
+    final long totalVoxels = (long) size.x * size.y * size.z * channels;
+    final long[] tBeforeClose = new long[1];
+    try (SplatContext sharedCtx = SplatContext.create(!isBasic, totalVoxels)) {
 
-    final AtomicInteger submitted = new AtomicInteger(0);
-    final AtomicInteger completed = new AtomicInteger(0);
+      // Submit per-slice tasks with bounded concurrency
+      CompletionService<MinMaxLocResult> ecs = new ExecutorCompletionService<>(VOLUME_BUILD_POOL);
 
-    for (int z = 0; z < n; z++) {
-      final int zi = z;
-      ecs.submit(
-          () -> {
-            DicomImageElement dcm = dicomImages.get(zi);
-            Matrix4d transform = getAffineTransform(dcm);
-            // Load source image (IO and decode may run concurrently with other slices)
-            PlanarImage src = dcm.getImage();
-            // Get min max after loading the image
-            Pair<Double, Double> minMax = new Pair<>(dcm.getPixelMin(), dcm.getPixelMax());
+      final AtomicInteger submitted = new AtomicInteger(0);
+      final AtomicInteger completed = new AtomicInteger(0);
 
-            // Flip only if needed
-            if (src != null && (flipRow || flipCol)) {
-              int flipType = (flipRow && flipCol) ? -1 : (flipCol ? 0 : 1);
-              src = ImageProcessor.flip(src.toImageCV(), flipType);
-            }
+      final long t0 = System.nanoTime();
+      for (int z = 0; z < n; z++) {
+        final int zi = z;
+        ecs.submit(
+            () -> {
+              DicomImageElement dcm = dicomImages.get(zi);
 
-            if (src != null) {
-              copyFrom(src, zi, transform);
-            }
-            int done = completed.incrementAndGet();
-            updateProgressBar(done - 1);
-            return minMax;
-          });
-      submitted.incrementAndGet();
-    }
+              // Load the slice on a private path that bypasses the shared image cache: the
+              // volume reads each frame exactly once, so caching yields no hit benefit, and
+              // — because cache eviction releases the native Mat — would race with sibling
+              // build threads (black slices, "Source image cannot be empty"). The returned
+              // image is owned here and released once the slice has been splatted.
+              PlanarImage src = dcm.getUncachedModalityLutImage(null);
+              if (src == null) {
+                LOGGER.warn("Skipping unreadable slice {} while building MPR volume", zi);
+                updateProgressBar(completed.incrementAndGet() - 1);
+                return null;
+              }
+              try {
+                // Get min/max after loading the image
+                Core.MinMaxLocResult minMaxLoc = new Core.MinMaxLocResult();
+                minMaxLoc.minVal = dcm.getMinValue(null);
+                minMaxLoc.maxVal = dcm.getMaxValue(null);
 
-    // Wait for processing all slices
-    try {
-      for (int i = 0; i < submitted.get(); i++) {
-        Future<Pair<Double, Double>> f = ecs.take();
-        var minMax = f.get(); // propagate exceptions if any
-        this.minValue = Math.min(minMax.first(), minValue);
-        this.maxValue = Math.max(minMax.second(), maxValue);
+                Matrix4d transform;
+                if (isBasic) {
+                  transform = computeSliceToVolumeTransform();
+                } else {
+                  Vector3d position = dcm.getSliceGeometry().getTLHC();
+                  transform = getBasisMatrix();
+                  position.sub(translation);
+                  transform.set(3, 0, position.x());
+                  transform.set(3, 1, position.y());
+                  transform.set(3, 2, position.z());
+                }
+
+                Dimension dim = new Dimension(src.width(), src.height());
+                SplatContext sliceCtx = sharedCtx.withTransformAndDim(transform, dim);
+                copyFrom(src, zi, sliceCtx);
+                updateProgressBar(completed.incrementAndGet() - 1);
+                return minMaxLoc;
+              } finally {
+                src.release();
+              }
+            });
+        submitted.incrementAndGet();
       }
-    } catch (InterruptedException ie) {
-      Thread.currentThread().interrupt();
-    } catch (Exception e) {
-      LOGGER.error("Error while building volume", e);
+
+      // Collect results and track global min/max
+      this.minValue = initMaxValue();
+      this.maxValue = initMinValue();
+      try {
+        for (int i = 0; i < submitted.get(); i++) {
+          Future<Core.MinMaxLocResult> f = ecs.take();
+          var minMax = f.get(); // propagate exceptions if any
+          if (minMax != null) { // null when a slice was unreadable and skipped
+            this.minValue = compareMin(convertToGeneric(minMax.minVal), minValue);
+            this.maxValue = compareMax(convertToGeneric(minMax.maxVal), maxValue);
+          }
+        }
+      } catch (InterruptedException ie) {
+        Thread.currentThread().interrupt();
+      } catch (Exception e) {
+        LOGGER.error("Error while building volume", e);
+      }
+      final long tSplatEnd = System.nanoTime();
+      LOGGER.debug(
+          "MPR volume splat phase finished: {} slices in {} ms", n, (tSplatEnd - t0) / 1_000_000L);
+
+      // --- Normalisation phase: extend the progress bar and feed it per-slice progress so
+      // the user sees activity instead of an "idle" bar between the last decoded slice and
+      // the moment the three MPR views are populated.
+      final JProgressBar pb = this.progressBar;
+      final int normSlices = size.z;
+      final int baseValue;
+      if (pb != null && sharedCtx.isWeighted() && normSlices > 0) {
+        baseValue = pb.getValue();
+        final int newMax = baseValue + normSlices;
+        GuiExecutor.execute(
+            () -> {
+              pb.setMaximum(newMax);
+              pb.setString("Normalizing volume…"); // NON-NLS
+            });
+      } else {
+        baseValue = 0;
+      }
+
+      sharedCtx.normalize(
+          this, pb == null ? null : throttledProgressListener(pb, baseValue, normSlices));
+
+      final long tNormEnd = System.nanoTime();
+      LOGGER.debug(
+          "MPR volume normalize phase finished in {} ms", (tNormEnd - tSplatEnd) / 1_000_000L);
+
+      if (pb != null && sharedCtx.isWeighted() && normSlices > 0) {
+        GuiExecutor.execute(() -> pb.setString(null));
+      }
+      tBeforeClose[0] = System.nanoTime();
     }
+    LOGGER.debug(
+        "MPR volume splat-context close finished in {} ms (unmap + temp file delete)",
+        (System.nanoTime() - tBeforeClose[0]) / 1_000_000L);
   }
 
-  protected void adaptPlaneOrientation() {
-    Matrix4d m = getAffineTransform(stack.getFirstImage());
-    Vector3d row = new Vector3d(stack.getFistSliceGeometry().getRow());
-    Vector3d col = new Vector3d(stack.getFistSliceGeometry().getColumn());
-    negativeDirRow = adaptNegativeVector(row);
-    negativeDirCol = adaptNegativeVector(col);
-    Vector4d oldRow = new Vector4d(row, 0.0);
-    Vector4d oldCol = new Vector4d(col, 0.0);
-    oldRow.sub(m.transform(new Vector4d(m.m00(), m.m10(), m.m20(), 0.0)));
-    oldCol.sub(m.transform(new Vector4d(m.m01(), m.m11(), m.m21(), 0.0)));
-
+  private Matrix4d computeSliceToVolumeTransform() {
+    Matrix4d matrix4d = new Matrix4d();
     switch (stack.getPlane()) {
       case AXIAL -> {
-        double x = Math.max(Math.abs(oldRow.x), Math.abs(oldCol.x));
-        double y = Math.max(Math.abs(oldRow.y), Math.abs(oldCol.y));
-        if (x < 0.5) {
-          pixelRatio.x += pixelRatio.x * x;
-        }
-        if (y < 0.5) {
-          pixelRatio.y += pixelRatio.y * y;
-        }
+        // No additional transform needed for axial, as it's the default orientation
       }
       case CORONAL -> {
-        double x = Math.max(Math.abs(oldRow.x), Math.abs(oldCol.x));
-        double z = Math.max(Math.abs(oldRow.z), Math.abs(oldCol.z));
-        if (x < 0.5) {
-          pixelRatio.x += pixelRatio.x * x;
-        }
-        if (z < 0.5) {
-          pixelRatio.z += pixelRatio.z * z;
-        }
+        matrix4d.rotateX(-Math.toRadians(90)).scale(1.0, -1.0, 1.0);
       }
       case SAGITTAL -> {
-        double y = Math.max(Math.abs(oldRow.y), Math.abs(oldCol.y));
-        double z = Math.max(Math.abs(oldRow.z), Math.abs(oldCol.z));
-        if (y < 0.5) {
-          pixelRatio.y += pixelRatio.y * y;
-        }
-        if (z < 0.5) {
-          pixelRatio.z += pixelRatio.z * z;
-        }
+        matrix4d.rotateY(Math.toRadians(90)).rotateZ(Math.toRadians(90));
+      }
+    }
+    return matrix4d;
+  }
+
+  protected void initValue(T value) {
+    if (MathUtil.isDifferentFromZero(value.doubleValue())) {
+      data.fill(value);
+    }
+  }
+
+  private void initValueMappedBuffer(T minValue) {
+    if (MathUtil.isDifferentFromZero(minValue.doubleValue())) {
+      long totalElements = (long) size.x * size.y * size.z * channels;
+      for (long i = 0; i < totalElements; i++) {
+        long byteIndex = i * byteDepth;
+        setInMappedBuffer(byteIndex, minValue);
       }
     }
   }
 
-  private boolean adaptNegativeVector(Vector3d vector) {
-    if (vector.x < -0.5 || vector.y < -0.5) {
-      vector.negate();
-      return true;
-    }
-    return false;
+  private T compareMin(T a, T b) {
+    return convertToUnsigned(a) < convertToUnsigned(b) ? a : b;
   }
 
-  private Matrix4d getAffineTransform(DicomImageElement dcm) {
-    GeometryOfSlice geometry = dcm.getSliceGeometry();
-    Vector3d row = new Vector3d(geometry.getRow());
-    Vector3d col = new Vector3d(geometry.getColumn());
-    adaptNegativeVector(row);
-    adaptNegativeVector(col);
-    Vector3d normal = geometry.getNormal();
-
-    return switch (stack.getPlane()) {
-      case AXIAL -> new Matrix4d();
-      // Return identity matrix because transformation matrix will be computed if needed later to
-      // rectify patient position
-      case CORONAL ->
-          new Matrix4d(
-              row.x, col.x, normal.x, 0.0, row.z, col.z, normal.z, 0.0, row.y, col.y, normal.y, 0.0,
-              0.0, 0.0, 0.0, 1.0);
-      case SAGITTAL ->
-          new Matrix4d(
-              row.z, col.z, normal.z, 0.0, row.x, col.x, normal.x, 0.0, row.y, col.y, normal.y, 0.0,
-              0.0, 0.0, 0.0, 1.0);
-    };
-  }
-
-  protected Vector3i transformPoint(int x, int y, int z, Matrix4d transform) {
-    Vector4d p = new Vector4d(x, y, z, 1.0);
-    transform.transform(p);
-    switch (stack.getPlane()) {
-      case AXIAL -> {
-        x = (int) Math.round(p.x);
-        y = (int) Math.round(p.y);
-      }
-      case CORONAL -> {
-        x = (int) Math.round(p.x);
-        y = z;
-        z = -(int) Math.round(p.y);
-      }
-      case SAGITTAL -> {
-        x = z;
-        y = -(int) Math.round(p.y);
-        z = -(int) Math.round(p.z);
-      }
-    }
-    return new Vector3i(x, y, z);
+  private T compareMax(T a, T b) {
+    return convertToUnsigned(a) > convertToUnsigned(b) ? a : b;
   }
 
   public void removeData() {
+    this.data = null;
     if (mappedBuffer != null) {
-      mappedBuffer.clear();
-    }
-    if (dataFile != null) {
-      FileUtil.delete(dataFile);
+      mappedBuffer.close();
+      mappedBuffer = null;
     }
   }
 
-  protected void copyFromCoronalToAxial() {
-    List<DicomImageElement> coronalStack = stack.getSourceStack();
-    DicomImageElement img = coronalStack.getFirst();
-    this.size.x = stack.getWidth();
-    this.size.y = coronalStack.size();
-    this.size.z = this.stack.getHeight();
-    pixelRatio.set(img.getPixelSize(), stack.getSliceSpace(), img.getPixelSize());
-    coyImageToVolume(coronalStack);
+  public PlanarImage getVolumeSlice(MprAxis mprAxis, Vector3d volumeCenter) {
+    if (mprAxis == null) {
+      return null;
+    }
+    int sliceImageSize = getSliceSize();
+    Vector3d voxelRatio = getVoxelRatio();
+    Quaterniond mprRotation = mprAxis.getMprView().mprController.getRotation(mprAxis.getPlane());
+    Matrix4d combinedTransform = mprAxis.getRealVolumeTransformation(mprRotation, volumeCenter);
+    mprAxis.getTransformation().set(combinedTransform);
+
+    int totalPixels = sliceImageSize * sliceImageSize;
+    long totalElements = (long) totalPixels * channels;
+    ChunkedArray<A> raster = createChunkedArray(totalElements);
+    fillRasterWithMinValue(raster);
+
+    try (ForkJoinPool pool = ForkJoinPool.commonPool()) {
+      pool.invoke(
+          new VolumeSliceTask(
+              0, totalPixels, sliceImageSize, combinedTransform, voxelRatio, raster));
+    }
+
+    ImageCV imageCV = new ImageCV(sliceImageSize, sliceImageSize, getCvType());
+    putRasterToImage(imageCV, raster);
+    return imageCV;
   }
 
-  protected void copyFromSagittalTaAxial() {
-    List<DicomImageElement> sagittalStack = stack.getSourceStack();
-    DicomImageElement img = sagittalStack.getFirst();
-    this.size.x = sagittalStack.size();
-    this.size.y = stack.getWidth();
-    this.size.z = this.stack.getHeight();
-    pixelRatio.set(stack.getSliceSpace(), img.getPixelSize(), img.getPixelSize());
-    coyImageToVolume(sagittalStack);
+  public PlanarImage getAxialSlice(int z) {
+    ImageCV imageCV = new ImageCV(size.y, size.x, cvType);
+    int sliceElements = size.x * size.y * channels;
+    var raster = createChunkedArray(sliceElements);
+    if (data != null) {
+      long sliceOffset = (long) z * sliceElements;
+      copySliceToRaster(sliceOffset, raster, sliceElements);
+    } else {
+      long byteOffset = (long) z * sliceElements * byteDepth;
+      mappedBuffer.readInto(raster, byteOffset, sliceElements, byteDepth);
+    }
+    putRasterToImage(imageCV, raster);
+    return imageCV;
   }
 
-  protected abstract void copyFrom(PlanarImage image, int z, Matrix4d transform);
-
-  public abstract PlanarImage getVolumeSlice(MprAxis mprAxis, Vector3d volumeCenter);
-
-  protected double getPhotometricMinValue() {
+  protected T getPhotometricMinValue() {
     boolean isPhotometricInverse = stack.getMiddleImage().isPhotometricInterpretationInverse(null);
     return isPhotometricInverse ? maxValue : minValue;
   }
 
-  public int getCVType() {
+  public int getCvType() {
     return cvType;
   }
 
   public Vector3d getTranslation() {
     return translation;
+  }
+
+  public OriginalStack getStack() {
+    return stack;
   }
 
   public void translate(double dx, double dy, double dz) {
@@ -397,6 +667,10 @@ public abstract class Volume<T extends Number> {
 
   public void resetTranslation() {
     translation.set(0, 0, 0);
+  }
+
+  public boolean isVariableSliceSpacing() {
+    return stack != null && stack.isVariableSliceSpacing();
   }
 
   public void rotate(double angleX, double angleY, double angleZ) {
@@ -413,44 +687,600 @@ public abstract class Volume<T extends Number> {
     rotation.identity();
   }
 
-  protected abstract void createDataArray(int sizeX, int sizeY, int sizeZ);
+  public void setSkipRectification(boolean skipRectification) {
+    this.skipRectification = skipRectification;
+  }
 
-  protected abstract void setValue(int x, int y, int z, T value, Matrix4d transform);
+  public boolean isSkipRectification() {
+    return skipRectification;
+  }
 
-  protected void copyPixels(int width, int height, BiConsumer<Integer, Integer> setPixel) {
-    try (ForkJoinPool pool = new ForkJoinPool()) {
-      pool.invoke(new CopyPixelsTask(0, width * height, width, setPixel));
+  protected abstract ChunkedArray<A> createChunkedArray(long totalElements);
+
+  /**
+   * Pre-computes the linear index for a voxel at (x, y, z) with the given channel. Avoids repeated
+   * multiplication in inner loops.
+   */
+  protected long linearIndex(int x, int y, int z, int channel) {
+    return ((long) z * size.y * size.x + (long) y * size.x + x) * channels + channel;
+  }
+
+  /** Pre-computes the linear index for a voxel at (x, y, z) for channel 0. */
+  protected long linearIndex(int x, int y, int z) {
+    return ((long) z * size.y * size.x + (long) y * size.x + x) * channels;
+  }
+
+  /**
+   * Sets a single element in the chunked data array at the given linear index. Subclasses implement
+   * this with the concrete primitive type, avoiding runtime type dispatch.
+   */
+  protected abstract void setElementInData(long index, T value);
+
+  /**
+   * Gets a single element from the chunked data array at the given linear index. Subclasses
+   * implement this with the concrete primitive type, avoiding runtime type dispatch.
+   */
+  protected abstract T getElementFromData(long index);
+
+  /**
+   * Allocates a primitive array of the correct type for the given pixel count. For multi-channel
+   * types (byte, short), the size includes all channels.
+   */
+  protected abstract A allocatePixelArray(int pixelCount);
+
+  /** Reads all pixel data from the image into the given array via image.get(0, 0, array). */
+  protected abstract void readImagePixels(PlanarImage image, A pixelData);
+
+  /**
+   * Writes a contiguous slice of pixel data from a primitive array into the mapped buffer. Used
+   * when data is null (fallback to disk-backed storage).
+   */
+  protected abstract void writeToMappedBuffer(long byteOffset, A pixelData, int length);
+
+  /**
+   * Gets a single element from the pixel array at the given flat index. Used in the per-pixel
+   * transform path.
+   */
+  protected abstract T getFromPixelArray(A pixelData, int index);
+
+  /** Returns the number of elements in the pixel array. */
+  protected abstract int pixelArrayLength(A pixelData);
+
+  private void copyFrom(PlanarImage image, int sliceIndex, SplatContext ctx) {
+    // Safety net: convert the image to the volume's expected depth if they differ.
+    // This can happen when individual slices produce a different modality-LUT output type
+    // than the type that was detected from the representative (middle) image at construction time
+    if (image != null && CvType.depth(image.type()) != CvType.depth(cvType)) {
+      ImageCV converted = new ImageCV();
+      image.toImageCV().convertTo(converted, cvType);
+      image = converted;
+    }
+    int pixelCount = ctx.dim().width * ctx.dim().height;
+    A pixelData = allocatePixelArray(pixelCount);
+    readImagePixels(image, pixelData);
+
+    if (isIdentityTransform(ctx.transform())) {
+      long destOffset = (long) sliceIndex * size.y * size.x * channels;
+      int length = pixelArrayLength(pixelData);
+      if (data != null) {
+        data.copyFrom(destOffset, pixelData, 0, length);
+      } else {
+        writeToMappedBuffer(destOffset * byteDepth, pixelData, length);
+      }
+    } else {
+      copyPixels(
+          ctx.dim(),
+          (x, y) -> {
+            setValue(x, y, sliceIndex, pixelData, ctx);
+            return 0;
+          });
     }
   }
 
-  private static class CopyPixelsTask extends RecursiveAction {
-    private static final int THRESHOLD = 1000;
-    private final int start;
-    private final int end;
-    private final int width;
-    private final BiConsumer<Integer, Integer> setPixel;
-
-    CopyPixelsTask(int start, int end, int width, BiConsumer<Integer, Integer> setPixel) {
-      this.start = start;
-      this.end = end;
-      this.width = width;
-      this.setPixel = setPixel;
+  /** Sets a single channel value at the specified voxel coordinates. */
+  protected void setChannelValue(int x, int y, int z, int channel, T value) {
+    long index = linearIndex(x, y, z, channel);
+    if (data == null) {
+      setInMappedBuffer(index * byteDepth, value);
+    } else {
+      setElementInData(index, value);
     }
+  }
 
-    @Override
-    protected void compute() {
-      if (end - start <= THRESHOLD) {
-        for (int i = start; i < end; i++) {
-          int x = i % width;
-          int y = i / width;
-          setPixel.accept(x, y);
+  /**
+   * Writes a normalised {@code float} value at the precomputed linear index {@code idx}, converting
+   * it to the volume's element type. Used by {@link SplatContext#normalize} to avoid the redundant
+   * {@code linearIndex(x, y, z, c)} recomputation that {@link #setChannelValue} would perform — the
+   * splat accumulator layout already matches the volume's data layout, so we have {@code idx} for
+   * free.
+   *
+   * <p><b>Hot path:</b> called once per sampled voxel during normalisation (~10⁸ calls per volume).
+   * The implementation deliberately avoids {@link #convertToGeneric}, which boxes a {@code
+   * Short}/{@code Integer}/etc per call and was responsible for ≈1 GB of garbage on a 200-megavoxel
+   * {@code VolumeShort} build. Instead it directly stores the primitive into the destination chunk
+   * via a pattern-matched {@code switch}, which the JIT compiles to a type-specialised store with
+   * zero allocation.
+   */
+  final void setNormalizedFloatAt(long idx, float value) {
+    if (data != null) {
+      int ci = data.chunkIndex(idx);
+      int co = data.chunkOffset(idx);
+      A chunk = data.getChunk(ci);
+      switch (chunk) {
+        case byte[] a -> a[co] = (byte) Math.round(value);
+        case short[] a -> a[co] = (short) Math.round(value);
+        case int[] a -> a[co] = Math.round(value);
+        case float[] a -> a[co] = value;
+        case double[] a -> a[co] = value;
+        default -> throw new IllegalStateException("Unsupported chunk type: " + chunk.getClass());
+      }
+    } else {
+      long byteOffset = idx * byteDepth;
+      switch (byteDepth) {
+        case 1 -> mappedBuffer.put(byteOffset, (byte) Math.round(value));
+        case 2 -> mappedBuffer.putShort(byteOffset, (short) Math.round(value));
+        case 4 -> {
+          if (this instanceof VolumeInt) {
+            mappedBuffer.putInt(byteOffset, Math.round(value));
+          } else {
+            mappedBuffer.putFloat(byteOffset, value);
+          }
+        }
+        case 8 -> mappedBuffer.putDouble(byteOffset, value);
+        default -> throw new IllegalStateException("Unsupported byteDepth: " + byteDepth);
+      }
+    }
+  }
+
+  /**
+   * Hoisted hot-loop normalisation of a chunk-aligned run of voxels into the heap-backed {@link
+   * #data} array. The destination type is decoded <b>once</b> per call (instead of per voxel) by
+   * pattern-matching on the chunk and dispatching to a primitive-typed static helper. The resulting
+   * inner loops contain only primitive locals and array stores, so the JIT can fully inline /
+   * unroll / auto-vectorise them.
+   *
+   * <p>Both {@link ChunkedArray}s involved (accumulator and {@link #data}) share the same {@code
+   * CHUNK_SIZE} so chunk indices align — the caller passes accumulator runs that never cross a
+   * destination chunk boundary, and we use the same {@code dco} as {@code wco}.
+   *
+   * <p>An additional fast-path skips voxels whose accumulated weight is exactly {@code 0} (raw int
+   * bits), avoiding the {@code Float.intBitsToFloat} on the unsampled half of the volume.
+   *
+   * @param wChunk weight accumulator chunk
+   * @param vChunk value accumulator chunk
+   * @param accOff offset within the accumulator chunks (same for both)
+   * @param destStartIdx global linear voxel index where this run starts in {@link #data}
+   * @param run number of voxels to normalise
+   */
+  final void normalizeHeapRun(int[] wChunk, int[] vChunk, int accOff, long destStartIdx, int run) {
+    int dco = data.chunkOffset(destStartIdx);
+    A dChunk = data.getChunk(data.chunkIndex(destStartIdx));
+    switch (dChunk) {
+      case byte[] da -> normalizeByteRun(wChunk, vChunk, accOff, da, dco, run);
+      case short[] da -> normalizeShortRun(wChunk, vChunk, accOff, da, dco, run);
+      case int[] da -> normalizeIntRun(wChunk, vChunk, accOff, da, dco, run);
+      case float[] da -> normalizeFloatRun(wChunk, vChunk, accOff, da, dco, run);
+      case double[] da -> normalizeDoubleRun(wChunk, vChunk, accOff, da, dco, run);
+      default -> throw new IllegalStateException("Unsupported chunk type: " + dChunk.getClass());
+    }
+  }
+
+  private static void normalizeByteRun(int[] w, int[] v, int aOff, byte[] d, int dOff, int run) {
+    for (int k = 0; k < run; k++) {
+      int wb = w[aOff + k];
+      if (wb == 0) continue; // 0 raw bits == 0.0f → unsampled, leave background
+      float fw = Float.intBitsToFloat(wb);
+      if (fw < SplatContext.WEIGHT_EPSILON) continue;
+      d[dOff + k] = (byte) Math.round(Float.intBitsToFloat(v[aOff + k]) / fw);
+    }
+  }
+
+  private static void normalizeShortRun(int[] w, int[] v, int aOff, short[] d, int dOff, int run) {
+    for (int k = 0; k < run; k++) {
+      int wb = w[aOff + k];
+      if (wb == 0) continue;
+      float fw = Float.intBitsToFloat(wb);
+      if (fw < SplatContext.WEIGHT_EPSILON) continue;
+      d[dOff + k] = (short) Math.round(Float.intBitsToFloat(v[aOff + k]) / fw);
+    }
+  }
+
+  private static void normalizeIntRun(int[] w, int[] v, int aOff, int[] d, int dOff, int run) {
+    for (int k = 0; k < run; k++) {
+      int wb = w[aOff + k];
+      if (wb == 0) continue;
+      float fw = Float.intBitsToFloat(wb);
+      if (fw < SplatContext.WEIGHT_EPSILON) continue;
+      d[dOff + k] = Math.round(Float.intBitsToFloat(v[aOff + k]) / fw);
+    }
+  }
+
+  private static void normalizeFloatRun(int[] w, int[] v, int aOff, float[] d, int dOff, int run) {
+    for (int k = 0; k < run; k++) {
+      int wb = w[aOff + k];
+      if (wb == 0) continue;
+      float fw = Float.intBitsToFloat(wb);
+      if (fw < SplatContext.WEIGHT_EPSILON) continue;
+      d[dOff + k] = Float.intBitsToFloat(v[aOff + k]) / fw;
+    }
+  }
+
+  private static void normalizeDoubleRun(
+      int[] w, int[] v, int aOff, double[] d, int dOff, int run) {
+    for (int k = 0; k < run; k++) {
+      int wb = w[aOff + k];
+      if (wb == 0) continue;
+      float fw = Float.intBitsToFloat(wb);
+      if (fw < SplatContext.WEIGHT_EPSILON) continue;
+      d[dOff + k] = (double) Float.intBitsToFloat(v[aOff + k]) / fw;
+    }
+  }
+
+  /**
+   * Variant of {@link #normalizeHeapRun} for the mapped-accumulator → heap-data path: the inputs
+   * are already-decoded {@code float[]} weight / value slabs read in bulk from the disk-backed
+   * accumulators, so we skip the {@code Float.intBitsToFloat} step. Same hoisted destination-type
+   * dispatch ⇒ tight typed inner loop, JIT-friendly.
+   */
+  final void normalizeFloatRunToHeap(
+      float[] weights, float[] values, int srcOff, long destStartIdx, int run) {
+    int dco = data.chunkOffset(destStartIdx);
+    A dChunk = data.getChunk(data.chunkIndex(destStartIdx));
+    switch (dChunk) {
+      case byte[] da -> normalizeFloatToByteRun(weights, values, srcOff, da, dco, run);
+      case short[] da -> normalizeFloatToShortRun(weights, values, srcOff, da, dco, run);
+      case int[] da -> normalizeFloatToIntRun(weights, values, srcOff, da, dco, run);
+      case float[] da -> normalizeFloatToFloatRun(weights, values, srcOff, da, dco, run);
+      case double[] da -> normalizeFloatToDoubleRun(weights, values, srcOff, da, dco, run);
+      default -> throw new IllegalStateException("Unsupported chunk type: " + dChunk.getClass());
+    }
+  }
+
+  private static void normalizeFloatToByteRun(
+      float[] w, float[] v, int sOff, byte[] d, int dOff, int run) {
+    for (int k = 0; k < run; k++) {
+      float fw = w[sOff + k];
+      if (fw < SplatContext.WEIGHT_EPSILON) continue;
+      d[dOff + k] = (byte) Math.round(v[sOff + k] / fw);
+    }
+  }
+
+  private static void normalizeFloatToShortRun(
+      float[] w, float[] v, int sOff, short[] d, int dOff, int run) {
+    for (int k = 0; k < run; k++) {
+      float fw = w[sOff + k];
+      if (fw < SplatContext.WEIGHT_EPSILON) continue;
+      d[dOff + k] = (short) Math.round(v[sOff + k] / fw);
+    }
+  }
+
+  private static void normalizeFloatToIntRun(
+      float[] w, float[] v, int sOff, int[] d, int dOff, int run) {
+    for (int k = 0; k < run; k++) {
+      float fw = w[sOff + k];
+      if (fw < SplatContext.WEIGHT_EPSILON) continue;
+      d[dOff + k] = Math.round(v[sOff + k] / fw);
+    }
+  }
+
+  private static void normalizeFloatToFloatRun(
+      float[] w, float[] v, int sOff, float[] d, int dOff, int run) {
+    for (int k = 0; k < run; k++) {
+      float fw = w[sOff + k];
+      if (fw < SplatContext.WEIGHT_EPSILON) continue;
+      d[dOff + k] = v[sOff + k] / fw;
+    }
+  }
+
+  private static void normalizeFloatToDoubleRun(
+      float[] w, float[] v, int sOff, double[] d, int dOff, int run) {
+    for (int k = 0; k < run; k++) {
+      float fw = w[sOff + k];
+      if (fw < SplatContext.WEIGHT_EPSILON) continue;
+      d[dOff + k] = (double) v[sOff + k] / fw;
+    }
+  }
+
+  /**
+   * Bulk-writes a contiguous slice of normalised float values into the disk-backed {@link
+   * #mappedBuffer}, converting them to the volume's element type. For voxels whose accumulated
+   * weight is below {@link SplatContext#WEIGHT_EPSILON} the configured background ({@link
+   * #minValue}) is written instead — matching what {@code initValueMappedBuffer} placed at volume
+   * construction.
+   *
+   * <p>This avoids the per-voxel {@code mappedBuffer.put*(...)} dispatch (n random writes spread
+   * over the same mapped pages) by building one typed scratch array and issuing a single bulk
+   * {@code putBytes/putShorts/putInts/putFloats/putDoubles} call. When the mapped accumulators are
+   * also disk-backed, this turns the entire normalisation pass into three sequential mapped-file
+   * streams (W read, V read, data write) instead of three random-access patterns competing for the
+   * page cache.
+   *
+   * <p>Caller invariants:
+   *
+   * <ul>
+   *   <li>{@code data == null} (i.e. the volume is disk-backed); a precondition is asserted.
+   *   <li>{@code values[k] == accumulatedValue / accumulatedWeight} for sampled voxels and may be
+   *       arbitrary for unsampled voxels.
+   *   <li>{@code weights[k]} is the accumulated weight, used solely as a sampled / not-sampled
+   *       discriminator against {@link SplatContext#WEIGHT_EPSILON}.
+   * </ul>
+   *
+   * @param startIdx starting linear voxel index of the slice (channel-aware, matches {@link
+   *     #linearIndex(int, int, int, int)})
+   * @param values per-voxel normalised float values (length ≥ {@code n})
+   * @param weights per-voxel accumulated weights, parallel to {@code values}
+   * @param n number of voxels to write
+   */
+  final void writeNormalizedSliceMappedBulk(long startIdx, float[] values, float[] weights, int n) {
+    if (mappedBuffer == null || data != null) {
+      throw new IllegalStateException("writeNormalizedSliceMappedBulk requires a mapped volume");
+    }
+    long byteStart = startIdx * byteDepth;
+    final float epsilon = SplatContext.WEIGHT_EPSILON;
+    switch (byteDepth) {
+      case 1 -> {
+        byte bg = minValue.byteValue();
+        byte[] scratch = new byte[n];
+        for (int k = 0; k < n; k++) {
+          scratch[k] = weights[k] < epsilon ? bg : (byte) Math.round(values[k]);
+        }
+        mappedBuffer.putBytes(byteStart, scratch, 0, n);
+      }
+      case 2 -> {
+        short bg = minValue.shortValue();
+        short[] scratch = new short[n];
+        for (int k = 0; k < n; k++) {
+          scratch[k] = weights[k] < epsilon ? bg : (short) Math.round(values[k]);
+        }
+        mappedBuffer.putShorts(byteStart, scratch, 0, n);
+      }
+      case 4 -> {
+        if (this instanceof VolumeInt) {
+          int bg = minValue.intValue();
+          int[] scratch = new int[n];
+          for (int k = 0; k < n; k++) {
+            scratch[k] = weights[k] < epsilon ? bg : Math.round(values[k]);
+          }
+          mappedBuffer.putInts(byteStart, scratch, 0, n);
+        } else {
+          float bg = minValue.floatValue();
+          float[] scratch = new float[n];
+          for (int k = 0; k < n; k++) {
+            scratch[k] = weights[k] < epsilon ? bg : values[k];
+          }
+          mappedBuffer.putFloats(byteStart, scratch, 0, n);
+        }
+      }
+      case 8 -> {
+        double bg = minValue.doubleValue();
+        double[] scratch = new double[n];
+        for (int k = 0; k < n; k++) {
+          scratch[k] = weights[k] < epsilon ? bg : values[k];
+        }
+        mappedBuffer.putDoubles(byteStart, scratch, 0, n);
+      }
+      default -> throw new IllegalStateException("Unsupported byteDepth: " + byteDepth);
+    }
+  }
+
+  /**
+   * Copies an entire axial slice from the chunked data array into a raster for ImageCV. Subclasses
+   * implement with typed bulk copy (System.arraycopy via ChunkedArray.copyTo).
+   *
+   * @param sliceOffset starting element index in the flat array
+   * @param raster the destination primitive array
+   * @param length number of elements to copy
+   */
+  protected void copySliceToRaster(long sliceOffset, ChunkedArray<A> raster, long length) {
+    if (raster.isSingleChunk()) {
+      data.copyTo(sliceOffset, raster.singleChunk(), 0, length);
+    } else {
+      data.copyTo(sliceOffset, raster, 0, length);
+    }
+  }
+
+  protected void checkSingleChannel(int channels) {
+    if (channels != 1) {
+      throw new IllegalArgumentException("Only single channel int type is supported");
+    }
+  }
+
+  /**
+   * Sets the voxel value at the specified 3D coordinates, applying the transformation and optional
+   * weighted-splatting accumulators carried by {@code ctx}.
+   *
+   * <p>When {@code ctx} contains non-null accumulators (rectified, non-basic mode) the source pixel
+   * is scatter-interpolated: its value is distributed to the 8 surrounding lattice corners weighted
+   * by trilinear coefficients. The normalisation pass in {@link SplatContext#normalize} later
+   * divides each voxel's accumulated value by its accumulated weight, producing an artefact-free
+   * result even with high tilt and few slices.
+   *
+   * <p>When no accumulators are present (basic mode or disk-backed fallback) the nearest-corner
+   * write is used.
+   */
+  private void setValue(int x, int y, int z, A pixelData, SplatContext ctx) {
+    Matrix4d transform = ctx.transform();
+    int width = ctx.dim().width;
+    if (transform != null) {
+      Vector4d p = new Vector4d(x, y, 0.0, 1.0);
+
+      if (isBasic) {
+        p.set(x, y, z, 1.0);
+      }
+
+      // World-space position of this source pixel
+      transform.transform(p);
+
+      if (!isBasic) {
+        // Convert mm → voxel units
+        p.div(new Vector4d(pixelRatio.x(), pixelRatio.y(), pixelRatio.z(), 1.0));
+
+        if (stack.getPlane().equals(MprView.Plane.AXIAL)) {
+          p.z = -p.z;
+        } else {
+          p.z = size.z - p.z;
+        }
+      }
+
+      int x0 = (int) Math.floor(p.x);
+      int y0 = (int) Math.floor(p.y);
+      int z0 = (int) Math.floor(p.z);
+
+      float fx = (float) (p.x - x0);
+      float fy = (float) (p.y - y0);
+      float fz = (float) (p.z - z0);
+
+      if (ctx.isWeighted()) {
+        // Trilinear weights for the 8 surrounding corners (float arithmetic)
+        float w000 = (1 - fx) * (1 - fy) * (1 - fz);
+        float w100 = fx * (1 - fy) * (1 - fz);
+        float w010 = (1 - fx) * fy * (1 - fz);
+        float w110 = fx * fy * (1 - fz);
+        float w001 = (1 - fx) * (1 - fy) * fz;
+        float w101 = fx * (1 - fy) * fz;
+        float w011 = (1 - fx) * fy * fz;
+        float w111 = fx * fy * fz;
+
+        int x1 = x0 + 1;
+        int y1 = y0 + 1;
+        int z1 = z0 + 1;
+
+        for (int channel = 0; channel < channels; channel++) {
+          float rawValue =
+              (float)
+                  convertToUnsigned(
+                      getFromPixelArray(pixelData, (y * width + x) * channels + channel));
+          // Each corner is accumulated only when it falls inside the volume bounds and its
+          // weight contribution is not negligible.
+          if (!isOutside(x0, y0, z0) && w000 >= WEIGHT_EPSILON)
+            ctx.accumulate(linearIndex(x0, y0, z0, channel), rawValue, w000);
+          if (!isOutside(x1, y0, z0) && w100 >= WEIGHT_EPSILON)
+            ctx.accumulate(linearIndex(x1, y0, z0, channel), rawValue, w100);
+          if (!isOutside(x0, y1, z0) && w010 >= WEIGHT_EPSILON)
+            ctx.accumulate(linearIndex(x0, y1, z0, channel), rawValue, w010);
+          if (!isOutside(x1, y1, z0) && w110 >= WEIGHT_EPSILON)
+            ctx.accumulate(linearIndex(x1, y1, z0, channel), rawValue, w110);
+          if (!isOutside(x0, y0, z1) && w001 >= WEIGHT_EPSILON)
+            ctx.accumulate(linearIndex(x0, y0, z1, channel), rawValue, w001);
+          if (!isOutside(x1, y0, z1) && w101 >= WEIGHT_EPSILON)
+            ctx.accumulate(linearIndex(x1, y0, z1, channel), rawValue, w101);
+          if (!isOutside(x0, y1, z1) && w011 >= WEIGHT_EPSILON)
+            ctx.accumulate(linearIndex(x0, y1, z1, channel), rawValue, w011);
+          if (!isOutside(x1, y1, z1) && w111 >= WEIGHT_EPSILON)
+            ctx.accumulate(linearIndex(x1, y1, z1, channel), rawValue, w111);
         }
       } else {
-        int mid = (start + end) / 2;
-        CopyPixelsTask leftTask = new CopyPixelsTask(start, mid, width, setPixel);
-        CopyPixelsTask rightTask = new CopyPixelsTask(mid, end, width, setPixel);
-        invokeAll(leftTask, rightTask);
+        for (int channel = 0; channel < channels; channel++) {
+          T value = getFromPixelArray(pixelData, (y * width + x) * channels + channel);
+          setIfInside(x0, y0, z0, channel, value);
+        }
       }
+    } else {
+      for (int channel = 0; channel < channels; channel++) {
+        T value = getFromPixelArray(pixelData, (y * width + x) * channels + channel);
+        setIfInside(x, y, z, value);
+      }
+    }
+  }
+
+  protected void setIfInside(int x, int y, int z, T value) {
+    if (!isOutside(x, y, z)) {
+      long idx = linearIndex(x, y, z);
+      if (data == null) {
+        setInMappedBuffer(idx * byteDepth, value);
+      } else {
+        setElementInData(idx, value);
+      }
+    }
+  }
+
+  protected void setIfInside(int x, int y, int z, int channel, T value) {
+    if (!isOutside(x, y, z)) {
+      setChannelValue(x, y, z, channel, value);
+    }
+  }
+
+  private void setInMappedBuffer(long byteOffset, T value) {
+    switch (byteDepth) {
+      case 1 -> mappedBuffer.put(byteOffset, value.byteValue());
+      case 2 -> mappedBuffer.putShort(byteOffset, value.shortValue());
+      case 4 -> {
+        if (this instanceof VolumeInt) {
+          mappedBuffer.putInt(byteOffset, value.intValue());
+        } else {
+          mappedBuffer.putFloat(byteOffset, value.floatValue());
+        }
+      }
+      case 8 -> mappedBuffer.putDouble(byteOffset, value.doubleValue());
+    }
+  }
+
+  protected void copyPixels(Dimension dim, IntBinaryOperator setPixel) {
+    if (dim.width <= 0 || dim.height <= 0) {
+      return;
+    }
+    try (ForkJoinPool pool = ForkJoinPool.commonPool()) {
+      pool.invoke(new CopyPixelsTask(0, dim.width * dim.height, dim.width, setPixel));
+    }
+  }
+
+  /**
+   * Checks if a transformation matrix is the identity (or null), meaning no coordinate remapping is
+   * needed and bulk copy can be used.
+   */
+  protected static boolean isIdentityTransform(Matrix4d transform) {
+    return transform == null || transform.equals(IDENTITY_MATRIX);
+  }
+
+  private void fillRasterWithMinValue(ChunkedArray<A> raster) {
+    T value = getPhotometricMinValue();
+    if (MathUtil.isEqualToZero(value.doubleValue())) {
+      return;
+    }
+    raster.fill(value);
+  }
+
+  private void putRasterToImage(ImageCV image, ChunkedArray<A> raster) {
+    int cols = image.cols();
+    int chunkChannels = image.channels();
+    long globalIndex = 0;
+    for (int ci = 0; ci < raster.chunkCount(); ci++) {
+      A chunk = raster.getChunk(ci);
+      int chunkLen = Array.getLength(chunk);
+      // Compute the row and column where this chunk starts
+      int startRow = (int) (globalIndex / (cols * chunkChannels));
+      int startCol = (int) ((globalIndex % (cols * chunkChannels)) / chunkChannels);
+      switch (chunk) {
+        case byte[] arr -> image.put(startRow, startCol, arr);
+        case short[] arr -> image.put(startRow, startCol, arr);
+        case int[] arr -> image.put(startRow, startCol, arr);
+        case float[] arr -> image.put(startRow, startCol, arr);
+        case double[] arr -> image.put(startRow, startCol, arr);
+        default -> throw new IllegalStateException("Unsupported raster type");
+      }
+      globalIndex += chunkLen;
+    }
+  }
+
+  /** Reads a single primitive value from the stream. Subclasses implement for their type. */
+  protected abstract T readPrimitive(DataInputStream dis) throws IOException;
+
+  /** Writes a single primitive value to the stream. Subclasses implement for their type. */
+  protected abstract void writePrimitive(DataOutputStream dos, T value) throws IOException;
+
+  public void readVolume(DataInputStream dis, int x, int y, int z) throws IOException {
+    for (int c = 0; c < channels; c++) {
+      setChannelValue(x, y, z, c, readPrimitive(dis));
+    }
+  }
+
+  public void writeVolume(DataOutputStream dos, int x, int y, int z) throws IOException {
+    for (int c = 0; c < channels; c++) {
+      T val = getValue(x, y, z, c);
+      if (val == null) {
+        throw new IOException("Null voxel value at (" + x + "," + y + "," + z + "), channel " + c);
+      }
+      writePrimitive(dos, val);
     }
   }
 
@@ -496,7 +1326,29 @@ public abstract class Volume<T extends Number> {
     return x < 0 || x >= size.x || y < 0 || y >= size.y || z < 0 || z >= size.z;
   }
 
-  public abstract T getValue(int x, int y, int z);
+  protected T getValue(int x, int y, int z, int channel) {
+    if (isOutside(x, y, z)) {
+      return null;
+    }
+
+    long index = linearIndex(x, y, z, channel);
+    if (data == null) {
+      return getFromMappedBuffer(index * byteDepth);
+    }
+    return getElementFromData(index);
+  }
+
+  private T getFromMappedBuffer(long byteOffset) {
+    return (T)
+        switch (CvType.depth(cvType)) {
+          case CvType.CV_8U, CvType.CV_8S -> mappedBuffer.get(byteOffset);
+          case CvType.CV_16U, CvType.CV_16S -> mappedBuffer.getShort(byteOffset);
+          case CvType.CV_32S -> mappedBuffer.getInt(byteOffset);
+          case CvType.CV_32F -> mappedBuffer.getFloat(byteOffset);
+          case CvType.CV_64F -> mappedBuffer.getDouble(byteOffset);
+          default -> null;
+        };
+  }
 
   public double getDiagonalLength() {
     return size.length();
@@ -506,12 +1358,20 @@ public abstract class Volume<T extends Number> {
     return (int) Math.ceil(getVoxelRatio().mul(new Vector3d(size)).length());
   }
 
-  public double getMinimum() {
+  public T getMinimum() {
     return minValue;
   }
 
-  public double getMaximum() {
+  public T getMaximum() {
     return maxValue;
+  }
+
+  public double getMinimumAsDouble() {
+    return convertToUnsigned(minValue);
+  }
+
+  public double getMaximumAsDouble() {
+    return convertToUnsigned(maxValue);
   }
 
   protected void updateProgressBar(int sliceIndex) {
@@ -524,69 +1384,120 @@ public abstract class Volume<T extends Number> {
     GuiExecutor.execute(() -> pb.setValue(target));
   }
 
-  @SuppressWarnings("unchecked")
-  public Volume<T> cloneVolume(int sizeX, int sizeY, int sizeZ, Vector3d originalPixelRatio) {
-    return (Volume<T>)
-        switch (this.getCVType()) {
-          case CvType.CV_8U, CvType.CV_8S ->
-              new VolumeByte(this, sizeX, sizeY, sizeZ, originalPixelRatio);
-          case CvType.CV_16U, CvType.CV_16S ->
-              new VolumeShort(this, sizeX, sizeY, sizeZ, originalPixelRatio);
-          case CvType.CV_32S -> new VolumeInt(this, sizeX, sizeY, sizeZ, originalPixelRatio);
-          case CvType.CV_32F -> new VolumeFloat(this, sizeX, sizeY, sizeZ, originalPixelRatio);
-          case CvType.CV_64F -> new VolumeDouble(this, sizeX, sizeY, sizeZ, originalPixelRatio);
-          default -> null;
-        };
+  /**
+   * Builds a throttled progress listener for the normalisation phase. The {@code IntStream
+   * .parallel()} normalisation can fire ~10⁰² to 10⁰³ completion events from worker threads; if
+   * each one was forwarded to the EDT via {@link GuiExecutor#execute} the event queue would
+   * saturate (paint events behind every {@code setValue}) and add seconds to the perceived build
+   * time. We coalesce updates so only meaningful steps reach the EDT:
+   *
+   * <ul>
+   *   <li>at least 1% of {@code totalSlices} must have advanced since the last update, AND
+   *   <li>at most one update per ~30 ms (≈30 fps),
+   * </ul>
+   *
+   * with the final {@code totalSlices} value always delivered so the bar reaches its end.
+   */
+  private static java.util.function.IntConsumer throttledProgressListener(
+      JProgressBar pb, int baseValue, int totalSlices) {
+    final int step = Math.max(1, totalSlices / 100);
+    final java.util.concurrent.atomic.AtomicInteger lastReported =
+        new java.util.concurrent.atomic.AtomicInteger(0);
+    final java.util.concurrent.atomic.AtomicLong lastTimeNs =
+        new java.util.concurrent.atomic.AtomicLong(0);
+    final long minIntervalNs = 30_000_000L; // 30 ms
+    return done -> {
+      boolean isFinal = done >= totalSlices;
+      int prev = lastReported.get();
+      long now = System.nanoTime();
+      if (!isFinal
+          && (done - prev < step
+              || now - lastTimeNs.get() < minIntervalNs
+              || !lastReported.compareAndSet(prev, done))) {
+        return;
+      }
+      if (isFinal) {
+        lastReported.set(done);
+      }
+      lastTimeNs.set(now);
+      GuiExecutor.execute(() -> pb.setValue(baseValue + done));
+    };
   }
 
-  public static Volume<?> createVolume(OriginalStack stack, JProgressBar progressBar) {
+  public static Volume<?, ?> createVolume(
+      OriginalStack stack, JProgressBar progressBar, boolean isBasic) {
     if (stack == null || stack.getSourceStack().isEmpty()) {
       return null;
     }
 
-    Volume<?> volume = getSharedVolume(stack);
-    if (volume == null) {
-      int type = CvType.depth(stack.getMiddleImage().getImage().type());
-      if (type == CvType.CV_8U) {
-        volume = new VolumeByte(stack, false, progressBar);
-      } else if (type == CvType.CV_8S) {
-        volume = new VolumeByte(stack, true, progressBar);
-      } else if (type == CvType.CV_16U) {
-        volume = new VolumeShort(stack, false, progressBar);
-      } else if (type == CvType.CV_16S) {
-        volume = new VolumeShort(stack, true, progressBar);
-      } else if (type == CvType.CV_32S) {
-        volume = new VolumeInt(stack, progressBar);
-      } else if (type == CvType.CV_32F) {
-        volume = new VolumeFloat(stack, progressBar);
-      } else if (type == CvType.CV_64F) {
-        volume = new VolumeDouble(stack, progressBar);
-      } else {
-        throw new IllegalArgumentException("Unsupported data type");
+    Volume<?, ?> volume = getSharedVolume(stack);
+    if (volume != null && volume.isBasic == isBasic) {
+      if (progressBar != null) {
+        progressBar.setValue(volume.size.z + 1);
       }
-    } else {
-      progressBar.setValue((int) Math.round(volume.size.z * 1.2));
+      LOGGER.info(
+          "MPR/fusion volume: reusing shared volume cvType={} for {} frames",
+          CvType.typeToString(volume.cvType),
+          stack.getSourceStack().size());
+      return volume;
     }
 
+    int cvType = getCvType(stack);
+    int depth = CvType.depth(cvType);
+    LOGGER.info(
+        "MPR/fusion volume: building cvType={} for {} frames",
+        CvType.typeToString(cvType),
+        stack.getSourceStack().size());
+    switch (depth) {
+      case CvType.CV_8U, CvType.CV_8S -> volume = new VolumeByte(stack, progressBar, isBasic);
+      case CvType.CV_16U, CvType.CV_16S -> volume = new VolumeShort(stack, progressBar, isBasic);
+      case CvType.CV_32S -> volume = new VolumeInt(stack, progressBar, isBasic);
+      case CvType.CV_32F -> volume = new VolumeFloat(stack, progressBar, isBasic);
+      case CvType.CV_64F -> volume = new VolumeDouble(stack, progressBar, isBasic);
+      default -> throw new IllegalArgumentException("Unsupported data type: " + depth);
+    }
     return volume;
+  }
+
+  /**
+   * Determines the OpenCV type for the volume by sampling the first, middle, and last images from
+   * the stack. The highest-precision (highest depth value) type found wins. This avoids the case
+   * where the middle image uses a low-depth modality LUT output (e.g. CV_16U) while other slices
+   * produce a higher-depth output (e.g. CV_32F for PET with float rescale slope).
+   */
+  public static int getCvType(OriginalStack stack) {
+    List<DicomImageElement> sourceStack = stack.getSourceStack();
+    int size = sourceStack.size();
+    // Sample first, middle and last to detect heterogeneous types (e.g. PET with float rescale)
+    int[] indices = {0, size / 2, size - 1};
+    int maxDepth = -1;
+    int resultType = CvType.CV_8U;
+    for (int idx : indices) {
+      PlanarImage img = sourceStack.get(idx).getModalityLutImage(null, null);
+      if (img != null) {
+        int depth = CvType.depth(img.type());
+        if (depth > maxDepth) {
+          maxDepth = depth;
+          resultType = img.type();
+        }
+      }
+    }
+    return resultType;
   }
 
   public boolean isSharedVolume() {
     return getSharedVolume(stack) != null;
   }
 
-  protected static Volume<?> getSharedVolume(OriginalStack currentStack) {
+  public static Volume<?, ?> getSharedVolume(OriginalStack currentStack) {
     List<ViewerPlugin<?>> viewerPlugins = GuiUtils.getUICore().getViewerPlugins();
     synchronized (viewerPlugins) {
       for (int i = viewerPlugins.size() - 1; i >= 0; i--) {
         ViewerPlugin<?> p = viewerPlugins.get(i);
-        if (p instanceof MprContainer mprContainer) {
-          MprController controller = mprContainer.getMprController();
-          if (controller != null) {
-            Volume<?> volume = controller.getVolume();
-            if (volume != null && volume.stack.equals(currentStack)) {
-              return volume;
-            }
+        if (p instanceof VolumeProvider provider) {
+          Volume<?, ?> volume = provider.getVolumeForStack(currentStack);
+          if (volume != null) {
+            return volume;
           }
         }
       }
@@ -594,126 +1505,134 @@ public abstract class Volume<T extends Number> {
     return null;
   }
 
-  protected Double interpolateVolume(Vector3d point, Vector3d voxelRatio) {
+  protected T interpolateVolume(Vector3d point, Vector3d voxelRatio, int channel) {
     // Convert from world coordinates to voxel indices
     double xIndex = point.x / voxelRatio.x;
     double yIndex = point.y / voxelRatio.y;
     double zIndex = point.z / voxelRatio.z;
 
-    int x0 = (int) Math.floor(xIndex);
-    int y0 = (int) Math.floor(yIndex);
-    int z0 = (int) Math.floor(zIndex);
-    int x1 = x0 + 1;
-    int y1 = y0 + 1;
-    int z1 = z0 + 1;
+    return getInterpolatedValueFromSource(xIndex, yIndex, zIndex, channel);
+  }
 
-    // Check if the point is outside the volume
-    if (x0 < 0 || x1 >= size.x || y0 < 0 || y1 >= size.y || z0 < 0 || z1 >= size.z) {
-      return null;
+  private double convertToUnsigned(Number n) {
+    if (isSigned) {
+      return n.doubleValue();
     }
-
-    double xd = xIndex - x0;
-    double yd = yIndex - y0;
-    double zd = zIndex - z0;
-
-    // Retrieve the values at the eight surrounding voxel points
-    T v000 = getValue(x0, y0, z0);
-    T v100 = getValue(x1, y0, z0);
-    T v010 = getValue(x0, y1, z0);
-    T v110 = getValue(x1, y1, z0);
-    T v001 = getValue(x0, y0, z1);
-    T v101 = getValue(x1, y0, z1);
-    T v011 = getValue(x0, y1, z1);
-    T v111 = getValue(x1, y1, z1);
-
-    // Trilinear interpolation
-    double c00 = interpolate(v000, v100, xd);
-    double c01 = interpolate(v001, v101, xd);
-    double c10 = interpolate(v010, v110, xd);
-    double c11 = interpolate(v011, v111, xd);
-
-    double c0 = c00 * (1 - yd) + c10 * yd;
-    double c1 = c01 * (1 - yd) + c11 * yd;
-
-    return (c0 * (1 - zd) + c1 * zd);
+    return switch (n) {
+      case Short s -> Short.toUnsignedInt(s);
+      case Byte b -> Byte.toUnsignedInt(b);
+      default -> n.doubleValue();
+    };
   }
 
   protected double interpolate(T v0, T v1, double factor) {
-    return (v0 == null ? 0 : v0.doubleValue()) * (1 - factor)
-        + (v1 == null ? 0 : v1.doubleValue()) * factor;
-  }
-
-  // value is supposed to be a cosine value, if the difference is greater than 10e-2 from 1 or 0,
-  // transformation is needed
-  public boolean needsTransformation(double value) {
-    double EPSILON = 1e-2; // Tolerance value
-    if (Math.abs(value) > 0.5) {
-      return (1 - Math.abs(value)) > EPSILON;
-    } else {
-      return Math.abs(value) > EPSILON;
-    }
-  }
-
-  public void setTransformed(boolean transformed) {
-    this.isTransformed = transformed;
+    double val0 = v0 == null ? getMinimumAsDouble() : convertToUnsigned(v0);
+    double val1 = v1 == null ? getMaximumAsDouble() : convertToUnsigned(v1);
+    return val0 * (1 - factor) + val1 * factor;
   }
 
   public boolean isTransformed() {
     return this.isTransformed;
   }
 
-  public Matrix4d calculateRotation() {
-    // Calculate from geometry vectors
-    Vector3d row = new Vector3d(stack.getFistSliceGeometry().getRow());
-    Matrix4d matrix = new Matrix4d();
-    matrix.rotateZ((Math.PI / 2.0 - Math.acos(row.y())));
-    return matrix;
+  public boolean isBasic() {
+    return isBasic;
   }
 
-  public double calculateCorrectShearFactorZ(Vector3d originalPixelRatio) {
-    Vector3d normal = stack.getFistSliceGeometry().getNormal();
-    return normal.y / normal.z;
+  /**
+   * Returns the physical LPS position (mm) of voxel (0,0,0). Set during volume construction; used
+   * by getSlice() to derive ImagePositionPatient.
+   */
+  public Vector3d getVolumeOrigin() {
+    return new Vector3d(volumeOrigin);
   }
 
-  public double calculateCorrectShearFactorX(Vector3d originalPixelRatio) {
-    Vector3d normal = stack.getFistSliceGeometry().getNormal();
-    return normal.x / normal.z;
+  public Vector3d getVolumeAxisX() {
+    return new Vector3d(volumeAxisX);
   }
 
-  private Vector3i[] calculateTransformedBounds(Matrix4d transform) {
-    // Transform all 8 corners of the original volume
-    Vector4d[] corners = {
-      new Vector4d(0.0, 0.0, 0.0, 1.0),
-      new Vector4d(size.x, 0.0, 0.0, 1.0),
-      new Vector4d(size.x, 0.0, size.z, 1.0),
-      new Vector4d(0.0, 0.0, size.z, 1.0),
-      new Vector4d(size.x, size.y, 0.0, 1.0),
-      new Vector4d(size.x, size.y, size.z, 1.0),
-      new Vector4d(0.0, size.y, size.z, 1.0),
-      new Vector4d(0.0, size.y, 0.0, 1.0)
-    };
+  public Vector3d getVolumeAxisY() {
+    return new Vector3d(volumeAxisY);
+  }
 
-    for (Vector4d corner : corners) {
-      transform.transform(corner);
+  public Vector3d getVolumeAxisZ() {
+    return new Vector3d(volumeAxisZ);
+  }
+
+  /**
+   * Maps a patient-space LPS point (mm) into this volume's <em>voxel</em> coordinate system, using
+   * the EXACT same convention as {@link #setValue(int, int, int, Object, SplatContext)} during
+   * volume construction. This is the only correct way for external code (e.g. {@link
+   * org.weasis.dicom.viewer2d.mpr.SegVolumeBuilder}) to overlay data on top of the image volume:
+   * relying on {@code (LPS - volumeOrigin) · volumeAxis / pixelRatio} would silently disagree with
+   * where the image pixels were actually written for non-axial rectified volumes (the construction
+   * code applies a per-plane Z-flip and uses a {@code translation} offset that differs from {@code
+   * volumeOrigin}).
+   *
+   * <p>For the basic ({@code isBasic == true}) path this method is unsupported because writes go
+   * through {@link #computeSliceToVolumeTransform()} which depends on the source slice index, not
+   * the LPS position; callers should rebuild the SEG in the SEG's own grid in that case.
+   *
+   * @param lps the patient-space LPS coordinate in mm
+   * @param dst the destination vector (may be the same instance as {@code lps}); receives the
+   *     fractional voxel index ({@code (vx, vy, vz)}). Out-of-volume points return values outside
+   *     {@code [0, size)}.
+   * @return {@code dst}
+   */
+  public Vector3d lpsToVoxel(Vector3d lps, Vector3d dst) {
+    if (isBasic || stack == null) {
+      // Basic volumes: writes use per-source-pixel coordinates rotated by
+      // computeSliceToVolumeTransform() and never see an LPS position. There is no closed-form
+      // LPS → voxel mapping that is consistent with what was written, so callers must pre-resample.
+      throw new UnsupportedOperationException("lpsToVoxel is only valid for rectified volumes");
     }
-
-    Vector3i min = new Vector3i(Integer.MAX_VALUE);
-    Vector3i max = new Vector3i(Integer.MIN_VALUE);
-
-    for (Vector4d corner : corners) {
-      min.x = Math.min(min.x, (int) Math.floor(corner.x));
-      min.y = Math.min(min.y, (int) Math.floor(corner.y));
-      min.z = Math.min(min.z, (int) Math.floor(corner.z));
-
-      max.x = Math.max(max.x, (int) Math.ceil(corner.x));
-      max.y = Math.max(max.y, (int) Math.ceil(corner.y));
-      max.z = Math.max(max.z, (int) Math.ceil(corner.z));
+    // Replicate the writes from setValue():
+    //   In copyImageToVolume the per-slice transform's translation column is set to
+    //     slice_TLHC - origin   (where origin == volumeOrigin == rectified min corner).
+    //   So  p = LPS - volumeOrigin   after  transform.transform(pixel).
+    //   Then p /= pixelRatio
+    //   if (axial) p.z = -p.z; else p.z = size.z - p.z;
+    double vx = (lps.x - volumeOrigin.x) / pixelRatio.x;
+    double vy = (lps.y - volumeOrigin.y) / pixelRatio.y;
+    double vz = (lps.z - volumeOrigin.z) / pixelRatio.z;
+    if (stack.getPlane() == MprView.Plane.AXIAL) {
+      vz = -vz;
+    } else {
+      vz = size.z - vz;
     }
-
-    return new Vector3i[] {min, max};
+    dst.set(vx, vy, vz);
+    return dst;
   }
 
-  protected T getInterpolatedValueFromSource(double x, double y, double z) {
+  /**
+   * Converts a (fractional) voxel coordinate {@code (vx, vy, vz)} in this volume's grid back to the
+   * corresponding patient-space (LPS) position in mm. This is the exact inverse of {@link
+   * #lpsToVoxel(Vector3d, Vector3d)} and shares its restriction: only rectified, non-basic volumes
+   * have a well-defined closed-form mapping.
+   *
+   * <p>Both Z branches of {@code lpsToVoxel} ({@code -vz} for axial and {@code size.z - vz} for
+   * sagittal/coronal) are involutions, so the same inverse formula applies regardless of the
+   * acquisition plane.
+   *
+   * @param vx voxel X coordinate (may be fractional)
+   * @param vy voxel Y coordinate (may be fractional)
+   * @param vz voxel Z coordinate (may be fractional)
+   * @param dst destination receiving the LPS position in mm
+   * @return {@code dst}
+   */
+  public Vector3d voxelToLps(double vx, double vy, double vz, Vector3d dst) {
+    if (isBasic || stack == null) {
+      throw new UnsupportedOperationException("voxelToLps is only valid for rectified volumes");
+    }
+    double internalZ = stack.getPlane() == MprView.Plane.AXIAL ? -vz : size.z - vz;
+    dst.set(
+        vx * pixelRatio.x + volumeOrigin.x,
+        vy * pixelRatio.y + volumeOrigin.y,
+        internalZ * pixelRatio.z + volumeOrigin.z);
+    return dst;
+  }
+
+  public T getInterpolatedValueFromSource(double x, double y, double z, int channel) {
     // Check bounds in the ORIGINAL volume (this)
     if (x < 0
         || x >= this.size.x - 1
@@ -740,14 +1659,14 @@ public abstract class Volume<T extends Number> {
     double fz = z - z0;
 
     // Get values from ORIGINAL volume (this)
-    T v000 = this.getValue(x0, y0, z0);
-    T v001 = this.getValue(x0, y0, z1);
-    T v010 = this.getValue(x0, y1, z0);
-    T v011 = this.getValue(x0, y1, z1);
-    T v100 = this.getValue(x1, y0, z0);
-    T v101 = this.getValue(x1, y0, z1);
-    T v110 = this.getValue(x1, y1, z0);
-    T v111 = this.getValue(x1, y1, z1);
+    T v000 = this.getValue(x0, y0, z0, channel);
+    T v001 = this.getValue(x0, y0, z1, channel);
+    T v010 = this.getValue(x0, y1, z0, channel);
+    T v110 = this.getValue(x1, y1, z0, channel);
+    T v100 = this.getValue(x1, y0, z0, channel);
+    T v101 = this.getValue(x1, y0, z1, channel);
+    T v011 = this.getValue(x0, y1, z1, channel);
+    T v111 = this.getValue(x1, y1, z1, channel);
 
     // Trilinear interpolation
     double v00 = interpolate(v000, v100, fx);
@@ -759,236 +1678,179 @@ public abstract class Volume<T extends Number> {
     double v1 = v01 * (1 - fy) + v11 * fy;
 
     double result = v0 * (1 - fz) + v1 * fz;
+    return convertToGeneric(result);
+  }
 
+  /**
+   * Trilinear sample at fractional voxel coordinates returned as a sign-corrected {@code double}
+   * (unsigned types are widened, not wrapped). Returns {@link Double#NaN} outside the volume.
+   *
+   * <p>Unlike {@link #getInterpolatedValueFromSource} this skips the narrowing back to {@code T},
+   * so 16-bit unsigned values above 32767 are preserved. This is required when an external consumer
+   * (e.g. fusion overlay resampling) reslices a functional volume such as PET and then normalises
+   * the raw values to 8-bit.
+   */
+  public double getInterpolatedDouble(double x, double y, double z, int channel) {
+    if (x < 0 || x >= size.x - 1 || y < 0 || y >= size.y - 1 || z < 0 || z >= size.z - 1) {
+      return Double.NaN;
+    }
+    int x0 = (int) Math.floor(x);
+    int y0 = (int) Math.floor(y);
+    int z0 = (int) Math.floor(z);
+    int x1 = Math.min(x0 + 1, size.x - 1);
+    int y1 = Math.min(y0 + 1, size.y - 1);
+    int z1 = Math.min(z0 + 1, size.z - 1);
+    double fx = x - x0;
+    double fy = y - y0;
+    double fz = z - z0;
+
+    double v00 = lerp(value(x0, y0, z0, channel), value(x1, y0, z0, channel), fx);
+    double v01 = lerp(value(x0, y0, z1, channel), value(x1, y0, z1, channel), fx);
+    double v10 = lerp(value(x0, y1, z0, channel), value(x1, y1, z0, channel), fx);
+    double v11 = lerp(value(x0, y1, z1, channel), value(x1, y1, z1, channel), fx);
+
+    double v0 = v00 * (1 - fy) + v10 * fy;
+    double v1 = v01 * (1 - fy) + v11 * fy;
+    return v0 * (1 - fz) + v1 * fz;
+  }
+
+  /**
+   * Nearest-neighbour sample at the given voxel coordinates, returning {@code NaN} outside the
+   * volume. Unlike {@link #getInterpolatedDouble} this does not blend neighbours, so it preserves
+   * the original voxel values (e.g. for faithful SUV min/max statistics).
+   */
+  public double getNearestDouble(double x, double y, double z, int channel) {
+    int xi = (int) Math.round(x);
+    int yi = (int) Math.round(y);
+    int zi = (int) Math.round(z);
+    if (xi < 0 || xi >= size.x || yi < 0 || yi >= size.y || zi < 0 || zi >= size.z) {
+      return Double.NaN;
+    }
+    return value(xi, yi, zi, channel);
+  }
+
+  private double value(int x, int y, int z, int channel) {
+    return convertToUnsigned(getValue(x, y, z, channel));
+  }
+
+  private static double lerp(double v0, double v1, double factor) {
+    return v0 * (1 - factor) + v1 * factor;
+  }
+
+  @SuppressWarnings("unchecked")
+  T convertToGeneric(double value) {
     return switch (this) {
-      case VolumeByte _ -> (T) Byte.valueOf((byte) Math.round(result));
-      case VolumeShort _ -> (T) Short.valueOf((short) Math.round(result));
-      case VolumeInt _ -> (T) Integer.valueOf((int) Math.round(result));
-      case VolumeFloat _ -> (T) Float.valueOf((float) result);
-      default -> (T) Double.valueOf(result);
+      case VolumeByte _ -> (T) Byte.valueOf((byte) Math.round(value));
+      case VolumeShort _ -> (T) Short.valueOf((short) Math.round(value));
+      case VolumeInt _ -> (T) Integer.valueOf((int) Math.round(value));
+      case VolumeFloat _ -> (T) Float.valueOf((float) value);
+      default -> (T) Double.valueOf(value);
     };
   }
 
-  public Volume<?> transformVolume() {
+  private class VolumeSliceTask extends RecursiveAction {
+    private static final int THRESHOLD = 4096;
 
-    if (this.isTransformed() || !this.stack.plane.equals(MprView.Plane.AXIAL)) {
-      // Volume already transformed, return itself
-      // The geometric rectification is applied only if the images are in the axial orientation
-      updateProgressBar(this.progressBar.getMaximum());
-      return this;
+    private final int start;
+    private final int end;
+    private final int width;
+    private final Matrix4d combinedTransform;
+    private final Vector3d voxelRatio;
+    private final ChunkedArray<A> raster;
+
+    VolumeSliceTask(
+        int start,
+        int end,
+        int width,
+        Matrix4d combinedTransform,
+        Vector3d voxelRatio,
+        ChunkedArray<A> raster) {
+      this.start = start;
+      this.end = end;
+      this.width = width;
+      this.combinedTransform = combinedTransform;
+      this.voxelRatio = voxelRatio;
+      this.raster = raster;
     }
 
-    boolean isModified = false;
+    @Override
+    protected void compute() {
+      if (end - start <= THRESHOLD) {
+        Voxel<T> voxel = channels > 1 ? new Voxel<>(channels) : null;
+        Vector3d sliceCoord = new Vector3d();
+        int x = start % width;
+        int y = start / width;
 
-    Vector3d col = new Vector3d(stack.getFistSliceGeometry().getColumn());
-    Vector3d row = new Vector3d(stack.getFistSliceGeometry().getRow());
+        for (int i = start; i < end; i++) {
+          sliceCoord.set(x, y, 0);
+          combinedTransform.transformPosition(sliceCoord);
 
-    Matrix4d identity = new Matrix4d();
-
-    DicomImageElement img = stack.getFirstImage();
-    Vector3d originalPixelRatio =
-        new Vector3d(img.getPixelSize(), img.getPixelSize(), stack.getSliceSpace());
-
-    // Rotate image
-    if (needsTransformation(row.y())) {
-      Matrix4d rotation = calculateRotation();
-      identity.mul(rotation);
-      isModified = true;
-    }
-
-    // Gantry tilt
-    if (needsTransformation(col.z())) {
-      // Force pixelRatio to not be modified by adaptPlaneOrientation method
-      List<DicomImageElement> medias = new ArrayList<>(stack.getSourceStack());
-      Collections.reverse(medias);
-
-      double shearFactorZ = calculateCorrectShearFactorZ(originalPixelRatio);
-      // Scale by pixel spacing ratio to account for anisotropic voxels
-      double pixelSpacingRatioZ = originalPixelRatio.y / originalPixelRatio.z;
-      double pixelSpacingRatioY = originalPixelRatio.z / originalPixelRatio.y;
-      Matrix4d shear =
-          new Matrix4d(
-              1.0,
-              0.0,
-              0.0,
-              0.0,
-              0.0,
-              1.0,
-              shearFactorZ * pixelSpacingRatioZ,
-              0.0,
-              0.0,
-              -shearFactorZ * pixelSpacingRatioY,
-              1.0,
-              0.0,
-              0.0,
-              0.0,
-              0.0,
-              1.0);
-
-      identity.mul(shear);
-      isModified = true;
-    }
-
-    if (needsTransformation(row.z())) {
-      // Force pixelRatio to not be modified by adaptPlaneOrientation method
-      List<DicomImageElement> medias = new ArrayList<>(stack.getSourceStack());
-      Collections.reverse(medias);
-
-      double shearFactorX = calculateCorrectShearFactorX(originalPixelRatio);
-      // Scale by pixel spacing ratio to account for anisotropic voxels
-      double pixelSpacingRatioX = originalPixelRatio.x / originalPixelRatio.z;
-      double pixelSpacingRatioZ = originalPixelRatio.z / originalPixelRatio.x;
-      Matrix4d shear =
-          new Matrix4d(
-              1.0,
-              0.0,
-              shearFactorX * pixelSpacingRatioX,
-              0.0,
-              0.0,
-              1.0,
-              0.0,
-              0.0,
-              -shearFactorX * pixelSpacingRatioZ,
-              0.0,
-              1.0,
-              0.0,
-              0.0,
-              0.0,
-              0.0,
-              1.0);
-
-      identity.mul(shear);
-      isModified = true;
-    }
-
-    if (!isModified) {
-      updateProgressBar(this.progressBar.getMaximum());
-      return this;
-    }
-
-    // Calculate transformed volume bounds
-    Vector3i[] bounds = calculateTransformedBounds(identity);
-    Vector3i min = bounds[0];
-    Vector3i max = bounds[1];
-
-    // Adjust for negative bounds
-    int translateX = 0;
-    int translateY = 0;
-    int translateZ = 0;
-
-    if (min.x < 0) {
-      translateX = -min.x;
-      max.x += translateX;
-    }
-    if (min.y < 0) {
-      translateY = -min.y;
-      max.y += translateY;
-    }
-    if (min.z < 0) {
-      translateZ = -min.z;
-      max.z += translateZ;
-    }
-
-    // Create transformed volume
-    Volume<T> transformedVolume = this.cloneVolume(max.x, max.y, max.z, originalPixelRatio);
-    transformedVolume.setTransformed(true);
-
-    identity.translate(translateX, translateY, translateZ);
-    Matrix4d inv = identity.invert();
-
-    double progressBarStep =
-        (this.stack.getSourceStack().size() * 0.2) / transformedVolume.getSizeX();
-    int stackSize = stack.getSourceStack().size();
-
-    // Multithreaded volume transformation
-    ExecutorService executor = ThreadUtil.newImageProcessingThreadPool("VolumeTransform");
-    try {
-      transformVolumeParallel(transformedVolume, inv, executor, stackSize, progressBarStep);
-    } finally {
-      executor.shutdown();
-      try {
-        if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
-          executor.shutdownNow();
-        }
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        executor.shutdownNow();
-      }
-    }
-
-    return transformedVolume;
-  }
-
-  private void transformVolumeParallel(
-      Volume<T> transformedVolume,
-      Matrix4d inv,
-      ExecutorService executor,
-      int stackSize,
-      double progressBarStep) {
-    int sizeX = transformedVolume.getSizeX();
-    int sizeY = transformedVolume.getSizeY();
-    int sizeZ = transformedVolume.getSizeZ();
-
-    // Determine optimal chunk size for X dimension
-    int availableThreads = ((ThreadPoolExecutor) executor).getCorePoolSize();
-    int chunkSize =
-        Math.max(
-            1,
-            sizeX
-                / (availableThreads
-                    * 2)); // Create more chunks than threads for better load balancing
-
-    List<Future<?>> futures = new ArrayList<>();
-    AtomicInteger processedChunks = new AtomicInteger(0);
-
-    // Submit tasks for X-dimension chunks
-    for (int startX = 0; startX < sizeX; startX += chunkSize) {
-      final int fromX = startX;
-      final int toX = Math.min(startX + chunkSize, sizeX);
-
-      Future<?> future =
-          executor.submit(
-              () -> {
-                processVolumeChunk(transformedVolume, inv, fromX, toX, sizeY, sizeZ);
-
-                // Update progress bar thread-safely
-                int completed = processedChunks.incrementAndGet();
-                double progress = stackSize + (completed * chunkSize * progressBarStep);
-                updateProgressBar((int) Math.ceil(progress));
-              });
-
-      futures.add(future);
-    }
-
-    // Wait for all tasks to complete
-    for (Future<?> future : futures) {
-      try {
-        future.get();
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        throw new RuntimeException("Volume transformation was interrupted", e);
-      } catch (ExecutionException e) {
-        throw new RuntimeException("Error during volume transformation", e.getCause());
-      }
-    }
-  }
-
-  private void processVolumeChunk(
-      Volume<T> transformedVolume, Matrix4d inv, int fromX, int toX, int sizeY, int sizeZ) {
-    for (int targetX = fromX; targetX < toX; targetX++) {
-      for (int targetY = 0; targetY < sizeY; targetY++) {
-        for (int targetZ = 0; targetZ < sizeZ; targetZ++) {
-          // Transform target coordinates back to source coordinates
-          Vector4d sourceCoord = new Vector4d(targetX, targetY, targetZ, 1.0);
-          inv.transform(sourceCoord);
-
-          // Interpolate from the ORIGINAL volume at these fractional coordinates
-          T interpolatedValue =
-              getInterpolatedValueFromSource(sourceCoord.x, sourceCoord.y, sourceCoord.z);
-          if (interpolatedValue != null) {
-            transformedVolume.setValue(targetX, targetY, targetZ, interpolatedValue, null);
+          if (voxel != null) {
+            boolean hasValue = true;
+            for (int c = 0; c < channels; c++) {
+              T val = interpolateVolume(sliceCoord, voxelRatio, c);
+              if (val == null) {
+                hasValue = false;
+                break;
+              }
+              voxel.setValue(c, val);
+            }
+            if (hasValue) {
+              setRasterValue(x, y, voxel);
+            }
+          } else {
+            T val = interpolateVolume(sliceCoord, voxelRatio, 0);
+            if (val != null) {
+              setRasterValue(x, y, val);
+            }
+          }
+          if (++x >= width) {
+            x = 0;
+            y++;
           }
         }
+      } else {
+        int mid = (start + end) / 2;
+        VolumeSliceTask leftTask =
+            new VolumeSliceTask(start, mid, width, combinedTransform, voxelRatio, raster);
+        VolumeSliceTask rightTask =
+            new VolumeSliceTask(mid, end, width, combinedTransform, voxelRatio, raster);
+        invokeAll(leftTask, rightTask);
+      }
+    }
+
+    private void setRasterValue(int x, int y, T val) {
+      long index = (long) y * width + x;
+      int ci = raster.chunkIndex(index);
+      int co = raster.chunkOffset(index);
+      A chunk = raster.getChunk(ci);
+      switch (chunk) {
+        case byte[] arr -> arr[co] = val.byteValue();
+        case short[] arr -> arr[co] = val.shortValue();
+        case int[] arr -> arr[co] = val.intValue();
+        case float[] arr -> arr[co] = val.floatValue();
+        case double[] arr -> arr[co] = val.doubleValue();
+        default -> throw new IllegalStateException("Unsupported raster type");
+      }
+    }
+
+    private void setRasterValue(int x, int y, Voxel<T> voxel) {
+      long index = ((long) y * width + x) * channels;
+      int ci = raster.chunkIndex(index);
+      int co = raster.chunkOffset(index);
+      A chunk = raster.getChunk(ci);
+      switch (chunk) {
+        case byte[] arr -> {
+          for (int c = 0; c < channels; c++) {
+            arr[co + c] = voxel.getValue(c).byteValue();
+          }
+        }
+        case short[] arr -> {
+          for (int c = 0; c < channels; c++) {
+            arr[co + c] = voxel.getValue(c).shortValue();
+          }
+        }
+        default -> throw new IllegalStateException("Unsupported raster type");
       }
     }
   }

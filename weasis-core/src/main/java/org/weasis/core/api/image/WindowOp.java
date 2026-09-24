@@ -11,7 +11,6 @@ package org.weasis.core.api.image;
 
 import org.weasis.core.Messages;
 import org.weasis.core.api.gui.util.ActionW;
-import org.weasis.core.api.image.ImageOpEvent.OpEvent;
 import org.weasis.core.api.image.util.WindLevelParameters;
 import org.weasis.core.api.media.data.ImageElement;
 import org.weasis.core.util.LangUtil;
@@ -20,6 +19,10 @@ import org.weasis.opencv.op.lut.DefaultWlPresentation;
 import org.weasis.opencv.op.lut.PresentationStateLut;
 import org.weasis.opencv.op.lut.WlPresentation;
 
+/**
+ * Operation for applying window/level transformations to medical images. This operation manages
+ * brightness and contrast adjustments based on window and level parameters.
+ */
 public class WindowOp extends AbstractOp {
 
   public static final String OP_NAME = Messages.getString("WindowLevelOperation.title");
@@ -28,6 +31,8 @@ public class WindowOp extends AbstractOp {
   public static final String P_FILL_OUTSIDE_LUT = "fill.outside.lut";
   public static final String P_APPLY_WL_COLOR = "weasis.color.wl.apply";
   public static final String P_INVERSE_LEVEL = "weasis.level.inverse";
+
+  private static final String P_PR_ELEMENT = "pr.element";
 
   public WindowOp() {
     setName(OP_NAME);
@@ -44,52 +49,66 @@ public class WindowOp extends AbstractOp {
 
   @Override
   public void handleImageOpEvent(ImageOpEvent event) {
-    OpEvent type = event.getEventType();
-    if (OpEvent.IMAGE_CHANGE.equals(type)) {
-      setParam(P_IMAGE_ELEMENT, event.getImage());
-    } else if (OpEvent.RESET_DISPLAY.equals(type) || OpEvent.SERIES_CHANGE.equals(type)) {
-      ImageElement img = event.getImage();
-      setParam(P_IMAGE_ELEMENT, img);
-      if (img != null) {
-        if (!img.isImageAvailable()) {
-          // Ensure to load image before calling the default preset that requires pixel min and max
-          img.getImage();
-        }
-
-        WlPresentation wlp = getWlPresentation();
-        setParam(ActionW.WINDOW.cmd(), img.getDefaultWindow(wlp));
-        setParam(ActionW.LEVEL.cmd(), img.getDefaultLevel(wlp));
-        setParam(ActionW.LEVEL_MIN.cmd(), img.getMinValue(wlp));
-        setParam(ActionW.LEVEL_MAX.cmd(), img.getMaxValue(wlp));
+    switch (event.eventType()) {
+      case IMAGE_CHANGE -> setParam(P_IMAGE_ELEMENT, event.image());
+      case RESET_DISPLAY, SERIES_CHANGE -> handleDisplayReset(event.image());
+      default -> {
+        /* no action */
       }
     }
   }
 
   @Override
   public void process() throws Exception {
-    PlanarImage source = (PlanarImage) params.get(Param.INPUT_IMG);
-    PlanarImage result = source;
-    ImageElement imageElement = (ImageElement) params.get(P_IMAGE_ELEMENT);
+    PlanarImage source = getSourceImage();
+    ImageElement imageElement = getImageElement();
 
-    if (imageElement != null) {
-      result = imageElement.getRenderedImage(source, params);
-    }
-
+    PlanarImage result =
+        imageElement != null ? imageElement.getRenderedImage(source, params) : source;
     params.put(Param.OUTPUT_IMG, result);
   }
 
+  private void handleDisplayReset(ImageElement img) {
+    setParam(P_IMAGE_ELEMENT, img);
+    if (img == null) {
+      return;
+    }
+    ensureImageLoaded(img);
+    WlPresentation wlp = getWlPresentation();
+    setParam(ActionW.WINDOW.cmd(), img.getDefaultWindow(wlp));
+    setParam(ActionW.LEVEL.cmd(), img.getDefaultLevel(wlp));
+    setParam(ActionW.LEVEL_MIN.cmd(), img.getMinValue(wlp));
+    setParam(ActionW.LEVEL_MAX.cmd(), img.getMaxValue(wlp));
+  }
+
+  private void ensureImageLoaded(ImageElement img) {
+    if (!img.isImageAvailable()) {
+      img.getImage();
+    }
+  }
+
+  private ImageElement getImageElement() {
+    return (ImageElement) params.get(P_IMAGE_ELEMENT);
+  }
+
+  /**
+   * Creates a window/level presentation with pixel padding settings.
+   *
+   * @return the configured WlPresentation instance
+   */
   public WlPresentation getWlPresentation() {
-    boolean pixelPadding =
-        LangUtil.getNULLtoTrue((Boolean) getParam(ActionW.IMAGE_PIX_PADDING.cmd()));
-    PresentationStateLut pr = (PresentationStateLut) getParam("pr.element");
+    boolean pixelPadding = LangUtil.nullToTrue((Boolean) getParam(ActionW.IMAGE_PIX_PADDING.cmd()));
+    PresentationStateLut pr = (PresentationStateLut) getParam(P_PR_ELEMENT);
     return new DefaultWlPresentation(pr, pixelPadding);
   }
 
+  /**
+   * Retrieves the current window/level parameters for the active image.
+   *
+   * @return WindLevelParameters instance or null if no image element is set
+   */
   public WindLevelParameters getWindLevelParameters() {
-    ImageElement imageElement = (ImageElement) params.get(P_IMAGE_ELEMENT);
-    if (imageElement != null) {
-      return new WindLevelParameters(imageElement, params);
-    }
-    return null;
+    ImageElement imageElement = getImageElement();
+    return imageElement != null ? new WindLevelParameters(imageElement, params) : null;
   }
 }

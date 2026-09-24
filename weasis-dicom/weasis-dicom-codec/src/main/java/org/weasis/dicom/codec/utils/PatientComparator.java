@@ -11,10 +11,11 @@ package org.weasis.dicom.codec.utils;
 
 import java.time.LocalDate;
 import java.util.Optional;
-import javax.xml.stream.XMLStreamReader;
+import java.util.regex.Pattern;
 import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.Tag;
 import org.weasis.core.api.gui.util.GuiUtils;
+import org.weasis.core.api.media.data.AttributeSource;
 import org.weasis.core.api.media.data.TagReadable;
 import org.weasis.core.api.media.data.TagUtil;
 import org.weasis.core.api.media.data.TagW;
@@ -22,6 +23,10 @@ import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.TagD;
 
 public class PatientComparator {
+
+  /** Empty components at the end of a component group, and empty groups at the end of the name. */
+  private static final Pattern TRAILING_PN_SEPARATORS =
+      Pattern.compile("\\^+(?==)|[\\^=]+$"); // NOSONAR only the second alternative is anchored
 
   private String issuerOfPatientID;
   private String patientId;
@@ -37,13 +42,14 @@ public class PatientComparator {
     setBirthdate(item.getString(Tag.PatientBirthDate));
   }
 
-  public PatientComparator(XMLStreamReader xmler) {
-    setPatientId(TagUtil.getTagAttribute(xmler, TagD.get(Tag.PatientID).getKeyword(), null));
+  public PatientComparator(AttributeSource source) {
+    setPatientId(TagUtil.getTagAttribute(source, TagD.get(Tag.PatientID).getKeyword(), null));
     setIssuerOfPatientID(
-        TagUtil.getTagAttribute(xmler, TagD.get(Tag.IssuerOfPatientID).getKeyword(), null));
-    setName(TagUtil.getTagAttribute(xmler, TagD.get(Tag.PatientName).getKeyword(), null));
-    setSex(TagUtil.getTagAttribute(xmler, TagD.get(Tag.PatientSex).getKeyword(), null));
-    setBirthdate(TagUtil.getTagAttribute(xmler, TagD.get(Tag.PatientBirthDate).getKeyword(), null));
+        TagUtil.getTagAttribute(source, TagD.get(Tag.IssuerOfPatientID).getKeyword(), null));
+    setName(TagUtil.getTagAttribute(source, TagD.get(Tag.PatientName).getKeyword(), null));
+    setSex(TagUtil.getTagAttribute(source, TagD.get(Tag.PatientSex).getKeyword(), null));
+    setBirthdate(
+        TagUtil.getTagAttribute(source, TagD.get(Tag.PatientBirthDate).getKeyword(), null));
   }
 
   public PatientComparator(TagReadable taggable) {
@@ -117,7 +123,17 @@ public class PatientComparator {
   }
 
   public void setName(String name) {
-    this.name = Optional.ofNullable(name).orElse(TagW.NO_VALUE).toUpperCase().trim();
+    this.name =
+        normalizePersonName(Optional.ofNullable(name).orElse(TagW.NO_VALUE).toUpperCase().trim());
+  }
+
+  /**
+   * Removes the empty trailing components ({@code ^}) and component groups ({@code =}) of a person
+   * name, which are not significant in DICOM (PS 3.5 §6.2.1): {@code Doe^Jane^^^} and {@code
+   * Doe^Jane} identify the same patient.
+   */
+  private static String normalizePersonName(String pn) {
+    return TRAILING_PN_SEPARATORS.matcher(pn).replaceAll(StringUtil.EMPTY_STRING);
   }
 
   public String getBirthdate() {

@@ -14,6 +14,8 @@ import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -60,12 +62,13 @@ import org.weasis.core.api.media.data.SeriesEvent;
 import org.weasis.core.api.media.data.SeriesThumbnail;
 import org.weasis.core.api.media.data.TagView;
 import org.weasis.core.api.media.data.TagW;
-import org.weasis.core.api.media.data.Thumbnail;
 import org.weasis.core.api.util.GzipManager;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.OtherIcon;
 import org.weasis.core.api.util.ThreadUtil;
 import org.weasis.core.ui.editor.SeriesViewerFactory;
+import org.weasis.core.ui.editor.ViewerOpenOptions;
+import org.weasis.core.ui.editor.ViewerPlacement;
 import org.weasis.core.ui.editor.ViewerPluginBuilder;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.AbstractKOSpecialElement;
@@ -81,16 +84,21 @@ import org.weasis.dicom.codec.HiddenSpecialElement;
 import org.weasis.dicom.codec.KOSpecialElement;
 import org.weasis.dicom.codec.PRSpecialElement;
 import org.weasis.dicom.codec.RejectedKOSpecialElement;
-import org.weasis.dicom.codec.SegSpecialElement;
 import org.weasis.dicom.codec.SortSeriesStack;
 import org.weasis.dicom.codec.SpecialElementReferences;
 import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.TagD.Level;
 import org.weasis.dicom.codec.display.Modality;
+import org.weasis.dicom.codec.seg.SegBuildScheduler;
+import org.weasis.dicom.codec.seg.SegSpecialElement;
+import org.weasis.dicom.codec.seg.SegVisibilityPolicy;
 import org.weasis.dicom.codec.utils.SplittingModalityRules;
 import org.weasis.dicom.codec.utils.SplittingModalityRules.Rule;
 import org.weasis.dicom.codec.utils.SplittingRules;
 import org.weasis.dicom.explorer.HangingProtocols.OpeningViewer;
+import org.weasis.dicom.explorer.imp.DicomDirLoader;
+import org.weasis.dicom.explorer.imp.DicomZipMediaIO;
+import org.weasis.dicom.explorer.main.SeriesPane;
 import org.weasis.dicom.explorer.rs.RsQueryParams;
 import org.weasis.dicom.explorer.wado.DicomManager;
 import org.weasis.dicom.explorer.wado.DownloadManager;
@@ -155,7 +163,8 @@ public class DicomModel implements TreeModel, DataExplorerModel {
       for (Codec<MediaElement> codec : codecs) {
         if (codec != null
             && !"JDK ImageIO".equals(codec.getCodecName()) // NON-NLS
-            && codec.isMimeTypeSupported(DicomMediaIO.DICOM_MIMETYPE)
+            && (codec.isMimeTypeSupported(DicomMediaIO.DICOM_MIMETYPE)
+                || codec.isMimeTypeSupported(DicomZipMediaIO.MIME_TYPE))
             && !codecPlugins.contains(codec)) {
           codecPlugins.add(codec);
         }
@@ -203,6 +212,7 @@ public class DicomModel implements TreeModel, DataExplorerModel {
     if (pt == null || Objects.equals(pt, pt2)) {
       return;
     }
+    SegVisibilityPolicy.renamePatient(oldPatientUID, newPatientUID);
     if (pt2 == null) {
       pt2 =
           new MediaSeriesGroupNode(
@@ -497,6 +507,7 @@ public class DicomModel implements TreeModel, DataExplorerModel {
       firePropertyChange(
           new ObservableEvent(
               ObservableEvent.BasicAction.REMOVE, DicomModel.this, null, seriesGroup));
+      forgetAnnouncedSegmentations(seriesGroup);
       // remove in the data model
       MediaSeriesGroup studyGroup = getParent(seriesGroup, DicomModel.study);
       removeHierarchyNode(studyGroup, seriesGroup);
@@ -545,8 +556,19 @@ public class DicomModel implements TreeModel, DataExplorerModel {
           group.dispose();
         }
       }
+      SegVisibilityPolicy.forgetPatient((String) patientGroup.getTagValue(TagW.PatientPseudoUID));
       removeHierarchyNode(MediaSeriesGroupNode.rootNode, patientGroup);
       LOGGER.info("Remove Patient: {}", patientGroup);
+    }
+  }
+
+  /** Drops what a transfer announced for a series being removed before it delivered it. */
+  private void forgetAnnouncedSegmentations(MediaSeriesGroup seriesGroup) {
+    MediaSeriesGroup patient = getParent(seriesGroup, DicomModel.patient);
+    if (patient != null) {
+      SegVisibilityPolicy.forgetSeries(
+          (String) patient.getTagValue(TagW.PatientPseudoUID),
+          TagD.getTagValue(seriesGroup, Tag.SeriesInstanceUID, String.class));
     }
   }
 
@@ -685,28 +707,25 @@ public class DicomModel implements TreeModel, DataExplorerModel {
           }
         }
         if (!seriesList.isEmpty()) {
-          Map<String, Object> props = createViewerKeyImagePluginProperties();
-          ViewerPluginBuilder builder = new ViewerPluginBuilder(plugin, seriesList, this, props);
-          ViewerPluginBuilder.openSequenceInPlugin(builder);
+          ViewerOpenOptions opts = createViewerKeyImageOpenOptions();
+          ViewerPluginBuilder builder = new ViewerPluginBuilder(plugin, seriesList, this, opts);
+          builder.open();
           this.firePropertyChange(
               new ObservableEvent(
-                  ObservableEvent.BasicAction.SELECT,
-                  props.get(ViewerPluginBuilder.UID),
-                  null,
-                  koSpecialElement));
+                  ObservableEvent.BasicAction.SELECT, opts.uid(), null, koSpecialElement));
         }
       }
     }
   }
 
-  public Map<String, Object> createViewerKeyImagePluginProperties() {
+  /** Creates typed open options for a Key Image viewer plugin. */
+  public ViewerOpenOptions createViewerKeyImageOpenOptions() {
     String uid = UUID.randomUUID().toString();
-    Map<String, Object> props = Collections.synchronizedMap(new HashMap<>());
-    props.put(ViewerPluginBuilder.CMP_ENTRY_BUILD_NEW_VIEWER, false);
-    props.put(ViewerPluginBuilder.BEST_DEF_LAYOUT, false);
-    props.put(ViewerPluginBuilder.ICON, ResourceUtil.getIcon(OtherIcon.KEY_IMAGE));
-    props.put(ViewerPluginBuilder.UID, uid);
-    return props;
+    return ViewerOpenOptions.builder()
+        .placement(ViewerPlacement.newTab())
+        .icon(ResourceUtil.getIcon(OtherIcon.KEY_IMAGE))
+        .uid(uid)
+        .build();
   }
 
   private void splitSeries(DicomMediaIO mediaIo, DicomSeries original, DicomImageElement media) {
@@ -754,7 +773,8 @@ public class DicomModel implements TreeModel, DataExplorerModel {
 
   private void rebuildSeries(DicomMediaIO dicomReader, DicomImageElement media) {
     String studyUID = TagD.getTagValue(dicomReader, Tag.StudyInstanceUID, String.class);
-    String patientPseudoUID = (String) dicomReader.getTagValue(TagW.PatientPseudoUID);
+    // The reader comes from an instanceof pattern, so it cannot be null
+    String patientPseudoUID = (String) dicomReader.getTagValue(TagW.PatientPseudoUID); // NOSONAR
     MediaSeriesGroup pt = getHierarchyNode(MediaSeriesGroupNode.rootNode, patientPseudoUID);
     if (pt == null) {
       MediaSeriesGroup st = getStudyNode(studyUID);
@@ -833,15 +853,12 @@ public class DicomModel implements TreeModel, DataExplorerModel {
     }
   }
 
-  public void buildThumbnail(Series<?> dicomSeries) {
+  public void buildThumbnail(DicomSeries dicomSeries) {
     // Load image and create a thumbnail in this Thread
     SeriesThumbnail t = (SeriesThumbnail) dicomSeries.getTagValue(TagW.Thumbnail);
     if (t == null) {
-      int thumbnailSize =
-          GuiUtils.getUICore()
-              .getSystemPreferences()
-              .getIntProperty(Thumbnail.KEY_SIZE, Thumbnail.DEFAULT_SIZE);
-      t = DicomExplorer.createThumbnail(dicomSeries, this, thumbnailSize);
+      int thumbnailSize = SeriesThumbnail.getThumbnailSizeFromPreferences();
+      t = SeriesPane.createThumbnail(dicomSeries, this, thumbnailSize);
       dicomSeries.setTag(TagW.Thumbnail, t);
       firePropertyChange(new ObservableEvent(BasicAction.ADD, this, null, dicomSeries));
     }
@@ -985,7 +1002,39 @@ public class DicomModel implements TreeModel, DataExplorerModel {
               .filter(series -> series instanceof DicomSeries)
               .map(series -> (DicomSeries) series)
               .toList();
-      seg.initContours(originalSeries, refSeriesList);
+
+      // Build SEG contours asynchronously so a heavy multi-frame SEG never blocks the
+      // import/Q-R session. The work runs silently on the bounded SEG parsing pool: a study may
+      // hold dozens of SEG files, and each parse walks the per-frame sequence against every image
+      // of the referenced series, so an unbounded fan-out would saturate every core. Heavier
+      // per-volume construction (segmentation volume, MPR overlays) is deferred to the viewer
+      // initializers (e.g. MprController#buildSegElementsAsync), so we no longer surface
+      // a dedicated loading task in the DICOM explorer's bottom bar.
+      SegBuildScheduler.submitContourInit(
+          () -> {
+            try {
+              seg.initContours(originalSeries, refSeriesList);
+            } catch (RuntimeException e) {
+              LOGGER.error("SEG loading failed for series {}", seriesUID, e);
+              return;
+            }
+            if (!seg.isReady()) {
+              return;
+            }
+            // When no referenced series could be resolved (either the ReferencedSeriesSequence
+            // is absent, or the referenced series UIDs are not present in the current model)
+            // but spatial matching succeeded (positionMap is populated), populate
+            // reference2Series by finding all non-hidden series for the same patient with
+            // matching FrameOfReferenceUID. This ensures the segmentation icon appears on
+            // thumbnails and the SegmentationTool can discover the SEG element even when the
+            // series UIDs differ.
+            if (refSeriesList.isEmpty() && !seg.getPositionMap().isEmpty()) {
+              populateReferencesByFrameOfRef(seriesUID, originalSeries);
+            }
+            // Notify viewers (View2dContainer, etc.) that the SEG is ready so they refresh
+            // overlays.
+            firePropertyChange(new ObservableEvent(BasicAction.UPDATE, DicomModel.this, null, seg));
+          });
     } else if (hiddenElement instanceof PRSpecialElement pr) {
       PrDicomObject prDicomObject = pr.getPrDicomObject();
       if (StringUtil.hasText(seriesUID) && prDicomObject != null) {
@@ -1013,6 +1062,9 @@ public class DicomModel implements TreeModel, DataExplorerModel {
       Map<String, Set<HiddenSpecialElement>> mapSeries =
           HiddenSeriesManager.getInstance().series2Elements;
       mapSeries.computeIfAbsent(seriesUID, _ -> new CopyOnWriteArraySet<>()).add(hiddenElement);
+      // The series is one segmentation more crowded, which may flip the default visibility of the
+      // ones already loaded: they are imported one by one, so the count is never final until now.
+      SegVisibilityPolicy.invalidate();
 
       String patientPseudoUID = (String) hiddenElement.getTagValue(TagW.PatientPseudoUID);
       if (patientPseudoUID != null) {
@@ -1021,6 +1073,46 @@ public class DicomModel implements TreeModel, DataExplorerModel {
                 .patient2Series
                 .computeIfAbsent(patientPseudoUID, _ -> new CopyOnWriteArraySet<>());
         patients.add(seriesUID);
+      }
+    }
+  }
+
+  /**
+   * Populates reference2Series by finding all non-hidden series for the same patient that share the
+   * same FrameOfReferenceUID as the SEG. This is used as a fallback when the SEG DICOM object does
+   * not contain a ReferencedSeriesSequence (common for AI-generated segmentations).
+   */
+  private void populateReferencesByFrameOfRef(String segSeriesUID, DicomSeries originalSeries) {
+    String segFrameOfRefUID =
+        TagD.getTagValue(originalSeries, Tag.FrameOfReferenceUID, String.class);
+    if (segFrameOfRefUID == null) {
+      return;
+    }
+
+    MediaSeriesGroup studyGroup = getParent(originalSeries, DicomModel.study);
+    if (studyGroup == null) {
+      return;
+    }
+    MediaSeriesGroup patientGroup = getParent(studyGroup, DicomModel.patient);
+    if (patientGroup == null) {
+      return;
+    }
+
+    for (MediaSeriesGroup st : getChildren(patientGroup)) {
+      for (MediaSeriesGroup item : getChildren(st)) {
+        String itemSeriesUID = TagD.getTagValue(item, Tag.SeriesInstanceUID, String.class);
+        String itemFrameOfRef = TagD.getTagValue(item, Tag.FrameOfReferenceUID, String.class);
+        // Link non-self series with matching FrameOfReferenceUID that are regular image series
+        // (not hidden special series like other SEGs, KOs, PRs, or RT objects)
+        if (segFrameOfRefUID.equals(itemFrameOfRef)
+            && !segSeriesUID.equals(itemSeriesUID)
+            && item instanceof DicomSeries ds
+            && DicomMediaIO.SERIES_MIMETYPE.equals(ds.getMimeType())) {
+          HiddenSeriesManager.getInstance()
+              .reference2Series
+              .computeIfAbsent(itemSeriesUID, _ -> new CopyOnWriteArraySet<>())
+              .add(segSeriesUID);
+        }
       }
     }
   }
@@ -1152,8 +1244,7 @@ public class DicomModel implements TreeModel, DataExplorerModel {
       for (int i = 0; i < files.length; i++) {
         files[i] = new File(largs.get(i));
       }
-      OpeningViewer openingViewer =
-          OpeningViewer.getOpeningViewerByLocalKey(LocalImport.LAST_OPEN_VIEWER_MODE);
+      OpeningViewer openingViewer = OpeningViewer.ALL_PATIENTS;
       LOADING_EXECUTOR.execute(new LoadLocalDicom(files, true, DicomModel.this, openingViewer));
     }
 
@@ -1169,7 +1260,7 @@ public class DicomModel implements TreeModel, DataExplorerModel {
 
     if (opt.isSet("zip")) {
       for (String zip : zargs) {
-        DicomZipImport.loadDicomZip(zip, DicomModel.this);
+        DicomZipMediaIO.loadDicomZip(zip, DicomModel.this);
       }
     }
 
@@ -1177,10 +1268,11 @@ public class DicomModel implements TreeModel, DataExplorerModel {
       List<String> xmlFiles = new ArrayList<>(iargs.size());
       for (String iarg : iargs) {
         try {
-          File tempFile =
-              File.createTempFile("wado_", ".xml", AppProperties.APP_TEMP_DIR); // NON-NLS
-          if (GzipManager.gzipUncompressToFile(Base64.getDecoder().decode(iarg), tempFile)) {
-            xmlFiles.add(tempFile.getPath());
+          Path tempFile =
+              Files.createTempFile(AppProperties.APP_TEMP_DIR, "wado_", ".xml"); // NON-NLS
+          if (GzipManager.gzipUncompressToFile(
+              Base64.getDecoder().decode(iarg), tempFile.toFile())) {
+            xmlFiles.add(tempFile.toString());
           }
 
         } catch (Exception e) {
@@ -1227,13 +1319,11 @@ public class DicomModel implements TreeModel, DataExplorerModel {
           loadSeries = dirImport.readDicomDir();
         }
         if (loadSeries != null && !loadSeries.isEmpty()) {
-          OpeningViewer openingViewer =
-              OpeningViewer.getOpeningViewerByLocalKey(DicomDirImport.LAST_DICOMDIR_OPEN_MODE);
-          LOADING_EXECUTOR.execute(new LoadDicomDir(loadSeries, DicomModel.this, openingViewer));
+          LOADING_EXECUTOR.execute(
+              new LoadDicomDir(loadSeries, DicomModel.this, OpeningViewer.ALL_PATIENTS));
         } else {
-          OpeningViewer openingViewer =
-              OpeningViewer.getOpeningViewerByLocalKey(LocalImport.LAST_OPEN_VIEWER_MODE);
-          LOADING_EXECUTOR.execute(new LoadLocalDicom(files, true, DicomModel.this, openingViewer));
+          LOADING_EXECUTOR.execute(
+              new LoadLocalDicom(files, true, DicomModel.this, OpeningViewer.ALL_PATIENTS));
         }
       }
     }
@@ -1241,9 +1331,9 @@ public class DicomModel implements TreeModel, DataExplorerModel {
 
   public void rs(String[] argv) throws IOException {
     final String[] usage = {
-      "Load DICOM files from DICOMWeb API (QIDO/WADO-RS)", // NON-NLS
+      "Load DICOM files from DICOMweb API (QIDO/WADO-RS)", // NON-NLS
       "Usage: dicom:rs -u URL -r QUERYPARAMS... [-H HEADER]... [--query-header HEADER]... [--retrieve-header HEADER]... [--query-ext EXT] [--retrieve-ext EXT] [--accept-ext EXT]", // NON-NLS
-      "  -u --url=URL               URL of the DICOMWeb service", // NON-NLS
+      "  -u --url=URL               URL of the DICOMweb service", // NON-NLS
       "  -r --request=QUERYPARAMS   Query params of the URL, see weasis-pacs-connector", // NON-NLS
       "  -H --header=HEADER         Pass custom header(s) to all the requests", // NON-NLS
       "  --query-header=HEADER      Pass custom header(s) to the query requests (QIDO)", // NON-NLS
@@ -1327,7 +1417,7 @@ public class DicomModel implements TreeModel, DataExplorerModel {
   public void close(String[] argv) throws IOException {
     final String[] usage = {
       "Close DICOM files", // NON-NLS
-      "Usage: dicom:close  (-a | ([-y UID]... [-s UID]...))", // NON-NLS
+      "Usage: dicom:close (-a | ([-y UID]... [-s UID]...))", // NON-NLS
       "  -a --all           close all the patients", // NON-NLS
       "  -p --patient=ID    close a patient from its patient ID", // NON-NLS
       "  -y --study=UID     close a study, UID is Study Instance UID", // NON-NLS

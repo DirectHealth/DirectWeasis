@@ -25,7 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.service.BundlePreferences;
-import org.weasis.core.util.FileUtil;
+import org.weasis.core.util.StreamUtil;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.param.DicomParam;
 import org.weasis.dicom.qr.DicomQrView.Period;
@@ -133,7 +133,7 @@ public class SearchParameters {
     List<SearchParameters> list = new ArrayList<>();
 
     final BundleContext context = AppProperties.getBundleContext(DicomQrView.class);
-    File file = new File(BundlePreferences.getDataFolder(context), FILENAME);
+    File file = BundlePreferences.getFileInDataFolder(context, FILENAME).toFile();
     if (file.canRead()) {
       XMLStreamReader xmler = null;
       try {
@@ -160,7 +160,7 @@ public class SearchParameters {
       } catch (Exception e) {
         LOGGER.error("Error on reading DICOM node file", e);
       } finally {
-        FileUtil.safeClose(xmler);
+        StreamUtil.safeClose(xmler);
       }
     }
     return list;

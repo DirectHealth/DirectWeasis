@@ -88,7 +88,7 @@ public class ObliqueRectangleGraphic extends AbstractDragGraphicArea {
     super(POINTS_NUMBER);
   }
 
-  public ObliqueRectangleGraphic(ObliqueRectangleGraphic graphic) {
+  public ObliqueRectangleGraphic(ObliqueRectangleGraphic graphic) { // NOSONAR see initCopy()
     super(graphic);
   }
 
@@ -254,8 +254,8 @@ public class ObliqueRectangleGraphic extends AbstractDragGraphicArea {
 
         ArrayList<MeasureItem> measVal = new ArrayList<>();
 
-        double ratio = adapter.getCalibRatio();
-        String unitStr = adapter.getUnit();
+        double ratio = adapter.calibrationRatio();
+        String unitStr = adapter.unit();
 
         if (CENTER_X.getComputed()) {
           measVal.add(

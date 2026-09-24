@@ -11,14 +11,20 @@ package org.weasis.dicom.viewer3d.vr;
 
 import com.jogamp.common.nio.Buffers;
 import com.jogamp.opengl.GL;
+import com.jogamp.opengl.GL2ES2;
+import com.jogamp.opengl.GL2ES3;
+import com.jogamp.opengl.GL2GL3;
 import com.jogamp.opengl.GL4;
 import com.jogamp.opengl.GLAutoDrawable;
 import com.jogamp.opengl.GLEventListener;
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GridBagConstraints;
 import java.awt.Paint;
 import java.awt.Point;
 import java.awt.Stroke;
@@ -30,26 +36,36 @@ import java.awt.event.MouseEvent;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
 import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
 import java.nio.IntBuffer;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.swing.Action;
+import javax.swing.JCheckBoxMenuItem;
+import javax.swing.JMenu;
+import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
 import javax.swing.JProgressBar;
 import javax.swing.ToolTipManager;
 import org.dcm4che3.img.lut.PresetWindowLevel;
+import org.joml.Matrix3d;
+import org.joml.Matrix4d;
+import org.joml.Quaterniond;
+import org.joml.Vector3d;
 import org.joml.Vector3f;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.weasis.core.api.gui.util.ActionState;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.ComboItemListener;
 import org.weasis.core.api.gui.util.Feature;
+import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.gui.util.MouseActionAdapter;
 import org.weasis.core.api.image.OpManager;
@@ -61,31 +77,35 @@ import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.service.AuditLog;
 import org.weasis.core.api.service.WProperties;
 import org.weasis.core.api.util.FontItem;
-import org.weasis.core.ui.editor.image.ContextMenuHandler;
-import org.weasis.core.ui.editor.image.DefaultView2d;
+import org.weasis.core.api.util.FontTools;
+import org.weasis.core.ui.editor.image.*;
 import org.weasis.core.ui.editor.image.DefaultView2d.ZoomType;
-import org.weasis.core.ui.editor.image.FocusHandler;
-import org.weasis.core.ui.editor.image.GraphicMouseHandler;
-import org.weasis.core.ui.editor.image.ImageViewerEventManager;
-import org.weasis.core.ui.editor.image.ImageViewerPlugin;
-import org.weasis.core.ui.editor.image.Panner;
-import org.weasis.core.ui.editor.image.PixelInfo;
-import org.weasis.core.ui.editor.image.SynchData;
-import org.weasis.core.ui.editor.image.SynchData.Mode;
-import org.weasis.core.ui.editor.image.SynchEvent;
-import org.weasis.core.ui.editor.image.ViewButton;
-import org.weasis.core.ui.editor.image.ViewCanvas;
 import org.weasis.core.ui.model.graphic.Graphic;
+import org.weasis.core.ui.model.graphic.imp.seg.SegRegion;
 import org.weasis.core.ui.model.layer.LayerAnnotation;
+import org.weasis.core.ui.model.layer.LayerItem;
 import org.weasis.core.ui.model.layer.LayerType;
 import org.weasis.core.ui.model.utils.bean.PanPoint;
+import org.weasis.core.util.LangUtil;
 import org.weasis.dicom.codec.DicomImageElement;
+import org.weasis.dicom.codec.DicomSeries;
+import org.weasis.dicom.codec.SpecialElementRegion;
+import org.weasis.dicom.codec.geometry.PatientOrientation;
+import org.weasis.dicom.codec.seg.SegBuildScheduler;
+import org.weasis.dicom.codec.seg.SegSpecialElement;
+import org.weasis.dicom.codec.seg.SegmentationVolume;
 import org.weasis.dicom.explorer.DicomSeriesHandler;
-import org.weasis.dicom.viewer2d.mip.MipView;
+import org.weasis.dicom.viewer2d.mpr.AxisDirection;
+import org.weasis.dicom.viewer2d.mpr.MprContainer;
+import org.weasis.dicom.viewer2d.mpr.MprFactory;
+import org.weasis.dicom.viewer2d.mpr.OriginalStack;
+import org.weasis.dicom.viewer2d.mpr.SegVolumeBuilder;
+import org.weasis.dicom.viewer2d.mpr.Volume;
 import org.weasis.dicom.viewer3d.ActionVol;
 import org.weasis.dicom.viewer3d.EventManager;
 import org.weasis.dicom.viewer3d.InfoLayer3d;
-import org.weasis.dicom.viewer3d.dockable.SegmentationTool;
+import org.weasis.dicom.viewer3d.OpenGLInfo;
+import org.weasis.dicom.viewer3d.View3DFactory;
 import org.weasis.dicom.viewer3d.dockable.SegmentationTool.Type;
 import org.weasis.dicom.viewer3d.geometry.Axis;
 import org.weasis.dicom.viewer3d.geometry.Camera;
@@ -93,20 +113,15 @@ import org.weasis.dicom.viewer3d.geometry.View;
 import org.weasis.dicom.viewer3d.vr.TextureData.PixelFormat;
 import org.weasis.opencv.data.PlanarImage;
 import org.weasis.opencv.op.lut.LutShape;
+import org.weasis.opencv.seg.RegionAttributes;
 
 public class View3d extends VolumeCanvas
     implements ViewCanvas<DicomImageElement>,
         RenderingLayerChangeListener<DicomImageElement>,
-        GLEventListener {
-  private static final Logger LOGGER = LoggerFactory.getLogger(View3d.class);
+        GLEventListener,
+        ViewProgress {
 
-  public enum ViewType {
-    AXIAL,
-    CORONAL,
-    SAGITTAL,
-    SLICE,
-    VOLUME3D
-  }
+  private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(View3d.class);
 
   static final float[] vertexBufferData =
       new float[] {
@@ -122,28 +137,86 @@ public class View3d extends VolumeCanvas
   protected final GraphicMouseHandler<DicomImageElement> graphicMouseHandler;
 
   private int pointerType = 0;
-  private LayerAnnotation infoLayer;
-  protected final ContextMenuHandler contextMenuHandler;
+  private final LayerAnnotation infoLayer;
+  protected final ContextMenuHandler<DicomImageElement> contextMenuHandler;
 
-  private final ComputeTexture texture;
+  private final TextureData texture;
   private final Program program;
   private final Program quadProgram;
-  protected final RenderingLayer renderingLayer;
+  private final boolean useComputeShader;
+  protected final RenderingLayer<DicomImageElement> renderingLayer;
 
   private int vertexBuffer;
   protected Preset volumePreset;
-  private ViewType viewType;
   private JProgressBar progressBar;
+
+  private volatile Vector3d mprCrossHairPosition; // NOSONAR visibility reference
+  private volatile Quaterniond mprCrossHairRotation; // NOSONAR visibility reference
+  private volatile CrosshairCutMode mprCrossHairCutMode = CrosshairCutMode.NONE;
+
+  private PropertyChangeListener mprCrossHairListener;
+  private DicomVolTexture mprCrossHairListenerSource;
+
+  /** Segmentation overlay 3D texture — null when no segmentation is active. */
+  private volatile SegVolumeTexture segVolumeTexture; // NOSONAR visibility reference
+
+  /** Frame-time breakdown, inert unless {@link RenderProfiler#P_PROFILE} is set. */
+  private final RenderProfiler profiler = new RenderProfiler(this);
+
+  /** 1×1×1 placeholders keeping the segmentation sampler units complete, see bindSegTextures. */
+  private int segPlaceholderTextureId;
+
+  private int segPlaceholderColorId;
+
+  /**
+   * The SEG files contained in the current segmentation texture, each with the segment-number
+   * offset applied when several files were merged into one volume — see {@link #mergeSegVolumes}.
+   * Consumed by {@link #buildRegionOverrideMap()} so the colour LUT overrides target the shifted
+   * IDs and so unchecked files are always forced invisible.
+   */
+  private volatile List<RenderedSeg> renderedSegs = List.of(); // NOSONAR visibility ref
+
+  /** Per-view segmentation display mode — applied through the synchronization mechanism. */
+  private volatile Type segType = Type.NONE;
+
+  /** Generation stamp; bumping it invalidates any in-flight asynchronous seg texture build. */
+  private final AtomicInteger segBuildGeneration = new AtomicInteger();
+
+  /** {@code true} while an asynchronous seg texture build is running for this view. */
+  private volatile boolean segBuildRunning;
+
+  /**
+   * Per-view auto-sync button rendered as a corner overlay. Lazily created the first time {@link
+   * #updateSynchState()} is invoked, so it picks up the per-view {@link SynchData} attached by
+   * {@link org.weasis.dicom.viewer3d.EventManager#updateAllListeners}.
+   */
+  private SynchViewButton synchButton;
 
   public View3d(
       ImageViewerEventManager<DicomImageElement> eventManager, DicomVolTexture volTexture) {
     super(eventManager, volTexture, null);
-    this.texture = new ComputeTexture(this, ComputeTexture.COMPUTE_LOCAL_SIZE);
+    // Detect whether compute shaders are available (OpenGL >= 4.3).
+    OpenGLInfo glInfo = View3DFactory.getOpenGLInfo();
+    this.useComputeShader =
+        !View3DFactory.isFboForced() && (glInfo == null || glInfo.isComputeShaderCapable());
+
+    if (useComputeShader) {
+      this.texture = new ComputeTexture(this, ComputeTexture.COMPUTE_LOCAL_SIZE);
+      this.program = new Program("compute", ShaderManager.COMPUTE_SHADER); // NON-NLS
+      LOGGER.info("Volume rendering: using compute shader path (OpenGL >= 4.3)");
+    } else {
+      this.texture = new FboRenderTexture(this);
+      this.program =
+          new Program(
+              "fbo", ShaderManager.FBO_VERTEX_SHADER, ShaderManager.FBO_FRAGMENT_SHADER); // NON-NLS
+      LOGGER.info(
+          "Volume rendering: using FBO fragment-shader path (OpenGL 3.3 fallback{})",
+          View3DFactory.isFboForced()
+              ? ", forced via " + View3DFactory.P_FORCE_FBO
+              : ""); // NON-NLS
+    }
     this.quadProgram =
         new Program("basic", ShaderManager.VERTEX_SHADER, ShaderManager.FRAGMENT_SHADER); // NON-NLS
-    this.program = new Program("compute", ShaderManager.COMPUTE_SHADER); // NON-NLS
-    // this.program =new Program("basic", ShaderManager.OLD_VERTEX_SHADER,
-    // ShaderManager.OLD_FRAGMENT_SHADER);
     try {
       setSharedContext(OpenglUtils.getDefaultGlContext());
     } catch (Exception e) {
@@ -151,7 +224,7 @@ public class View3d extends VolumeCanvas
     }
     setLayout(null);
 
-    this.renderingLayer = new RenderingLayer();
+    this.renderingLayer = new RenderingLayer<>();
     this.volumePreset = Preset.getDefaultPreset(null);
     volumePreset.setRequiredBuilding(true);
 
@@ -161,9 +234,9 @@ public class View3d extends VolumeCanvas
 
     initActionWState();
 
-    this.graphicMouseHandler = new GraphicMouseHandler(this);
-    this.contextMenuHandler = new ContextMenuHandler(this);
-    this.focusHandler = new FocusHandler(this);
+    this.graphicMouseHandler = new GraphicMouseHandler<>(this);
+    this.contextMenuHandler = new ContextMenuHandler<>(this);
+    this.focusHandler = new FocusHandler<>(this);
     setFocusable(true);
 
     setBorder(viewBorder);
@@ -212,19 +285,61 @@ public class View3d extends VolumeCanvas
         });
   }
 
+  /**
+   * Subscribes to {@code "mpr.crosshair"} events on the given texture and unsubscribes from the
+   * previous one. Pass {@code null} to only unsubscribe.
+   */
+  private void subscribeToCrossHairEvents(DicomVolTexture newTexture) {
+    if (mprCrossHairListener != null && mprCrossHairListenerSource != null) {
+      mprCrossHairListenerSource.removePropertyChangeListener(mprCrossHairListener);
+      mprCrossHairListenerSource = null;
+    }
+    if (newTexture == null) {
+      mprCrossHairPosition = null;
+      mprCrossHairRotation = null;
+      mprCrossHairListener = null;
+      return;
+    }
+    mprCrossHairListener =
+        evt -> {
+          if (ActionVol.MPR_CROSSHAIR.cmd().equals(evt.getPropertyName())
+              && evt.getNewValue() instanceof Object[] arr
+              && arr.length >= 2
+              && arr[0] instanceof Vector3d pos
+              && arr[1] instanceof Quaterniond rot) {
+            mprCrossHairPosition = new Vector3d(pos);
+            mprCrossHairRotation = new Quaterniond(rot);
+            repaint();
+          }
+        };
+    mprCrossHairListenerSource = newTexture;
+    newTexture.addPropertyChangeListener(mprCrossHairListener);
+  }
+
   @Override
   public void disposeView() {
     disableMouseAndKeyListener();
+    subscribeToCrossHairEvents(null);
     removeFocusListener(this);
     ToolTipManager.sharedInstance().unregisterComponent(this);
     renderingLayer.removeLayerChangeListener(this);
     if (volTexture != null) {
       GuiUtils.getUICore().closeSeries(volTexture.getSeries());
     }
-    GL4 gl4 = OpenglUtils.getGL4();
-    program.destroy(gl4);
-    quadProgram.destroy(gl4);
-    texture.destroy(gl4);
+    GL2ES2 gl = OpenglUtils.getGL();
+    if (gl != null) {
+      program.destroy(gl);
+      quadProgram.destroy(gl);
+      texture.destroy(gl);
+      SegVolumeTexture svt = segVolumeTexture;
+      if (svt != null) {
+        // destroy() releases the SegVolumeTexture's retain on the SegmentationVolume.
+        // If no other consumer (e.g. MprController) is still holding the volume the CPU
+        // buffers are freed inside release(); otherwise they stay alive for the MPR overlay.
+        svt.destroy(gl);
+        segVolumeTexture = null;
+      }
+    }
     super.disposeView();
   }
 
@@ -233,21 +348,17 @@ public class View3d extends VolumeCanvas
     display();
   }
 
-  public RenderingLayer getRenderingLayer() {
+  public RenderingLayer<DicomImageElement> getRenderingLayer() {
     return renderingLayer;
+  }
+
+  public CrosshairCutMode getCrossHairCutMode() {
+    CrosshairCutMode mode = mprCrossHairCutMode;
+    return mode != null ? mode : CrosshairCutMode.NONE;
   }
 
   public Camera getCamera() {
     return camera;
-  }
-
-  public ViewType getViewType() {
-    return viewType;
-  }
-
-  public void setViewType(ViewType viewType) {
-    this.viewType = viewType;
-    camera.setSliceMode(viewType != ViewType.VOLUME3D);
   }
 
   public double getZoom() {
@@ -255,28 +366,29 @@ public class View3d extends VolumeCanvas
   }
 
   public void setVolTexture(DicomVolTexture volTexture) {
+    if (this.volTexture != null) {
+      this.volTexture.unregisterCrossHairRelay();
+    }
     this.volTexture = volTexture;
+    subscribeToCrossHairEvents(volTexture);
+    if (volTexture != null && mprCrossHairCutMode != CrosshairCutMode.NONE) {
+      volTexture.registerCrossHairRelay();
+      syncMprPosition();
+    }
     if (volTexture != null) {
       camera.setZoomFactor(-getBestFitViewScale());
       renderingLayer.setEnableRepaint(false);
-      Preset preset;
-      if (viewType == ViewType.VOLUME3D) {
-        int quality = getDefaultQuality();
-        renderingLayer.setQuality(quality);
-        eventManager
-            .getAction(ActionVol.VOL_QUALITY)
-            .ifPresent(a -> a.setSliderValue(quality, false));
-        ComboItemListener<Type> segType = eventManager.getAction(ActionVol.SEG_TYPE).orElse(null);
-        if (segType != null && segType.getSelectedItem() == SegmentationTool.Type.SEG_ONLY) {
-          preset = Preset.getSegmentationLut();
-        } else {
-          preset = Preset.getDefaultPreset(volTexture.getModality());
-        }
-      } else {
-        preset = Preset.getDefaultPreset(null);
-      }
+
+      int quality = getDefaultQuality();
+      renderingLayer.setQuality(quality);
+      eventManager
+          .getAction(ActionVol.VOL_QUALITY)
+          .ifPresent(a -> a.setSliderValue(quality, false));
       renderingLayer.setEnableRepaint(true);
-      setVolumePreset(preset);
+      // The anatomy volume always uses the modality's default preset.
+      setVolumePreset(Preset.getDefaultPreset(volTexture.getModality()));
+      // (Re)build the segmentation texture for this volume.
+      updateSegmentation();
     } else {
       display();
     }
@@ -292,10 +404,16 @@ public class View3d extends VolumeCanvas
 
   @Override
   protected void paintComponent(Graphics graphs) {
+    profiler.beginFrame();
+    long panelStart = profiler.start();
+    // Triggers display() — the GL pass — then the GLJPanel read-back into the Java2D pipeline.
     super.paintComponent(graphs);
+    long overlayStart = profiler.start();
     if (graphs instanceof Graphics2D graphics2D) {
       draw(graphics2D);
     }
+    profiler.endFrame(
+        panelStart, overlayStart, camera.isAdjusting(), getPassWidth(), getPassHeight());
   }
 
   protected void draw(Graphics2D g2d) {
@@ -311,8 +429,7 @@ public class View3d extends VolumeCanvas
     g2d.translate(-p.getX(), -p.getY());
 
     drawPointer(g2d, pointerType);
-    //   drawAffineInvariant(g2d);
-    if (infoLayer != null) {
+    if (infoLayer != null && volTexture != null) {
       g2d.setFont(getLayerFont());
       infoLayer.paint(g2d);
     }
@@ -324,23 +441,93 @@ public class View3d extends VolumeCanvas
   }
 
   protected void drawOnTop(Graphics2D g2d) {
+    if (infoLayer != null
+        && volTexture != null
+        && LangUtil.nullToFalse(infoLayer.getVisible())
+        && infoLayer.getDisplayPreferences(LayerItem.IMAGE_ORIENTATION)) {
+      drawLpsOrientation(g2d);
+    }
     drawProgressBar(g2d, progressBar);
+    drawSegLoadingMessage(g2d);
   }
 
+  /**
+   * Paints the pending segmentation build at the bottom of the view, as the 2D and MPR views do.
+   */
+  private void drawSegLoadingMessage(Graphics2D g2d) {
+    if (!segBuildRunning) {
+      return;
+    }
+    String msg = org.weasis.dicom.viewer2d.Messages.getString("seg.loading");
+    g2d.setFont(getLayerFont());
+    FontMetrics fm = g2d.getFontMetrics();
+    float x = (getWidth() - fm.stringWidth(msg)) / 2f;
+    float y = getHeight() - fm.getHeight() * 2f;
+    FontTools.paintColorFontOutline(g2d, msg, x, y, Color.ORANGE);
+  }
+
+  private void drawLpsOrientation(Graphics2D g2d) {
+    int axisLength = GuiUtils.getScaleLength(30);
+
+    // LPS unit directions in volume-texture space:
+    //   X+ = Left  (R/L, blue),  Y+ = Superior (S/I, green),  -Z = Posterior (A/P, red)
+    Vector3d lrDir = new Vector3d(1, 0, 0);
+    Vector3d apDir = new Vector3d(0, 0, -1);
+    Vector3d siDir = new Vector3d(0, 1, 0);
+
+    // Build the combined model × view matrix (direction-only — translation is irrelevant).
+    // Camera.currentModelMatrix = rotateX(90°) × translate(-0.5,-0.5,-0.5)
+    Matrix4d mv = camera.getViewMatrix().mul(Camera.currentModelMatrix, new Matrix4d());
+    mv.transformDirection(lrDir);
+    mv.transformDirection(apDir);
+    mv.transformDirection(siDir);
+
+    // Camera space uses y-up; screen uses y-down — flip y.
+    lrDir.y = -lrDir.y;
+    apDir.y = -apDir.y;
+    siDir.y = -siDir.y;
+
+    // Scale to the desired pixel length.
+    lrDir.mul(axisLength);
+    apDir.mul(axisLength);
+    siDir.mul(axisLength);
+
+    Point2D topLeft = infoLayer.getPosition(LayerAnnotation.Position.TopLeft);
+    Point origin =
+        AxisDirection.computeOrigin(axisLength, new Vector3d[] {lrDir, apDir, siDir}, topLeft);
+
+    Stroke savedStroke = g2d.getStroke();
+    g2d.setStroke(new BasicStroke(2));
+
+    g2d.setColor(PatientOrientation.blue); // R/L
+    AxisDirection.drawAxisLine(g2d, lrDir, origin);
+
+    g2d.setColor(PatientOrientation.red); // A/P
+    AxisDirection.drawAxisLine(g2d, apDir, origin);
+
+    g2d.setColor(PatientOrientation.green); // S/I
+    AxisDirection.drawAxisLine(g2d, siDir, origin);
+
+    g2d.setStroke(savedStroke);
+  }
+
+  @Override
   public void setProgressBar(JProgressBar bar) {
     this.progressBar = bar;
   }
 
+  @Override
   public JProgressBar getProgressBar() {
     return progressBar;
   }
 
   @Override
   public void init(GLAutoDrawable glAutoDrawable) {
-    initShaders(glAutoDrawable.getGL().getGL4());
+    GL2ES2 gl = glAutoDrawable.getGL().getGL2ES2();
+    initShaders(gl);
   }
 
-  public void initShaders(GL4 gl4) {
+  public void initShaders(GL2ES2 gl) {
     WProperties preferences = GuiUtils.getUICore().getSystemPreferences();
     Color lightColor = preferences.getColorProperty(RenderingLayer.P_LIGHT_COLOR, Color.WHITE);
     Vector3f lColor =
@@ -350,131 +537,237 @@ public class View3d extends VolumeCanvas
     Vector3f bColor =
         new Vector3f(
             bckColor.getRed() / 255f, bckColor.getGreen() / 255f, bckColor.getBlue() / 255f);
-    gl4.glClearColor(bColor.x, bColor.y, bColor.z, 1);
-    program.init(gl4);
+    gl.glClearColor(bColor.x, bColor.y, bColor.z, 1);
+    program.init(gl);
     program.allocateUniform(
-        gl4,
+        gl,
         "viewMatrix",
-        (gl, loc) ->
-            gl.glUniformMatrix4fv(
+        (g, loc) ->
+            g.glUniformMatrix4fv(
                 loc,
                 1,
                 false,
                 camera.getViewMatrix().invert().get(Buffers.newDirectFloatBuffer(16))));
     program.allocateUniform(
-        gl4,
+        gl,
         "projectionMatrix",
-        (gl, loc) ->
-            gl.glUniformMatrix4fv(
+        (g, loc) ->
+            g.glUniformMatrix4fv(
                 loc,
                 1,
                 false,
                 camera.getProjectionMatrix().invert().get(Buffers.newDirectFloatBuffer(16))));
     program.allocateUniform(
-        gl4,
+        gl,
         "depthSampleNumber",
-        (gl, loc) -> gl4.glUniform1i(loc, renderingLayer.getDepthSampleNumber()));
+        (g, loc) -> g.glUniform1i(loc, renderingLayer.getDepthSampleNumber()));
     program.allocateUniform(
-        gl4,
+        gl,
         "lutShape",
-        (gl, loc) -> gl4.glUniform1ui(loc, isSegMode() ? 0 : renderingLayer.getLutShapeId()));
+        (g, loc) ->
+            ((GL2ES3) g).glUniform1ui(loc, isSegMode() ? 0 : renderingLayer.getLutShapeId()));
 
     program.allocateUniform(
-        gl4,
+        gl,
         "backgroundColor",
-        (gl, loc) -> gl.glUniform3fv(loc, 1, bColor.get(Buffers.newDirectFloatBuffer(3))));
+        (g, loc) -> g.glUniform3fv(loc, 1, bColor.get(Buffers.newDirectFloatBuffer(3))));
 
     for (int i = 0; i < 4; ++i) {
       int val = i;
       program.allocateUniform(
-          gl4,
+          gl,
           String.format("lights[%d].position", val), // NON-NLS
-          (gl, loc) ->
-              gl.glUniform4fv(
-                  loc, 1, camera.getLightOrigin().get(Buffers.newDirectFloatBuffer(4))));
+          (g, loc) ->
+              g.glUniform4fv(loc, 1, camera.getLightOrigin().get(Buffers.newDirectFloatBuffer(4))));
       program.allocateUniform(
-          gl4,
+          gl,
           String.format("lights[%d].specularPower", val), // NON-NLS
-          (gl, loc) -> gl.glUniform1f(loc, renderingLayer.getShadingOptions().getSpecularPower()));
+          (g, loc) -> g.glUniform1f(loc, renderingLayer.getShadingOptions().getSpecularPower()));
       program.allocateUniform(
-          gl4,
+          gl,
           String.format("lights[%d].enabled", val), // NON-NLS
-          (gl, loc) -> gl.glUniform1i(loc, val < 1 ? 1 : 0));
+          (g, loc) -> g.glUniform1i(loc, val < 1 ? 1 : 0));
     }
     program.allocateUniform(
-        gl4,
+        gl,
         "lightColor",
-        (gl, loc) -> gl.glUniform3fv(loc, 1, lColor.get(Buffers.newDirectFloatBuffer(3))));
+        (g, loc) -> g.glUniform3fv(loc, 1, lColor.get(Buffers.newDirectFloatBuffer(3))));
     program.allocateUniform(
-        gl4, "shading", (gl, loc) -> gl.glUniform1i(loc, renderingLayer.isShading() ? 1 : 0));
+        gl, "shading", (g, loc) -> g.glUniform1i(loc, renderingLayer.isShading() ? 1 : 0));
     program.allocateUniform(
-        gl4,
+        gl,
         "texelSize",
-        (gl, loc) ->
-            gl.glUniform3fv(
-                loc, 1, volTexture.getNormalizedTexelSize().get(Buffers.newDirectFloatBuffer(3))));
+        (g, loc) -> {
+          DicomVolTexture tex = volTexture;
+          Vector3f texelSizeVal =
+              tex != null
+                  ? tex.getNormalizedTexelSize().get(new Vector3f())
+                  : new Vector3f(1f, 1f, 1f);
+          g.glUniform3fv(loc, 1, texelSizeVal.get(Buffers.newDirectFloatBuffer(3)));
+        });
 
     program.allocateUniform(
-        gl4,
+        gl,
         "renderingType",
-        (gl, loc) -> gl.glUniform1ui(loc, renderingLayer.getRenderingType().getId()));
+        (g, loc) -> ((GL2ES3) g).glUniform1ui(loc, renderingLayer.getRenderingType().getId()));
     program.allocateUniform(
-        gl4, "mipType", (gl, loc) -> gl.glUniform1ui(loc, renderingLayer.getMipType().getId()));
-    program.allocateUniform(gl4, "volTexture", (gl, loc) -> gl.glUniform1i(loc, 0));
-    program.allocateUniform(gl4, "colorMap", (gl, loc) -> gl.glUniform1i(loc, 1));
+        gl,
+        "mipType",
+        (g, loc) ->
+            ((GL2ES3) g).glUniform1ui(loc, renderingLayer.getRenderingType().getMipTypeId()));
+    program.allocateUniform(gl, "volTexture", (g, loc) -> g.glUniform1i(loc, 0));
+    program.allocateUniform(gl, "colorMap", (g, loc) -> g.glUniform1i(loc, 1));
     program.allocateUniform(
-        gl4,
+        gl,
         "textureDataType",
-        (gl, loc) -> gl.glUniform1ui(loc, TextureData.getDataType(getPixelFormat())));
+        (g, loc) -> ((GL2ES3) g).glUniform1ui(loc, TextureData.getDataType(getPixelFormat())));
 
     program.allocateUniform(
-        gl4,
-        "opacityFactor",
-        (gl, loc) -> gl.glUniform1f(loc, (float) renderingLayer.getOpacity()));
+        gl, "opacityFactor", (g, loc) -> g.glUniform1f(loc, (float) renderingLayer.getOpacity()));
 
     program.allocateUniform(
-        gl4,
+        gl,
         "inputLevelMin",
-        (gl, loc) -> gl.glUniform1f(loc, isSegMode() ? 0 : volTexture.getLevelMin()));
+        (g, loc) -> {
+          DicomVolTexture tex = volTexture;
+          g.glUniform1f(loc, (tex == null || isSegMode()) ? 0 : (float) tex.getLevelMin());
+        });
     program.allocateUniform(
-        gl4,
+        gl,
         "inputLevelMax",
-        (gl, loc) ->
-            gl.glUniform1f(loc, isSegMode() ? volumePreset.getWidth() : volTexture.getLevelMax()));
-    program.allocateUniform(gl4, "outputLevelMin", (gl, loc) -> gl.glUniform1f(loc, 0));
+        (g, loc) -> {
+          DicomVolTexture tex = volTexture;
+          g.glUniform1f(
+              loc,
+              isSegMode()
+                  ? volumePreset.getWidth()
+                  : (tex != null ? (float) tex.getLevelMax() : 1f));
+        });
+    program.allocateUniform(gl, "outputLevelMin", (g, loc) -> g.glUniform1f(loc, 0));
     program.allocateUniform(
-        gl4, "outputLevelMax", (gl, loc) -> gl.glUniform1f(loc, volumePreset.getWidth()));
+        gl, "outputLevelMax", (g, loc) -> g.glUniform1f(loc, volumePreset.getWidth()));
     program.allocateUniform(
-        gl4,
+        gl,
         "windowWidth",
-        (gl, loc) ->
-            gl.glUniform1f(
+        (g, loc) ->
+            g.glUniform1f(
                 loc,
                 isSegMode()
                     ? volumePreset.getColorMax() - volumePreset.getColorMin()
                     : renderingLayer.getWindowWidth()));
     program.allocateUniform(
-        gl4,
+        gl,
         "windowCenter",
-        (gl, loc) ->
-            gl.glUniform1f(
+        (g, loc) ->
+            g.glUniform1f(
                 loc,
                 isSegMode()
                     ? (volumePreset.getColorMin() + volumePreset.getColorMax()) / 2f
                     : renderingLayer.getWindowCenter()));
 
-    final IntBuffer intBuffer = IntBuffer.allocate(1);
-    texture.init(gl4);
-    volTexture.init(gl4);
-    if (volumePreset != null) {
-      volumePreset.init(gl4, renderingLayer.isInvertLut());
+    if (!useComputeShader) {
+      // The FBO shader uses voxelUniforms410.glsl which has no default for ditherRay
+      // (default uniform initializers require GLSL 4.2+).
+      program.allocateUniform(gl, "ditherRay", (g, loc) -> g.glUniform1i(loc, 1));
+      // Explicitly bind all three samplers to their texture units.
+      // layout(binding=N) on samplers requires GLSL 4.2 and is not available in 4.1,
+      // so we must set the units from Java.
+      program.allocateUniform(gl, "volTexture", (g, loc) -> g.glUniform1i(loc, 0));
+      program.allocateUniform(gl, "colorMap", (g, loc) -> g.glUniform1i(loc, 1));
+      program.allocateUniform(gl, "lightingMap", (g, loc) -> g.glUniform1i(loc, 2));
+      // The crosshair overlay derives the viewport pixel resolution from screen-space
+      // derivatives of quadCoordinates in volumeFbo.frag, which is robust to the macOS GLJPanel
+      // quirk that lets gl_FragCoord range over physical pixels even when the FBO color
+      // attachment is sized at logical resolution — so no viewportSize uniform is needed here.
+      // Only the size of the pixel-metric overlays has to be corrected when the adaptive pass
+      // runs below the screen resolution.
+      program.allocateUniform(
+          gl, "overlayScale", (g, loc) -> g.glUniform1f(loc, getRenderScaleX()));
     }
 
-    quadProgram.init(gl4);
-    gl4.glGenBuffers(1, intBuffer);
+    final IntBuffer intBuffer = IntBuffer.allocate(1);
+    texture.init(gl);
+    if (volTexture != null) {
+      volTexture.init(gl);
+    }
+    if (volumePreset != null) {
+      volumePreset.init(gl, renderingLayer.isInvertLut());
+    }
+
+    // MPR crosshair uniforms — position in normalized [0,1]³ volume-texture space
+    program.allocateUniform(
+        gl,
+        "crosshairPos", // NON-NLS
+        (g, loc) -> {
+          Vector3d pos = mprCrossHairPosition;
+          if (pos != null) {
+            g.glUniform3f(loc, (float) pos.x, (float) pos.y, (float) pos.z);
+          } else {
+            g.glUniform3f(loc, 0.5f, 0.5f, 0.5f);
+          }
+        });
+    program.allocateUniform(
+        gl,
+        "crosshairRot", // NON-NLS
+        (g, loc) -> {
+          Quaterniond rot = mprCrossHairRotation;
+          Matrix3d m = (rot != null) ? new Matrix3d().set(rot) : new Matrix3d().identity();
+          float[] f = {
+            (float) m.m00, (float) m.m10, (float) m.m20,
+            (float) m.m01, (float) m.m11, (float) m.m21,
+            (float) m.m02, (float) m.m12, (float) m.m22
+          };
+          g.glUniformMatrix3fv(loc, 1, false, f, 0);
+        });
+    program.allocateUniform(
+        gl,
+        "crosshairVisible", // NON-NLS
+        (g, loc) -> g.glUniform1i(loc, mprCrossHairPosition != null ? 1 : 0));
+    program.allocateUniform(
+        gl,
+        "crosshairCutMode", // NON-NLS
+        (g, loc) -> {
+          CrosshairCutMode mode = mprCrossHairCutMode;
+          g.glUniform1i(loc, mode != null ? mode.getId() : 0);
+        });
+
+    // ---- Segmentation overlay uniforms ----
+    program.allocateUniform(
+        gl,
+        "segOverlayEnabled", // NON-NLS
+        (g, loc) -> g.glUniform1i(loc, isSegTextureActive() ? 1 : 0));
+    program.allocateUniform(
+        gl, "segOnly", (g, loc) -> g.glUniform1i(loc, isSegOnly() ? 1 : 0)); // NON-NLS
+    program.allocateUniform(
+        gl, "segMaskMode", (g, loc) -> g.glUniform1i(loc, getSegMaskMode())); // NON-NLS
+    program.allocateUniform(
+        gl,
+        "segSegmentCount", // NON-NLS
+        (g, loc) -> {
+          SegVolumeTexture svt = segVolumeTexture;
+          g.glUniform1i(
+              loc, svt != null && svt.isReady() ? svt.getSegVolume().getSegmentCount() : 0);
+        });
+    program.allocateUniform(
+        gl, "segTexture", (g, loc) -> g.glUniform1i(loc, SegVolumeTexture.SEG_TEXTURE_UNIT));
+    program.allocateUniform(
+        gl, "segColorMap", (g, loc) -> g.glUniform1i(loc, SegVolumeTexture.SEG_COLOR_UNIT));
+
+    quadProgram.init(gl);
+    // Blit uniforms: the compute path writes its image to unit 0 and always fills it entirely,
+    // the FBO path blits from unit 3 and may have ray-cast only a sub-rectangle.
+    quadProgram.allocateUniform(
+        gl,
+        "compute",
+        (g, loc) ->
+            g.glUniform1i(loc, useComputeShader ? 0 : FboRenderTexture.OUTPUT_TEXTURE_UNIT));
+    quadProgram.allocateUniform(
+        gl, "texScale", (g, loc) -> g.glUniform2f(loc, getRenderScaleX(), getRenderScaleY()));
+
+    gl.glGenBuffers(1, intBuffer);
     vertexBuffer = intBuffer.get(0);
-    gl4.glBindBuffer(GL.GL_ARRAY_BUFFER, vertexBuffer);
-    gl4.glBufferData(
+    gl.glBindBuffer(GL.GL_ARRAY_BUFFER, vertexBuffer);
+    gl.glBufferData(
         GL.GL_ARRAY_BUFFER,
         (long) vertexBufferData.length * Float.BYTES,
         Buffers.newDirectFloatBuffer(vertexBufferData),
@@ -486,7 +779,11 @@ public class View3d extends VolumeCanvas
   }
 
   private PixelFormat getPixelFormat() {
-    PixelFormat format = volTexture.getPixelFormat();
+    DicomVolTexture tex = volTexture;
+    if (tex == null) {
+      return PixelFormat.UNSIGNED_SHORT;
+    }
+    PixelFormat format = tex.getPixelFormat();
     if (isSegMode()) {
       if (format == PixelFormat.SIGNED_SHORT) {
         return PixelFormat.UNSIGNED_SHORT;
@@ -496,12 +793,91 @@ public class View3d extends VolumeCanvas
   }
 
   public void display(GLAutoDrawable drawable) {
-    render(drawable.getGL().getGL4());
+    render(drawable.getGL().getGL2ES2());
   }
 
-  private void render(GL4 gl2) {
+  /**
+   * Fraction of the render target that this frame is ray-cast into — below 1 only on the adaptive
+   * FBO path while the camera is being dragged. The compute path always fills its image.
+   */
+  private float getRenderScaleX() {
+    return texture instanceof FboRenderTexture fbo ? fbo.getRenderScaleX() : 1f;
+  }
+
+  private float getRenderScaleY() {
+    return texture instanceof FboRenderTexture fbo ? fbo.getRenderScaleY() : 1f;
+  }
+
+  /** Resolution the volume is actually ray-cast at this frame, for the profiling report. */
+  private int getPassWidth() {
+    return Math.round(getRenderScaleX() * texture.getWidth());
+  }
+
+  private int getPassHeight() {
+    return Math.round(getRenderScaleY() * texture.getHeight());
+  }
+
+  /**
+   * Binds the segmentation textures on units 4 and 5, falling back to 1×1×1 placeholders when no
+   * segmentation is loaded. Drivers validate every sampler of the active program, even those the
+   * shader never reaches, so leaving the {@code usampler3D} unit empty makes strict implementations
+   * (macOS) report an incomplete texture on each draw.
+   */
+  private void bindSegTextures(GL2ES2 gl) {
+    SegVolumeTexture svt = segVolumeTexture;
+    if (svt != null && svt.isReady()) {
+      svt.bind(gl);
+      return;
+    }
+    if (segPlaceholderTextureId <= 0) {
+      IntBuffer buf = IntBuffer.allocate(2);
+      gl.glGenTextures(2, buf);
+      segPlaceholderTextureId = buf.get(0);
+      segPlaceholderColorId = buf.get(1);
+
+      gl.glActiveTexture(GL.GL_TEXTURE0 + SegVolumeTexture.SEG_TEXTURE_UNIT);
+      gl.glBindTexture(GL2ES2.GL_TEXTURE_3D, segPlaceholderTextureId);
+      gl.glTexParameteri(GL2ES2.GL_TEXTURE_3D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST);
+      gl.glTexParameteri(GL2ES2.GL_TEXTURE_3D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST);
+      gl.glTexImage3D(
+          GL2ES2.GL_TEXTURE_3D,
+          0,
+          GL2ES3.GL_R8UI,
+          1,
+          1,
+          1,
+          0,
+          GL2GL3.GL_RED_INTEGER,
+          GL.GL_UNSIGNED_BYTE,
+          Buffers.newDirectByteBuffer(1));
+
+      gl.glActiveTexture(GL.GL_TEXTURE0 + SegVolumeTexture.SEG_COLOR_UNIT);
+      gl.glBindTexture(GL.GL_TEXTURE_2D, segPlaceholderColorId);
+      gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST);
+      gl.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST);
+      gl.glTexImage2D(
+          GL.GL_TEXTURE_2D,
+          0,
+          GL.GL_RGBA8,
+          1,
+          1,
+          0,
+          GL.GL_RGBA,
+          GL.GL_UNSIGNED_BYTE,
+          Buffers.newDirectByteBuffer(4));
+    } else {
+      gl.glActiveTexture(GL.GL_TEXTURE0 + SegVolumeTexture.SEG_TEXTURE_UNIT);
+      gl.glBindTexture(GL2ES2.GL_TEXTURE_3D, segPlaceholderTextureId);
+      gl.glActiveTexture(GL.GL_TEXTURE0 + SegVolumeTexture.SEG_COLOR_UNIT);
+      gl.glBindTexture(GL.GL_TEXTURE_2D, segPlaceholderColorId);
+    }
+    gl.glActiveTexture(GL.GL_TEXTURE0);
+  }
+
+  private void render(GL2ES2 gl2) {
+    long start = profiler.start();
     gl2.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT);
-    if (volTexture.isReadyForDisplay()) {
+    if (volTexture != null && volTexture.isReadyForDisplay()) {
       int sampleCount = renderingLayer.getQuality();
       if (camera.isAdjusting()) {
         double quality =
@@ -514,35 +890,81 @@ public class View3d extends VolumeCanvas
         sampleCount = Math.max(64, (int) Math.round(sampleCount * quality));
       }
       renderingLayer.setDepthSampleNumber(sampleCount);
-      program.use(gl2);
-      program.setUniforms(gl2);
-      volTexture.render(gl2);
-      if (volumePreset != null) {
-        volumePreset.render(gl2, renderingLayer.isInvertLut(), isOriginalLUT());
+
+      if (useComputeShader) {
+        // --- Compute shader path (OpenGL >= 4.3) ---
+        // Cast to GL4 here: compute shaders (glDispatchCompute, glBindImageTexture) are GL4-only.
+        GL4 gl4 = gl2.getGL4();
+        program.use(gl4);
+        program.setUniforms(gl4);
+        volTexture.render(gl4);
+        if (volumePreset != null) {
+          volumePreset.render(gl4, renderingLayer.isInvertLut());
+        }
+        // Bind segmentation overlay textures (units 4 and 5)
+        bindSegTextures(gl4);
+        texture.render(gl4);
+        quadProgram.use(gl4);
+        quadProgram.setUniforms(gl4);
+
+        gl4.glEnable(GL.GL_BLEND);
+        gl4.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA);
+
+        gl4.glEnableVertexAttribArray(0);
+        gl4.glBindBuffer(GL.GL_ARRAY_BUFFER, vertexBuffer);
+        gl4.glVertexAttribPointer(0, 2, GL.GL_FLOAT, false, 0, 0);
+        gl4.glActiveTexture(GL.GL_TEXTURE0);
+        gl4.glBindTexture(GL.GL_TEXTURE_2D, texture.getId());
+        gl4.glDrawArrays(GL.GL_TRIANGLES, 0, vertexBufferData.length / 2);
+        gl4.glDisableVertexAttribArray(0);
+        gl4.glDisable(GL.GL_BLEND);
+      } else {
+        // --- FBO fragment-shader fallback path (OpenGL 3.3+, e.g., macOS GL3) ---
+        program.use(gl2);
+        program.setUniforms(gl2);
+
+        // Bind volume and LUT textures on their expected texture units
+        volTexture.render(gl2);
+        if (volumePreset != null) {
+          volumePreset.render(gl2, renderingLayer.isInvertLut());
+        }
+        // Bind segmentation overlay textures (units 4 and 5)
+        bindSegTextures(gl2);
+
+        // Set up the vertex array so FboRenderTexture.render() can call glDrawArrays
+        gl2.glEnableVertexAttribArray(0);
+        gl2.glBindBuffer(GL.GL_ARRAY_BUFFER, vertexBuffer);
+        gl2.glVertexAttribPointer(0, 2, GL.GL_FLOAT, false, 0, 0);
+
+        // Render into FBO (binds FBO, draws quad, unbinds FBO, restores viewport)
+        texture.render(gl2);
+        gl2.glDisableVertexAttribArray(0);
+
+        // Step 2: Blit the FBO colour-attachment texture to the screen using the quad program.
+        // The FBO output lives on unit 3 (FboRenderTexture.OUTPUT_TEXTURE_UNIT), so the quad
+        // sampler never disturbs the 3D volume texture on unit 0, and texScale restricts the
+        // sampling to the sub-rectangle that was ray-cast.
+        quadProgram.use(gl2);
+        quadProgram.setUniforms(gl2);
+
+        gl2.glEnable(GL.GL_BLEND);
+        gl2.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA);
+
+        gl2.glEnableVertexAttribArray(0);
+        gl2.glBindBuffer(GL.GL_ARRAY_BUFFER, vertexBuffer);
+        gl2.glVertexAttribPointer(0, 2, GL.GL_FLOAT, false, 0, 0);
+        gl2.glActiveTexture(GL.GL_TEXTURE0 + FboRenderTexture.OUTPUT_TEXTURE_UNIT);
+        gl2.glBindTexture(GL.GL_TEXTURE_2D, texture.getId());
+        gl2.glDrawArrays(GL.GL_TRIANGLES, 0, vertexBufferData.length / 2);
+        gl2.glDisableVertexAttribArray(0);
+        gl2.glDisable(GL.GL_BLEND);
       }
-      texture.render(gl2);
-      quadProgram.use(gl2);
-
-      gl2.glEnable(GL.GL_BLEND);
-      gl2.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA);
-
-      gl2.glEnableVertexAttribArray(0);
-      gl2.glBindBuffer(GL.GL_ARRAY_BUFFER, vertexBuffer);
-      gl2.glVertexAttribPointer(0, 2, GL.GL_FLOAT, false, 0, 0);
-      gl2.glActiveTexture(GL.GL_TEXTURE0);
-      gl2.glBindTexture(GL.GL_TEXTURE_2D, texture.getId());
-      gl2.glDrawArrays(GL.GL_TRIANGLES, 0, vertexBufferData.length / 2);
-      gl2.glDisableVertexAttribArray(0);
-      gl2.glDisable(GL.GL_BLEND);
     }
-  }
-
-  public boolean isOriginalLUT() {
-    return viewType != ViewType.VOLUME3D && volumePreset != null && volumePreset.isDefaultForAll();
+    profiler.endGpu(gl2, start);
   }
 
   public void reshape(GLAutoDrawable drawable, int x, int y, int width, int height) {
-    GL4 gl2 = drawable.getGL().getGL4();
+    GL2ES2 gl2 = drawable.getGL().getGL2ES2();
     gl2.glViewport(0, 0, width, height);
     camera.resetTransformation();
   }
@@ -555,24 +977,442 @@ public class View3d extends VolumeCanvas
     //    }
   }
 
-  public void updateSegmentation() {}
+  public void updateSegmentation() {
+    Type currentType = getSegType();
+    DicomVolTexture tex = volTexture;
+    Volume<?, ?> volume = tex == null ? null : tex.getVolume();
+    // Only the SEG files actually shown are resampled. Each one costs a full copy of the displayed
+    // volume's grid (one byte per image voxel, hundreds of MB for a thin-slice CT), and a study may
+    // carry dozens; building the hidden ones exhausts the heap for overlays nobody asked for.
+    // Ticking one back on is caught by hasUnrenderedVisibleSeg() and rebuilds the texture.
+    List<SpecialElementRegion> segList =
+        currentType.requiresSegTexture() && volume != null
+            ? tex.getSegmentations().stream().filter(SpecialElementRegion::isVisible).toList()
+            : null;
+    if (segList == null || segList.isEmpty()) {
+      segBuildGeneration.incrementAndGet(); // invalidate any in-flight build
+      setSegBuildRunning(false);
+      destroySegTexture();
+      display();
+      return;
+    }
+
+    if (!segBuildRunning && isSegTextureUpToDate(segList)) {
+      // The same SEG files are already uploaded: switching between the display modes only changes
+      // shader uniforms, so render the existing texture instead of rebuilding it.
+      display();
+      return;
+    }
+
+    // The heavy work (mask decoding, splatting, resampling, GPU upload) runs asynchronously so
+    // the EDT never freezes on large SEG objects; a message is shown in the view meanwhile.
+    int generation = segBuildGeneration.incrementAndGet();
+    setSegBuildRunning(true);
+    final Volume<?, ?> imageVolume = volume;
+    CompletableFuture.runAsync(() -> buildSegTexture(generation, segList, imageVolume))
+        .exceptionally(
+            e -> {
+              LOGGER.error("Building segmentation texture", e);
+              GuiExecutor.execute(
+                  () -> {
+                    if (generation == segBuildGeneration.get()) {
+                      setSegBuildRunning(false);
+                      destroySegTexture();
+                      display();
+                    }
+                  });
+              return null;
+            });
+  }
+
+  /**
+   * Background part of {@link #updateSegmentation()}: builds one image-aligned volume per SEG file,
+   * combines them when needed, uploads the GPU texture through the shared GL context, then installs
+   * the result on the EDT. Aborts silently when a newer build supersedes this one.
+   */
+  private void buildSegTexture(
+      int generation, List<SpecialElementRegion> segList, Volume<?, ?> imageVolume) {
+    List<RenderedSeg> rendered = new ArrayList<>();
+    SegmentationVolume segVolume =
+        buildCombinedSegVolume(generation, segList, imageVolume, rendered);
+
+    // An interrupt cuts the build short, and a partial texture would be missing some SEG files.
+    if (Thread.currentThread().isInterrupted() || generation != segBuildGeneration.get()) {
+      return; // superseded by a newer request
+    }
+    if (segVolume == null) {
+      GuiExecutor.execute(
+          () -> {
+            if (generation == segBuildGeneration.get()) {
+              setSegBuildRunning(false);
+              destroySegTexture();
+              display();
+            }
+          });
+      return;
+    }
+
+    SegVolumeTexture newSvt = new SegVolumeTexture(segVolume, new Vector3d(1.0, 1.0, 1.0));
+    // Upload from this worker thread through the shared GL context
+    newSvt.uploadVolumeDataAsync();
+
+    GuiExecutor.execute(() -> installSegTexture(generation, newSvt, rendered));
+  }
+
+  /**
+   * Resamples the SEG files onto the displayed volume's grid and combines them into one volume,
+   * recording each file's segment-number offset in {@code rendered}. Returns {@code null} when no
+   * file yielded anything usable.
+   *
+   * <p>Each resampled volume is a full copy of the image grid, so they are merged and freed as they
+   * complete rather than collected first: the peak is the merge target plus the handful of builds
+   * in flight, not one volume per SEG file. A lone file needs no merge and keeps its cached volume,
+   * which the MPR overlays can then reuse.
+   */
+  private SegmentationVolume buildCombinedSegVolume(
+      int generation,
+      List<SpecialElementRegion> segList,
+      Volume<?, ?> imageVolume,
+      List<RenderedSeg> rendered) {
+
+    if (segList.size() == 1) {
+      AlignedSeg single = buildAlignedSeg(generation, segList.getFirst(), imageVolume);
+      if (single == null) {
+        return null;
+      }
+      rendered.add(new RenderedSeg(single.seg(), 0));
+      return single.volume();
+    }
+
+    // Offsets follow segList order rather than completion order, so a study always maps a given
+    // file to the same segment numbers however the concurrent builds interleave. Files that end up
+    // yielding nothing simply leave their range unused.
+    Map<Integer, RegionAttributes> combined = new HashMap<>();
+    List<Integer> indexes = new ArrayList<>(segList.size());
+    int[] offsets = new int[segList.size()];
+    int offset = 0;
+    for (int i = 0; i < segList.size(); i++) {
+      indexes.add(i);
+      offsets[i] = offset;
+      int maxSegNum = 0;
+      for (Map.Entry<Integer, ? extends RegionAttributes> e :
+          segList.get(i).getSegAttributes().entrySet()) {
+        combined.put(offset + e.getKey(), e.getValue());
+        maxSegNum = Math.max(maxSegNum, e.getKey());
+      }
+      offset += maxSegNum;
+    }
+
+    SegVolumeMerger merger = new SegVolumeMerger(combined);
+    long start = System.nanoTime();
+    // mapBounded returns the non-null results in input order, so rendered stays in segList order.
+    rendered.addAll(
+        SegBuildScheduler.mapBounded(
+            indexes,
+            i -> {
+              AlignedSeg as = buildAlignedSeg(generation, segList.get(i), imageVolume);
+              if (as == null) {
+                return null;
+              }
+              try {
+                merger.merge(as.volume(), offsets[i]);
+              } finally {
+                // Freed as soon as it is merged. MPR keeps a retain() on the volumes it displays,
+                // so this releases only the copies this build owns.
+                as.seg().disposeAlignedVolume(imageVolume);
+              }
+              return new RenderedSeg(as.seg(), offsets[i]);
+            }));
+    LOGGER.debug(
+        "Merged {} segmentation volumes ({} stamped voxels) in {} ms",
+        rendered.size(),
+        merger.stamped(),
+        (System.nanoTime() - start) / 1_000_000);
+    return merger.merged();
+  }
+
+  /**
+   * Accumulates image-aligned SEG volumes into a single volume as they are built. Segment numbers
+   * of each file are shifted by that file's offset so files sharing segment numbers do not
+   * overwrite each other.
+   */
+  private static final class SegVolumeMerger {
+
+    private final Map<Integer, RegionAttributes> combined;
+    private SegmentationVolume merged;
+    private long stamped;
+
+    SegVolumeMerger(Map<Integer, RegionAttributes> combined) {
+      this.combined = combined;
+    }
+
+    /** The merge target is created from the first volume, which fixes the grid for the rest. */
+    synchronized void merge(SegmentationVolume volume, int offset) {
+      if (merged == null) {
+        merged = volume.createCompatible(combined);
+      }
+      stamped += volume.mergeInto(merged, segNum -> segNum + offset);
+    }
+
+    synchronized SegmentationVolume merged() {
+      return merged;
+    }
+
+    synchronized long stamped() {
+      return stamped;
+    }
+  }
+
+  /**
+   * Builds (or reuses) the image-aligned volume of a single SEG file. Returns {@code null} when the
+   * file yields nothing usable or when a newer segmentation request has superseded this build.
+   */
+  private AlignedSeg buildAlignedSeg(
+      int generation, SpecialElementRegion seg, Volume<?, ?> imageVolume) {
+    if (generation != segBuildGeneration.get() || !(seg instanceof SegSpecialElement segElement)) {
+      return null;
+    }
+    DicomSeries segSeries = segElement.getMediaReader().getMediaSeries();
+    if (segSeries == null) {
+      return null;
+    }
+    // Reuse the SEG's per-image-volume cached resample when available so we do not redo the
+    // expensive frame splatting if MPR (or another 3D view) already built it for the same volume.
+    SegmentationVolume segVol =
+        segElement.getOrBuildAlignedVolume(
+            imageVolume, s -> SegVolumeBuilder.build(s, segSeries, imageVolume));
+    if (segVol == null) {
+      return null;
+    }
+    if (segVol.isEmpty()) {
+      // Empty resample is useless to keep cached: drop it from the SEG so a future request can
+      // retry (e.g. once the image volume finishes loading).
+      segElement.disposeAlignedVolume(imageVolume);
+      return null;
+    }
+    return new AlignedSeg(segElement, segVol);
+  }
+
+  /** EDT part of the asynchronous build: swaps the new texture in and refreshes the view. */
+  private void installSegTexture(
+      int generation, SegVolumeTexture newSvt, List<RenderedSeg> rendered) {
+    if (generation != segBuildGeneration.get()) {
+      // Superseded while uploading — discard the freshly-built texture.
+      GL2ES2 gl = OpenglUtils.getGL();
+      if (gl != null) {
+        newSvt.destroy(gl);
+      }
+      return;
+    }
+    this.renderedSegs = rendered;
+    // Apply the tree's visibility/opacity state to the colour LUT. This runs on the EDT (no
+    // current GL context), so stash the LUT — SegVolumeTexture.bind() uploads it on the GL
+    // thread at the next render. buildSegmentColorLUT() is pure CPU work.
+    newSvt.setPendingColorLut(newSvt.getSegVolume().buildSegmentColorLUT(buildRegionOverrideMap()));
+
+    SegVolumeTexture old = this.segVolumeTexture;
+    this.segVolumeTexture = newSvt;
+    if (old != null) {
+      GL2ES2 gl = OpenglUtils.getGL();
+      if (gl != null) {
+        old.destroy(gl);
+      }
+      // Do NOT free the underlying SegmentationVolume here: it is now owned by the
+      // SegSpecialElement's per-image-volume cache (see SegSpecialElement.alignedVolumes) and
+      // may still be in use by the MPR overlay or by a re-upload of this very texture.
+    }
+    setSegBuildRunning(false);
+    display();
+  }
+
+  private void setSegBuildRunning(boolean running) {
+    this.segBuildRunning = running;
+    repaint();
+  }
+
+  /**
+   * {@code true} when the current texture already holds exactly the SEG files of {@code segList}.
+   */
+  private boolean isSegTextureUpToDate(List<SpecialElementRegion> segList) {
+    SegVolumeTexture svt = segVolumeTexture;
+    if (svt == null) {
+      return false;
+    }
+    List<RenderedSeg> rendered = renderedSegs;
+    if (rendered.size() != segList.size()) {
+      return false;
+    }
+    for (int i = 0; i < rendered.size(); i++) {
+      if (rendered.get(i).seg() != segList.get(i)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Refreshes only the segment colour LUT on the GPU using the current visibility / opacity state
+   * from the UI tree ({@link Preset#getRegionMap()}). This is much cheaper than rebuilding the
+   * entire segmentation texture and should be used when only segment visibility or opacity has
+   * changed.
+   */
+  public void refreshSegColorLUT() {
+    if (segBuildRunning) {
+      // A texture build is in flight; it reads the tree state when it installs the texture.
+      return;
+    }
+    SegVolumeTexture svt = segVolumeTexture;
+    if (svt == null || hasUnrenderedVisibleSeg()) {
+      // No texture yet, or the user enabled a SEG file that is not part of the current texture
+      // (e.g. its volume could not be built when the texture was created): rebuild it fully.
+      // updateSegmentation() is a no-op when no segmentation display mode is active.
+      updateSegmentation();
+      return;
+    }
+    // Build the colour LUT from the Preset region map (reflects the tree's checkbox state)
+    Map<Integer, RegionAttributes> overrideAttrs = buildRegionOverrideMap();
+    svt.setPendingColorLut(svt.getSegVolume().buildSegmentColorLUT(overrideAttrs));
+    display();
+  }
+
+  /** Returns {@code true} when a visible SEG file is missing from the rendered texture. */
+  private boolean hasUnrenderedVisibleSeg() {
+    DicomVolTexture tex = volTexture;
+    if (tex == null) {
+      return false;
+    }
+    List<RenderedSeg> rendered = renderedSegs;
+    for (SpecialElementRegion seg : tex.getSegmentations()) {
+      if (seg.isVisible()
+          && seg instanceof SegSpecialElement sse
+          && rendered.stream().noneMatch(rs -> rs.seg() == sse)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** A SEG file together with its volume resampled onto the displayed image volume's grid. */
+  private record AlignedSeg(SegSpecialElement seg, SegmentationVolume volume) {}
+
+  /** A SEG file contained in the current texture and its segment-number offset. */
+  private record RenderedSeg(SegSpecialElement seg, int offset) {}
+
+  /**
+   * Builds a flat segment-number → RegionAttributes map suitable for {@link
+   * SegmentationVolume#buildSegmentColorLUT(Map)}. Region-level state comes from the Preset's
+   * region map (the tool tree's copies, keyed by {@code "<regionUID>::<groupKey>"}), shifted by the
+   * per-file offset used when the rendered volume was merged. On top of that, the file-level
+   * checkbox is authoritative: every region of an unchecked SEG file is forced invisible, even when
+   * the tree copies are unavailable or stale.
+   */
+  private Map<Integer, RegionAttributes> buildRegionOverrideMap() {
+    List<RenderedSeg> rendered = renderedSegs;
+    Map<Integer, RegionAttributes> result = new HashMap<>();
+
+    Map<String, List<SegRegion<?>>> regionMap = Preset.getRegionMap();
+    if (regionMap != null && !regionMap.isEmpty()) {
+      for (Map.Entry<String, List<SegRegion<?>>> entry : regionMap.entrySet()) {
+        Integer offset = resolveSegOffset(rendered, entry.getKey());
+        if (offset == null) {
+          continue; // this segmentation is not part of the rendered texture
+        }
+        for (SegRegion<?> region : entry.getValue()) {
+          result.put(region.getId() + offset, region);
+        }
+      }
+    }
+
+    for (RenderedSeg rs : rendered) {
+      if (!rs.seg().isVisible()) {
+        for (Map.Entry<Integer, ? extends RegionAttributes> e :
+            rs.seg().getSegAttributes().entrySet()) {
+          if (e.getValue() instanceof SegRegion<?> region) {
+            SegRegion<?> hidden = region.copy();
+            hidden.setVisible(false);
+            result.put(e.getKey() + rs.offset(), hidden);
+          }
+        }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Resolves the segment-number offset of the segmentation owning the given Preset region-map key
+   * ({@code "<regionUID>::<groupKey>"}), or {@code null} when that segmentation is not rendered.
+   */
+  private static Integer resolveSegOffset(List<RenderedSeg> rendered, String key) {
+    if (rendered.isEmpty()) {
+      return 0;
+    }
+    for (RenderedSeg rs : rendered) {
+      if (key.startsWith(rs.seg().getRegionUID() + "::")) { // NON-NLS
+        return rs.offset();
+      }
+    }
+    return null;
+  }
+
+  /** Returns this view's segmentation display mode (never {@code null}). */
+  public Type getSegType() {
+    return segType;
+  }
+
+  /** Applies a new segmentation display mode to this view and rebuilds/destroys its texture. */
+  public void setSegType(Type type) {
+    if (type != null && type != segType) {
+      this.segType = type;
+      updateSegmentation();
+    }
+  }
+
+  private boolean isSegOnly() {
+    return getSegType() == Type.SEG_ONLY;
+  }
+
+  /**
+   * Returns true when a segmentation texture is ready and the current mode renders it — overlay,
+   * segmentation-only, or one of the voxel mask modes.
+   */
+  private boolean isSegTextureActive() {
+    SegVolumeTexture svt = segVolumeTexture;
+    return svt != null && svt.isReady() && segType.requiresSegTexture();
+  }
+
+  /**
+   * Returns the mask mode passed to the shader: {@code 0} = none, {@code 1} = include (only the
+   * real voxels inside visible segments are rendered), {@code 2} = exclude (those voxels are
+   * removed from the rendering).
+   */
+  private int getSegMaskMode() {
+    if (segType == Type.SEG_MASK_INCLUDE) {
+      return 1;
+    }
+    return segType == Type.SEG_MASK_EXCLUDE ? 2 : 0;
+  }
+
+  private void destroySegTexture() {
+    renderedSegs = List.of();
+    SegVolumeTexture svt = segVolumeTexture;
+    if (svt != null) {
+      segVolumeTexture = null;
+      GL2ES2 gl = OpenglUtils.getGL();
+      if (gl != null) {
+        svt.destroy(gl);
+      }
+      // The underlying SegmentationVolume is owned by the SegSpecialElement's per-image-volume
+      // cache; only the GL texture is released here.
+    }
+  }
 
   public void setVolumePreset(Preset preset) {
     this.volumePreset = Objects.requireNonNull(preset);
     volumePreset.setRequiredBuilding(true);
 
-    boolean originalLUT = isOriginalLUT();
-    List<PresetWindowLevel> list = getVolTexture().getPresetList(true, volumePreset, originalLUT);
-    if (originalLUT) {
-      if (!list.isEmpty()) {
-        changePresetWindowLevel(list.getFirst());
-      }
-    } else {
-      list.stream()
-          .filter(p -> p.getKeyCode() == 0x30)
-          .findFirst()
-          .ifPresent(this::changePresetWindowLevel);
-    }
+    PresetWindowLevel defaultPreset = getVolTexture().getDefaultPreset(volumePreset);
+    changePresetWindowLevel(defaultPreset);
+
     renderingLayer.applyVolumePreset(volumePreset, false);
     eventManager
         .getAction(ActionVol.VOL_SHADING)
@@ -605,7 +1445,124 @@ public class View3d extends VolumeCanvas
   }
 
   @Override
-  public void updateSynchState() {}
+  public void updateSynchState() {
+    SynchData synchData = (SynchData) actionsInView.get(ActionW.SYNCH_LINK.cmd());
+    ImageViewerPlugin<DicomImageElement> container = eventManager.getSelectedView2dContainer();
+    boolean multiView = container != null && container.getImagePanels().size() > 1;
+
+    // Hide the per-view sync button when nothing can be synced — either no SynchData attached or
+    // the layout has a single view (no other view to mirror).
+    if (synchData == null || !multiView) {
+      if (synchButton != null) {
+        synchButton.setVisible(false);
+      }
+      repaint();
+      return;
+    }
+    if (synchButton == null) {
+      synchButton = new SynchViewButton(this::showSyncPopup);
+      synchButton.setPosition(GridBagConstraints.SOUTHEAST);
+      getViewButtons().add(synchButton);
+    }
+    synchButton.setState(
+        synchData.isSynchActivated() ? SynchData.SyncState.ON : SynchData.SyncState.OFF);
+    synchButton.setVisible(true);
+    repaint();
+  }
+
+  /**
+   * Invoked when the user clicks the auto-sync overlay button: shows the per-view sync popup at the
+   * click location. Same content as the right-click "Volume sync" submenu, presented as a
+   * standalone popup with an additional auto-sync on/off toggle at the top.
+   */
+  private void showSyncPopup(java.awt.Component invoker, int x, int y) {
+    SynchData sd = (SynchData) actionsInView.get(ActionW.SYNCH_LINK.cmd());
+    if (sd == null) {
+      return;
+    }
+    ImageViewerPlugin<DicomImageElement> container = eventManager.getSelectedView2dContainer();
+    if (container == null) {
+      return;
+    }
+
+    SynchOptionsCheckBoxGroup group = new SynchOptionsCheckBoxGroup(container.getSyncOptions());
+    JPopupMenu popup = group.buildPopupMenu(sd.getActions(), this::onSyncOptionToggled);
+
+    // Top auto-sync on/off toggle.
+    JCheckBoxMenuItem syncToggle =
+        new JCheckBoxMenuItem(
+            org.weasis.core.Messages.getString("ViewerToolBar.synch_this_view"),
+            sd.isSynchActivated());
+    syncToggle.setToolTipText(
+        org.weasis.core.Messages.getString("ViewerToolBar.synch_this_view_tooltip"));
+    syncToggle.addActionListener(e -> toggleAutoSync(sd, syncToggle.isSelected()));
+    popup.insert(syncToggle, 0);
+    popup.insert(new JPopupMenu.Separator(), 1);
+
+    popup.addSeparator();
+    popup.add(buildApplyToAllItem(sd, container));
+
+    popup.show(invoker, x, y);
+  }
+
+  private void toggleAutoSync(SynchData sd, boolean enabled) {
+    // Per-view toggle: only mutate this view's state and mark non-original so a subsequent
+    // refresh (updateAllListeners → getOrCreateSynchData) preserves it. Do NOT touch SYNCH_MODE
+    // — that would trigger the master toggle and propagate to every other view.
+    sd.setOriginal(false);
+    sd.setAutoSyncState(enabled ? SynchData.SyncState.ON : SynchData.SyncState.OFF);
+    refreshAllListeners();
+  }
+
+  private void refreshAllListeners() {
+    ComboItemListener<SynchView> synchAction = eventManager.getAction(ActionW.SYNCH).orElse(null);
+    SynchView selected =
+        synchAction != null && synchAction.getSelectedItem() instanceof SynchView sv
+            ? sv
+            : SynchView.DEFAULT_STACK;
+    eventManager.updateAllListeners(eventManager.getSelectedView2dContainer(), selected);
+  }
+
+  private void onSyncOptionToggled(String cmd, boolean selected) {
+    SynchData sd = (SynchData) actionsInView.get(ActionW.SYNCH_LINK.cmd());
+    if (sd != null) {
+      sd.getActions().put(cmd, selected);
+      repaint();
+    }
+  }
+
+  private JMenuItem buildApplyToAllItem(
+      SynchData source, ImageViewerPlugin<DicomImageElement> container) {
+    JMenuItem applyToAll =
+        new JMenuItem(org.weasis.core.Messages.getString("ViewerToolBar.synch_apply_to_all"));
+    applyToAll.addActionListener(e -> applySyncOptionsToOtherViews(source, container));
+    return applyToAll;
+  }
+
+  /**
+   * Copy this view's sync actions map to every other view in the container. All 3D views show the
+   * same volume so no FrameOfReferenceUID filter is applied; views with sync deactivated are still
+   * updated so the user gets a consistent map when they re-enable.
+   */
+  private void applySyncOptionsToOtherViews(
+      SynchData source, ImageViewerPlugin<DicomImageElement> container) {
+    if (source == null || container == null) {
+      return;
+    }
+    Map<String, Boolean> snapshot = new HashMap<>(source.getActions());
+    for (ViewCanvas<DicomImageElement> v : container.getImagePanels()) {
+      if (v == this) {
+        continue;
+      }
+      SynchData target = (SynchData) v.getActionValue(ActionW.SYNCH_LINK.cmd());
+      if (target == null) {
+        continue;
+      }
+      target.getActions().clear();
+      target.getActions().putAll(snapshot);
+      v.getJComponent().repaint();
+    }
+  }
 
   @Override
   public PixelInfo getPixelInfo(Point p) {
@@ -658,10 +1615,17 @@ public class View3d extends VolumeCanvas
 
   @Override
   public void moveOrigin(PanPoint point) {
-    if (point != null) {
-      if (PanPoint.State.DRAGGING.equals(point.getState())) {
-        camera.translate(point);
-      }
+    if (point == null) {
+      return;
+    }
+    PanPoint.State state = point.getState();
+    if (PanPoint.State.DRAGSTART.equals(state)) {
+      // Anchor the pan reference point so the first DRAGGING delta is computed against the
+      // press position rather than this view's stale prevMousePos (which would shift the
+      // image visibly when sync is on).
+      camera.anchorMouse(point);
+    } else if (PanPoint.State.DRAGGING.equals(state)) {
+      camera.translate(point);
     }
   }
 
@@ -679,8 +1643,7 @@ public class View3d extends VolumeCanvas
     graphicManager.fireGraphicsSelectionChanged(getImageLayer());
 
     if (selected && getSeries() != null) {
-      AuditLog.LOGGER.info(
-          "select:series nb:{} viewType:{}", getSeries().getSeriesNumber(), viewType);
+      AuditLog.LOGGER.info("select:series nb:{}", getSeries().getSeriesNumber());
     }
   }
 
@@ -759,8 +1722,6 @@ public class View3d extends VolumeCanvas
       return contextMenuHandler;
     } else if (command.equals(ActionW.WINLEVEL.cmd())) {
       return getAction(ActionW.LEVEL);
-      //    } else if (command.equals(ActionW.CROSSHAIR.cmd())) {
-      //      return controls;
     }
 
     Optional<Feature<? extends ActionState>> actionKey = eventManager.getActionKey(command);
@@ -799,15 +1760,14 @@ public class View3d extends VolumeCanvas
 
   @Override
   public void reset() {
-    ImageViewerPlugin pane = eventManager.getSelectedView2dContainer();
+    ImageViewerPlugin<DicomImageElement> pane = eventManager.getSelectedView2dContainer();
     if (pane != null) {
       pane.resetMaximizedSelectedImagePane(this);
     }
 
     initActionWState();
 
-    View c =
-        viewType == ViewType.VOLUME3D ? Camera.getDefaultOrientation() : Camera.DEFAULT_SLICE_VIEW;
+    View c = Camera.getDefaultOrientation();
     camera.set(c.position(), c.rotation(), -getBestFitViewScale(), false);
     renderingLayer.setEnableRepaint(false);
     renderingLayer.setQuality(getDefaultQuality());
@@ -819,9 +1779,11 @@ public class View3d extends VolumeCanvas
     eventManager.updateComponentsListener(this);
   }
 
+  private final List<ViewButton> viewButtons = new java.util.ArrayList<>();
+
   @Override
   public List<ViewButton> getViewButtons() {
-    return Collections.emptyList();
+    return viewButtons;
   }
 
   @Override
@@ -850,25 +1812,47 @@ public class View3d extends VolumeCanvas
     int count = popupMenu.getComponentCount();
 
     if (eventManager instanceof EventManager manager) {
-      GuiUtils.addItemToMenu(popupMenu, manager.getPresetMenu(null));
-      GuiUtils.addItemToMenu(popupMenu, manager.getLutShapeMenu(null));
       GuiUtils.addItemToMenu(popupMenu, manager.getLutMenu(null));
+      GuiUtils.addItemToMenu(popupMenu, manager.getLutShapeMenu(null));
       count = addSeparatorToPopupMenu(popupMenu, count);
 
       GuiUtils.addItemToMenu(popupMenu, manager.getViewTypeMenu(null));
-      GuiUtils.addItemToMenu(popupMenu, manager.getMipTypeMenu(null));
       GuiUtils.addItemToMenu(popupMenu, manager.getShadingMenu(null));
       GuiUtils.addItemToMenu(popupMenu, manager.getSProjectionMenu(null));
-      GuiUtils.addItemToMenu(popupMenu, manager.getSlicingMenu(null));
+      count = addSeparatorToPopupMenu(popupMenu, count);
+
+      GuiUtils.addItemToMenu(popupMenu, manager.getMprCutMenu(null));
       count = addSeparatorToPopupMenu(popupMenu, count);
 
       GuiUtils.addItemToMenu(popupMenu, manager.getZoomMenu(null));
       GuiUtils.addItemToMenu(popupMenu, manager.getOrientationMenu(null));
-      addSeparatorToPopupMenu(popupMenu, count);
+      count = addSeparatorToPopupMenu(popupMenu, count);
+
+      GuiUtils.addItemToMenu(popupMenu, buildSyncOptionsMenu());
+      count = addSeparatorToPopupMenu(popupMenu, count);
 
       GuiUtils.addItemToMenu(popupMenu, manager.getResetMenu(null));
     }
     return popupMenu;
+  }
+
+  /**
+   * Per-view sync options submenu shown in the right-click context menu. Reads/writes this view's
+   * own {@link SynchData} (attached by {@code EventManager.updateAllListeners}); the Apply-to-all
+   * entry then copies this view's actions map to every other view in the container.
+   */
+  private JMenu buildSyncOptionsMenu() {
+    ImageViewerPlugin<DicomImageElement> container = eventManager.getSelectedView2dContainer();
+    SynchData sd = (SynchData) actionsInView.get(ActionW.SYNCH_LINK.cmd());
+    if (container == null || sd == null) {
+      return null;
+    }
+    SynchOptionsCheckBoxGroup group = new SynchOptionsCheckBoxGroup(container.getSyncOptions());
+    JMenu menu = new JMenu(org.weasis.core.Messages.getString("ActionW.synch"));
+    group.addStayOpenItemsTo(menu, sd.getActions(), this::onSyncOptionToggled);
+    menu.addSeparator();
+    menu.add(buildApplyToAllItem(sd, container));
+    return menu;
   }
 
   @Override
@@ -906,8 +1890,18 @@ public class View3d extends VolumeCanvas
   private void propertyChange(final SynchEvent synch) {
     {
       SynchData synchData = (SynchData) actionsInView.get(ActionW.SYNCH_LINK.cmd());
-      if (synchData != null && Mode.NONE.equals(synchData.getMode())) {
-        return;
+      SynchData issuerSyncData =
+          synch.getView() != null
+              ? (SynchData) synch.getView().getActionsInView().get(ActionW.SYNCH_LINK.cmd())
+              : null;
+      boolean isSource = synch.getView() == this;
+      if (!isSource) {
+        if (synchData != null && !synchData.isSynchActivated()) {
+          return;
+        }
+        if (issuerSyncData != null && !issuerSyncData.isSynchActivated()) {
+          return;
+        }
       }
       // Progressive mode for VR
       boolean forceRepaint = camera.isAdjusting() != synch.isValueIsAdjusting();
@@ -916,14 +1910,15 @@ public class View3d extends VolumeCanvas
       for (Entry<String, Object> entry : synch.getEvents().entrySet()) {
         String command = entry.getKey();
         final Object val = entry.getValue();
-        if (synchData != null && !synchData.isActionEnable(command)) {
+        // The originator always applies its own action (otherwise unchecking e.g. W/L in the
+        // popup would also break the slider locally). For target views, both the issuer's and
+        // the receiver's sync option must be enabled for this action.
+        if (!isSource
+            && ((synchData != null && !synchData.isActionEnable(command))
+                || (issuerSyncData != null && !issuerSyncData.isActionEnable(command)))) {
           continue;
         }
-        if (command.equals(ActionVol.SCROLLING.cmd())) {
-          if (getViewType() != ViewType.VOLUME3D) { // If its not a volumetric view
-            //  setSlice((Integer) val);
-          }
-        } else if (command.equals(ActionW.WINDOW.cmd())) {
+        if (command.equals(ActionW.WINDOW.cmd())) {
           renderingLayer.setWindowWidth(((Double) val).intValue(), forceRepaint);
         } else if (command.equals(ActionW.LEVEL.cmd())) {
           renderingLayer.setWindowCenter(((Double) val).intValue(), forceRepaint);
@@ -939,6 +1934,14 @@ public class View3d extends VolumeCanvas
           }
         } else if (command.equals(ActionW.ROTATION.cmd()) && val instanceof Integer rotation) {
           setRotation(rotation);
+        } else if (command.equals(ActionW.ROTATION.cmd()) && val instanceof Quaterniond quat) {
+          // Arcball path: the source view already applied the rotation via Camera.rotate(), so
+          // re-applying here would only trigger a redundant repaint. Targets adopt the full 3D
+          // rotation that the integer slider angle cannot represent.
+          if (!isSource) {
+            camera.getRotation().set(quat);
+            camera.updateCameraTransform();
+          }
         } else if (command.equals(ActionW.RESET.cmd())) {
           reset();
         } else if (command.equals(ActionW.ZOOM.cmd())) {
@@ -985,24 +1988,9 @@ public class View3d extends VolumeCanvas
             if (type != oldType) {
               renderingLayer.setEnableRepaint(false);
               renderingLayer.setRenderingType(type);
-              setViewType(type.getViewType());
               renderingLayer.setEnableRepaint(true);
-              if (type == RenderingType.SLICE) {
-                setVolumePreset(Preset.getDefaultPreset(null));
-              } else if (oldType == RenderingType.SLICE) {
-                setVolumePreset(Preset.getDefaultPreset(volTexture.getModality()));
-              } else {
-                display();
-              }
+              display();
             }
-          }
-        } else if (command.equals(ActionVol.MIP_DEPTH.cmd())) {
-          if (val instanceof Integer thickness) {
-            renderingLayer.setMipThickness(thickness);
-          }
-        } else if (command.equals(ActionVol.MIP_TYPE.cmd())) {
-          if (val instanceof MipView.Type mipType) {
-            renderingLayer.setMipType(mipType);
           }
         } else if (command.equals(ActionVol.VOL_AXIS.cmd())) {
           if (val instanceof Axis axis) {
@@ -1016,11 +2004,30 @@ public class View3d extends VolumeCanvas
           if (val instanceof Double opacity) {
             renderingLayer.setOpacity(opacity, forceRepaint);
           }
-        } else if (command.equals(ActionVol.VOL_SLICING.cmd())) {
-          setActionsInView(ActionVol.VOL_SLICING.cmd(), val, true);
         } else if (command.equals(ActionVol.VOL_SHADING.cmd())) {
           if (val instanceof Boolean shading) {
             renderingLayer.setShading(shading);
+          }
+        } else if (command.equals(ActionVol.SEG_TYPE.cmd())) {
+          if (val instanceof Type type) {
+            setSegType(type);
+          }
+        } else if (command.equals(ActionVol.CROSSHAIR_CUT_MODE.cmd())) {
+          if (val instanceof CrosshairCutMode cutMode) {
+            mprCrossHairCutMode = cutMode;
+            if (cutMode == CrosshairCutMode.NONE) {
+              if (volTexture != null) {
+                volTexture.unregisterCrossHairRelay();
+              }
+              mprCrossHairPosition = null;
+              mprCrossHairRotation = null;
+            } else {
+              if (volTexture != null) {
+                volTexture.registerCrossHairRelay();
+              }
+              ensureMprIsOpen();
+            }
+            display();
           }
         } else if (command.equals(ActionVol.VOL_PROJECTION.cmd())) {
           if (val instanceof Boolean projection) {
@@ -1029,6 +2036,53 @@ public class View3d extends VolumeCanvas
         }
       }
     }
+  }
+
+  private void ensureMprIsOpen() {
+    DicomVolTexture tex = volTexture;
+    if (tex == null) {
+      return;
+    }
+    MediaSeries<DicomImageElement> series = tex.getSeries();
+    if (series == null) {
+      return;
+    }
+    if (!fireCrossHairIfMprOpen(tex)) {
+      // No MPR viewer found – open one.
+      MprFactory.getMprAction(series).actionPerformed(null);
+    }
+  }
+
+  private void syncMprPosition() {
+    DicomVolTexture tex = volTexture;
+    if (tex == null) {
+      return;
+    }
+    fireCrossHairIfMprOpen(tex);
+  }
+
+  private boolean fireCrossHairIfMprOpen(DicomVolTexture tex) {
+    Volume<?, ?> texVolume = tex.getVolume();
+    if (texVolume == null || texVolume.getStack() == null) {
+      return false;
+    }
+    OriginalStack texStack = texVolume.getStack();
+    boolean texIsBasic = texVolume.isBasic();
+    List<?> plugins = GuiUtils.getUICore().getViewerPlugins();
+    synchronized (plugins) {
+      for (Object plugin : plugins) {
+        if (plugin instanceof MprContainer mpr) {
+          Volume<?, ?> mprVolume = mpr.getMprController().getVolume();
+          if (mprVolume != null
+              && texStack.equals(mprVolume.getStack())
+              && texIsBasic == mprVolume.isBasic()) {
+            mpr.getMprController().fireCrossHairChanged();
+            return true;
+          }
+        }
+      }
+    }
+    return false;
   }
 
   private void setPresetWindowLevel(PresetWindowLevel preset, boolean repaint) {

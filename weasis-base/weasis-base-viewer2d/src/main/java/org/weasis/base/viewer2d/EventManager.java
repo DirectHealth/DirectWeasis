@@ -27,6 +27,7 @@ import org.osgi.framework.BundleContext;
 import org.osgi.service.prefs.Preferences;
 import org.weasis.core.api.gui.Insertable.Type;
 import org.weasis.core.api.gui.InsertableUtil;
+import org.weasis.core.api.gui.layout.MigLayoutModel;
 import org.weasis.core.api.gui.util.ActionState;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.AppProperties;
@@ -40,7 +41,6 @@ import org.weasis.core.api.gui.util.SliderCineListener;
 import org.weasis.core.api.gui.util.SliderCineListener.TIME;
 import org.weasis.core.api.gui.util.ToggleButtonListener;
 import org.weasis.core.api.image.FilterOp;
-import org.weasis.core.api.image.GridBagLayoutModel;
 import org.weasis.core.api.image.ImageOpNode;
 import org.weasis.core.api.image.OpManager;
 import org.weasis.core.api.image.PseudoColorOp;
@@ -105,11 +105,8 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
 
     setAction(newLutAction());
     setAction(newFilterAction());
-    setAction(
-        newLayoutAction(View2dContainer.DEFAULT_LAYOUT_LIST.toArray(new GridBagLayoutModel[0])));
-    setAction(newSynchAction(View2dContainer.DEFAULT_SYNCH_LIST.toArray(new SynchView[0])));
-    getAction(ActionW.SYNCH)
-        .ifPresent(a -> a.setSelectedItemWithoutTriggerAction(SynchView.DEFAULT_STACK));
+    setAction(newLayoutAction(View2dContainer.DEFAULT_LAYOUT_LIST.toArray(new MigLayoutModel[0])));
+    setAction(newSynchAction(SynchView.DEFAULT_STACK));
     setAction(newMeasurementAction(MeasureToolBar.getMeasureGraphicList().toArray(new Graphic[0])));
     setAction(newDrawAction(MeasureToolBar.getDrawGraphicList().toArray(new Graphic[0])));
     setAction(newSpatialUnit(Unit.values()));
@@ -151,7 +148,8 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
   }
 
   private ComboItemListener<KernelData> newFilterAction() {
-    return new ComboItemListener<>(ActionW.FILTER, KernelData.getAllFilters()) {
+    return new ComboItemListener<>(
+        ActionW.FILTER, KernelData.getAllFilters().toArray(new KernelData[0])) {
 
       @Override
       public void itemStateChanged(Object object) {
@@ -166,14 +164,14 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
   }
 
   private ComboItemListener<ByteLut> newLutAction() {
-    List<ByteLut> luts = new ArrayList<>();
-    luts.add(ColorLut.GRAY.getByteLut());
+    List<ByteLut> lutEntries = new ArrayList<>();
+    lutEntries.add(ColorLut.GRAY.getByteLut());
     ByteLutCollection.readLutFilesFromResourcesDir(
-        luts, ResourceUtil.getResource("luts")); // NON-NLS
+        lutEntries, ResourceUtil.getResource("luts").toPath()); // NON-NLS
     // Set default first as the list has been sorted
-    luts.add(0, ColorLut.IMAGE.getByteLut());
+    lutEntries.addFirst(ColorLut.IMAGE.getByteLut());
 
-    return new ComboItemListener<>(ActionW.LUT, luts.toArray(new ByteLut[0])) {
+    return new ComboItemListener<>(ActionW.LUT, lutEntries.toArray(new ByteLut[0])) {
       @Override
       public void itemStateChanged(Object object) {
         if (object instanceof ByteLut) {
@@ -233,20 +231,16 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
     this.selectedView2dContainer = selectedView2dContainer;
     if (selectedView2dContainer != null) {
       Optional<ComboItemListener<SynchView>> synchAction = getAction(ActionW.SYNCH);
-      Optional<ComboItemListener<GridBagLayoutModel>> layoutAction = getAction(ActionW.LAYOUT);
+      Optional<ComboItemListener<MigLayoutModel>> layoutAction = getAction(ActionW.LAYOUT);
       if (oldContainer == null
           || !oldContainer.getClass().equals(selectedView2dContainer.getClass())) {
-        synchAction.ifPresent(
-            a ->
-                a.setDataListWithoutTriggerAction(
-                    selectedView2dContainer.getSynchList().toArray(new SynchView[0])));
         layoutAction.ifPresent(
             a ->
                 a.setDataListWithoutTriggerAction(
-                    selectedView2dContainer.getLayoutList().toArray(new GridBagLayoutModel[0])));
+                    selectedView2dContainer.getLayoutList().toArray(new MigLayoutModel[0])));
       }
       if (oldContainer != null) {
-        ViewCanvas<ImageElement> pane = oldContainer.getSelectedImagePane();
+        ViewCanvas<ImageElement> pane = oldContainer.getSelectedViewCanvas();
         if (pane != null) {
           pane.setFocused(false);
         }
@@ -257,9 +251,9 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
           a ->
               a.setSelectedItemWithoutTriggerAction(
                   selectedView2dContainer.getOriginalLayoutModel()));
-      updateComponentsListener(selectedView2dContainer.getSelectedImagePane());
+      updateComponentsListener(selectedView2dContainer.getSelectedViewCanvas());
       selectedView2dContainer.setMouseActions(mouseActions);
-      ViewCanvas<ImageElement> pane = selectedView2dContainer.getSelectedImagePane();
+      ViewCanvas<ImageElement> pane = selectedView2dContainer.getSelectedViewCanvas();
       if (pane != null) {
         fireSeriesViewerListeners(
             new SeriesViewerEvent(
@@ -307,16 +301,15 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
       getAction(ActionW.ROTATION).ifPresent(a -> a.setSliderValue(0));
     } else if (ResetTools.WL.equals(action)) {
       if (selectedView2dContainer != null) {
-        ViewCanvas<ImageElement> defaultView2d = selectedView2dContainer.getSelectedImagePane();
+        ViewCanvas<ImageElement> defaultView2d = selectedView2dContainer.getSelectedViewCanvas();
         if (defaultView2d != null) {
           ImageElement img = defaultView2d.getImage();
           if (img != null) {
             boolean pixelPadding =
-                LangUtil.getNULLtoTrue(
-                    (Boolean)
-                        defaultView2d
-                            .getDisplayOpManager()
-                            .getParamValue(WindowOp.OP_NAME, ActionW.IMAGE_PIX_PADDING.cmd()));
+                defaultView2d
+                    .getDisplayOpManager()
+                    .getParamValue(WindowOp.OP_NAME, ActionW.IMAGE_PIX_PADDING.cmd(), Boolean.class)
+                    .orElse(Boolean.TRUE);
             DefaultWlPresentation wlp = new DefaultWlPresentation(null, pixelPadding);
             getAction(ActionW.WINDOW).ifPresent(a -> a.setRealValue(img.getDefaultWindow(wlp)));
             getAction(ActionW.LEVEL).ifPresent(a -> a.setRealValue(img.getDefaultLevel(wlp)));
@@ -325,7 +318,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
       }
     } else if (ResetTools.PAN.equals(action)) {
       if (selectedView2dContainer != null) {
-        ViewCanvas viewPane = selectedView2dContainer.getSelectedImagePane();
+        ViewCanvas viewPane = selectedView2dContainer.getSelectedViewCanvas();
         if (viewPane != null) {
           viewPane.resetPan();
         }
@@ -340,7 +333,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
     }
 
     if (selectedView2dContainer == null
-        || view2d != selectedView2dContainer.getSelectedImagePane()) {
+        || view2d != selectedView2dContainer.getSelectedViewCanvas()) {
       return false;
     }
 
@@ -361,13 +354,13 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
     MediaSeries<ImageElement> series = view2d.getSeries();
 
     OpManager dispOp = view2d.getDisplayOpManager();
-    ImageOpNode node = dispOp.getNode(WindowOp.OP_NAME);
-    if (node != null) {
+    Optional<ImageOpNode> node = dispOp.getNode(WindowOp.OP_NAME);
+    if (node.isPresent()) {
       Optional<SliderChangeListener> windowAction = getAction(ActionW.WINDOW);
       Optional<SliderChangeListener> levelAction = getAction(ActionW.LEVEL);
       if (windowAction.isPresent() && levelAction.isPresent()) {
-        Double windowValue = (Double) node.getParam(ActionW.WINDOW.cmd());
-        Double levelValue = (Double) node.getParam(ActionW.LEVEL.cmd());
+        Double windowValue = (Double) node.get().getParam(ActionW.WINDOW.cmd());
+        Double levelValue = (Double) node.get().getParam(ActionW.LEVEL.cmd());
 
         double window;
         double minLevel;
@@ -378,8 +371,8 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
         if (levelValue == null) {
           levelValue = levelAction.get().getRealValue();
         }
-        Double levelMin = (Double) node.getParam(ActionW.LEVEL_MIN.cmd());
-        Double levelMax = (Double) node.getParam(ActionW.LEVEL_MAX.cmd());
+        Double levelMin = (Double) node.get().getParam(ActionW.LEVEL_MIN.cmd());
+        Double levelMax = (Double) node.get().getParam(ActionW.LEVEL_MAX.cmd());
         if (levelMin == null || levelMax == null) {
           minLevel = levelValue - windowValue / 2.0;
           maxLevel = levelValue + windowValue / 2.0;
@@ -398,18 +391,24 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
         .ifPresent(
             a ->
                 a.setSelectedItemWithoutTriggerAction(
-                    dispOp.getParamValue(PseudoColorOp.OP_NAME, PseudoColorOp.P_LUT)));
+                    dispOp
+                        .getParamValue(PseudoColorOp.OP_NAME, PseudoColorOp.P_LUT)
+                        .orElse(ColorLut.IMAGE.getByteLut())));
     getAction(ActionW.INVERT_LUT)
         .ifPresent(
             a ->
                 a.setSelectedWithoutTriggerAction(
-                    (Boolean)
-                        dispOp.getParamValue(PseudoColorOp.OP_NAME, PseudoColorOp.P_LUT_INVERSE)));
+                    dispOp
+                        .getParamValue(
+                            PseudoColorOp.OP_NAME, PseudoColorOp.P_LUT_INVERSE, Boolean.class)
+                        .orElse(Boolean.FALSE)));
     getAction(ActionW.FILTER)
         .ifPresent(
             a ->
                 a.setSelectedItemWithoutTriggerAction(
-                    dispOp.getParamValue(FilterOp.OP_NAME, FilterOp.P_KERNEL_DATA)));
+                    dispOp
+                        .getParamValue(FilterOp.OP_NAME, FilterOp.P_KERNEL_DATA)
+                        .orElse(KernelData.NONE)));
     getAction(ActionW.ROTATION)
         .ifPresent(
             a -> a.setSliderValue((Integer) view2d.getActionValue(ActionW.ROTATION.cmd()), false));
@@ -417,7 +416,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
         .ifPresent(
             a ->
                 a.setSelectedWithoutTriggerAction(
-                    LangUtil.getNULLtoFalse((Boolean) view2d.getActionValue(ActionW.FLIP.cmd()))));
+                    LangUtil.nullToFalse((Boolean) view2d.getActionValue(ActionW.FLIP.cmd()))));
 
     getAction(ActionW.ZOOM)
         .ifPresent(
@@ -459,7 +458,7 @@ public class EventManager extends ImageViewerEventManager<ImageElement> implemen
     ComboItemListener<SynchView> synchAction = getAction(ActionW.SYNCH).orElse(null);
     updateAllListeners(
         selectedView2dContainer,
-        synchAction == null ? SynchView.NONE : (SynchView) synchAction.getSelectedItem());
+        synchAction == null ? SynchView.DEFAULT_STACK : (SynchView) synchAction.getSelectedItem());
 
     view2d.updateGraphicSelectionListener(selectedView2dContainer);
 

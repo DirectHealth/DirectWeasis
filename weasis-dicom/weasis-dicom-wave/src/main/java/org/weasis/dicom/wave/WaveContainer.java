@@ -33,10 +33,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.gui.InsertableUtil;
+import org.weasis.core.api.gui.layout.MigLayoutModel;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
-import org.weasis.core.api.image.GridBagLayoutModel;
 import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.media.data.MediaSeriesGroup;
 import org.weasis.core.api.media.data.Series;
@@ -50,7 +50,6 @@ import org.weasis.core.ui.editor.SeriesViewerUI;
 import org.weasis.core.ui.editor.image.DefaultView2d;
 import org.weasis.core.ui.editor.image.ImageViewerEventManager;
 import org.weasis.core.ui.editor.image.ImageViewerPlugin;
-import org.weasis.core.ui.editor.image.SynchView;
 import org.weasis.core.ui.editor.image.ViewCanvas;
 import org.weasis.core.ui.editor.image.dockable.MeasureTool;
 import org.weasis.core.ui.pref.LauncherToolBar;
@@ -61,28 +60,26 @@ import org.weasis.dicom.codec.DicomSeries;
 import org.weasis.dicom.codec.DicomSpecialElement;
 import org.weasis.dicom.codec.TagD;
 import org.weasis.dicom.codec.TagD.Level;
-import org.weasis.dicom.explorer.DicomExportAction;
-import org.weasis.dicom.explorer.DicomFieldsView;
 import org.weasis.dicom.explorer.DicomModel;
 import org.weasis.dicom.explorer.DicomViewerPlugin;
-import org.weasis.dicom.explorer.ExportToolBar;
-import org.weasis.dicom.explorer.ImportToolBar;
+import org.weasis.dicom.explorer.exp.DicomExportAction;
+import org.weasis.dicom.explorer.exp.ExportToolBar;
+import org.weasis.dicom.explorer.imp.ImportToolBar;
+import org.weasis.dicom.explorer.tag.DicomFieldsView;
 import org.weasis.dicom.wave.dockable.MeasureAnnotationTool;
 
 public class WaveContainer extends DicomViewerPlugin implements PropertyChangeListener {
   private static final Logger LOGGER = LoggerFactory.getLogger(WaveContainer.class);
 
-  public static final GridBagLayoutModel DEFAULT_VIEW =
-      new GridBagLayoutModel(
+  public static final MigLayoutModel DEFAULT_VIEW =
+      new MigLayoutModel(
           "1x1", // NON-NLS
           "1x1", // NON-NLS
           1,
           1,
           WaveView.class.getName()); // NON-NLS
 
-  public static final List<GridBagLayoutModel> LAYOUT_LIST = List.of(DEFAULT_VIEW);
-
-  public static final List<SynchView> SYNCH_LIST = List.of(SynchView.NONE);
+  public static final List<MigLayoutModel> LAYOUT_LIST = List.of(DEFAULT_VIEW);
 
   public static final SeriesViewerUI UI = new SeriesViewerUI(WaveContainer.class);
   static final ImageViewerEventManager<DicomImageElement> ECG_EVENT_MANAGER =
@@ -131,7 +128,7 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
     this(DEFAULT_VIEW, null);
   }
 
-  public WaveContainer(GridBagLayoutModel layoutModel, String uid) {
+  public WaveContainer(MigLayoutModel layoutModel, String uid) {
     super(
         ECG_EVENT_MANAGER,
         layoutModel,
@@ -139,7 +136,6 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
         WaveFactory.NAME,
         ResourceUtil.getIcon(FileIcon.ECG),
         null);
-    setSynchView(SynchView.NONE);
 
     if (!UI.init.getAndSet(true)) {
       List<Toolbar> toolBars = UI.toolBars;
@@ -305,7 +301,7 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
   }
 
   @Override
-  public int getViewTypeNumber(GridBagLayoutModel layout, Class<?> defaultClass) {
+  public int getViewTypeNumber(MigLayoutModel layout, Class<?> defaultClass) {
     return 0;
   }
 
@@ -351,7 +347,7 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
   }
 
   @Override
-  public GridBagLayoutModel getDefaultLayoutModel() {
+  public MigLayoutModel getDefaultLayoutModel() {
     return DEFAULT_VIEW;
   }
 
@@ -396,12 +392,7 @@ public class WaveContainer extends DicomViewerPlugin implements PropertyChangeLi
   }
 
   @Override
-  public List<SynchView> getSynchList() {
-    return SYNCH_LIST;
-  }
-
-  @Override
-  public List<GridBagLayoutModel> getLayoutList() {
+  public List<MigLayoutModel> getLayoutList() {
     return LAYOUT_LIST;
   }
 

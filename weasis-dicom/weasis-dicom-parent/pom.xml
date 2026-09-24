@@ -22,6 +22,11 @@
       <scope>provided</scope>
     </dependency>
     <dependency>
+      <groupId>jakarta.json</groupId>
+      <artifactId>jakarta.json-api</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
       <groupId>org.weasis.thirdparty</groupId>
       <artifactId>docking-frames</artifactId>
     </dependency>

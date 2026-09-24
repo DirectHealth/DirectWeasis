@@ -15,7 +15,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import org.dcm4che3.data.Tag;
-import org.dcm4che3.img.DicomImageReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.explorer.ObservableEvent;
@@ -32,6 +31,7 @@ import org.weasis.core.util.FileUtil;
 import org.weasis.core.util.MathUtil;
 import org.weasis.core.util.StringUtil;
 import org.weasis.dicom.codec.TagD.Level;
+import org.weasis.dicom.codec.seg.SegSpecialElement;
 import org.weasis.dicom.codec.utils.SeriesInstanceList;
 
 public class DicomSeries extends Series<DicomImageElement> {
@@ -160,7 +160,6 @@ public class DicomSeries extends Series<DicomImageElement> {
   public synchronized void dispose() {
     stopPreloading(this);
     String seriesUID = (String) getTagValue(getTagID());
-    DicomImageReader.removeSeriesToFloatImages(seriesUID);
     String modality = TagD.getTagValue(this, Tag.Modality, String.class);
     if (DicomMediaIO.isHiddenModality(modality)) {
       HiddenSeriesManager manager = HiddenSeriesManager.getInstance();
@@ -189,6 +188,11 @@ public class DicomSeries extends Series<DicomImageElement> {
                 });
 
         for (HiddenSpecialElement element : removed) {
+          if (element instanceof SegSpecialElement seg) {
+            // Frees the canonical and image-aligned rasters now and gives their share of the
+            // segmentation volume budget back, instead of waiting for the SEG to be collected.
+            seg.disposeSegmentationVolume();
+          }
           String sopUID = TagD.getTagValue(element, Tag.SOPInstanceUID, String.class);
           if (sopUID != null) {
             Set<String> referencingSeries = manager.sopRef2Series.get(sopUID);
@@ -218,9 +222,9 @@ public class DicomSeries extends Series<DicomImageElement> {
     synchronized (this) {
       double bestDiff = Double.MAX_VALUE;
       for (DicomImageElement dcm : mediaList) {
-        double[] val = (double[]) dcm.getTagValue(TagW.SlicePosition);
+        Double val = (Double) dcm.getTagValue(TagW.SlicePosition);
         if (val != null) {
-          double diff = Math.abs(location - (val[0] + val[1] + val[2]));
+          double diff = Math.abs(location - val);
           if (diff < bestDiff) {
             bestDiff = diff;
             nearest = dcm;
@@ -251,9 +255,9 @@ public class DicomSeries extends Series<DicomImageElement> {
     synchronized (this) {
       double bestDiff = Double.MAX_VALUE;
       for (DicomImageElement dcm : mediaList) {
-        double[] val = (double[]) dcm.getTagValue(TagW.SlicePosition);
+        Double val = (Double) dcm.getTagValue(TagW.SlicePosition);
         if (val != null) {
-          double diff = Math.abs(location - (val[0] + val[1] + val[2]));
+          double diff = Math.abs(location - val);
           if (diff < bestDiff) {
             bestDiff = diff;
             bestIndex = index;

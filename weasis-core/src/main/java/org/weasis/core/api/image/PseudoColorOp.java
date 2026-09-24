@@ -14,25 +14,21 @@ import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.image.op.ByteLutCollection;
 import org.weasis.core.util.LangUtil;
 import org.weasis.opencv.data.PlanarImage;
-import org.weasis.opencv.op.ImageProcessor;
+import org.weasis.opencv.op.ImageTransformer;
 import org.weasis.opencv.op.lut.ByteLut;
 
-public class PseudoColorOp extends AbstractOp {
+/**
+ * Operation that applies pseudo-coloring to grayscale images using lookup tables (LUTs). Supports
+ * optional LUT inversion for negative color mapping.
+ */
+public final class PseudoColorOp extends AbstractOp {
 
   public static final String OP_NAME = Messages.getString("PseudoColorOperation.title");
 
-  /**
-   * Set the lookup table (Required parameter).
-   *
-   * <p>org.weasis.core.api.image.op.ByteLut value.
-   */
+  /** Parameter name for the LUT used in pseudo-coloring. (ByteLut, Required) */
   public static final String P_LUT = ActionW.LUT.cmd();
 
-  /**
-   * Whether the LUT must be inverted (Optional parameter).
-   *
-   * <p>Boolean value. Default value is false.
-   */
+  /** Parameter name for inverting the LUT in pseudo-coloring. (Boolean, Optional) */
   public static final String P_LUT_INVERSE = ActionW.INVERT_LUT.cmd();
 
   public PseudoColorOp() {
@@ -50,26 +46,26 @@ public class PseudoColorOp extends AbstractOp {
 
   @Override
   public void process() throws Exception {
-    PlanarImage source = (PlanarImage) params.get(Param.INPUT_IMG);
-    PlanarImage result = source;
+    PlanarImage source = getSourceImage();
     ByteLut lutTable = (ByteLut) params.get(P_LUT);
+    boolean invertLut = LangUtil.nullToFalse((Boolean) params.get(P_LUT_INVERSE));
 
-    if (lutTable != null) {
-      boolean invert = LangUtil.getNULLtoFalse((Boolean) params.get(P_LUT_INVERSE));
-      byte[][] lut = lutTable.lutTable();
-      if (lut == null) {
-        if (invert) {
-          result = ImageProcessor.invertLUT(source.toImageCV());
-        }
-      } else {
-        if (invert) {
-          lut = ByteLutCollection.invert(lut);
-        }
-        result = ImageProcessor.applyLUT(source.toMat(), lut);
-        // result = new LookupTableCV(lut).lookup(source);
-      }
+    PlanarImage result = applyPseudoColor(source, lutTable, invertLut);
+    params.put(Param.OUTPUT_IMG, result);
+  }
+
+  private PlanarImage applyPseudoColor(PlanarImage source, ByteLut lutTable, boolean invertLut) {
+
+    if (lutTable == null) {
+      return source;
     }
 
-    params.put(Param.OUTPUT_IMG, result);
+    byte[][] lut = lutTable.lutTable();
+    if (lut == null) {
+      return invertLut ? ImageTransformer.invertLUT(source.toImageCV()) : source;
+    }
+
+    byte[][] finalLut = invertLut ? ByteLutCollection.invert(lut) : lut;
+    return ImageTransformer.applyLUT(source.toMat(), finalLut);
   }
 }

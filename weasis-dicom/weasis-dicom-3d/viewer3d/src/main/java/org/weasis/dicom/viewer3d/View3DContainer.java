@@ -9,15 +9,12 @@
  */
 package org.weasis.dicom.viewer3d;
 
-import com.jogamp.opengl.GL4;
+import com.jogamp.opengl.GL2ES2;
 import java.awt.Component;
-import java.awt.GridBagConstraints;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -36,13 +33,13 @@ import org.weasis.core.api.explorer.DataExplorerView;
 import org.weasis.core.api.explorer.ObservableEvent;
 import org.weasis.core.api.gui.Insertable.Type;
 import org.weasis.core.api.gui.InsertableUtil;
+import org.weasis.core.api.gui.layout.MigCell;
+import org.weasis.core.api.gui.layout.MigLayoutModel;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiExecutor;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.gui.util.SliderChangeListener;
-import org.weasis.core.api.image.GridBagLayoutModel;
-import org.weasis.core.api.image.LayoutConstraints;
 import org.weasis.core.api.media.data.MediaSeries;
 import org.weasis.core.api.media.data.MediaSeriesGroup;
 import org.weasis.core.api.service.BundlePreferences;
@@ -55,172 +52,141 @@ import org.weasis.core.ui.editor.SeriesViewerListener;
 import org.weasis.core.ui.editor.SeriesViewerUI;
 import org.weasis.core.ui.editor.image.RotationToolBar;
 import org.weasis.core.ui.editor.image.SynchData;
+import org.weasis.core.ui.editor.image.SynchOptionsCheckBoxGroup.SyncOption;
 import org.weasis.core.ui.editor.image.SynchView;
 import org.weasis.core.ui.editor.image.ViewCanvas;
 import org.weasis.core.ui.editor.image.ViewerToolBar;
 import org.weasis.core.ui.editor.image.ZoomToolBar;
-import org.weasis.core.ui.editor.image.dockable.MeasureTool;
 import org.weasis.core.ui.editor.image.dockable.MiniTool;
 import org.weasis.core.ui.model.graphic.imp.seg.SegRegion;
 import org.weasis.core.ui.util.Toolbar;
 import org.weasis.core.ui.util.WtoolBar;
 import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.codec.TagD;
-import org.weasis.dicom.explorer.DicomExplorer;
 import org.weasis.dicom.explorer.DicomViewerPlugin;
+import org.weasis.dicom.explorer.main.DicomExplorer;
 import org.weasis.dicom.viewer2d.LutToolBar;
 import org.weasis.dicom.viewer2d.View2dContainer;
-import org.weasis.dicom.viewer2d.mpr.MprContainer;
+import org.weasis.dicom.viewer2d.mpr.OriginalStack;
+import org.weasis.dicom.viewer2d.mpr.Volume;
+import org.weasis.dicom.viewer2d.mpr.VolumeProvider;
 import org.weasis.dicom.viewer3d.dockable.DisplayTool;
-import org.weasis.dicom.viewer3d.dockable.SegmentationTool;
 import org.weasis.dicom.viewer3d.dockable.VolumeTool;
 import org.weasis.dicom.viewer3d.vr.DicomVolTexture;
 import org.weasis.dicom.viewer3d.vr.DicomVolTextureFactory;
 import org.weasis.dicom.viewer3d.vr.OpenglUtils;
 import org.weasis.dicom.viewer3d.vr.View3d;
-import org.weasis.dicom.viewer3d.vr.View3d.ViewType;
 import org.weasis.dicom.viewer3d.vr.VolumeBuilder;
 
-public class View3DContainer extends DicomViewerPlugin implements PropertyChangeListener {
+public class View3DContainer extends DicomViewerPlugin
+    implements PropertyChangeListener, VolumeProvider {
   private static final Logger LOGGER = LoggerFactory.getLogger(View3DContainer.class);
 
-  static SynchView defaultMpr;
+  public static final MigLayoutModel VIEWS_vr =
+      new MigLayoutModel(
+          "vr", Messages.getString("volume.rendering"), 1, 1, View3d.class.getName()); // NON-NLS
+
+  public static final MigLayoutModel VIEWS_vr_1x2 =
+      new MigLayoutModel(
+          "vr_1x2", VIEWS_vr.getUIName() + " (1x2)", 1, 2, View3d.class.getName()); // NON-NLS
+
+  public static final MigLayoutModel VIEWS_vr_2x1 =
+      new MigLayoutModel(
+          "vr_2x1", VIEWS_vr.getUIName() + " (2x1)", 2, 1, View3d.class.getName()); // NON-NLS
+
+  public static final MigLayoutModel VIEWS_vr_1x3 =
+      new MigLayoutModel(
+          "vr_1x3", VIEWS_vr.getUIName() + " (1x3)", 1, 3, View3d.class.getName()); // NON-NLS
+
+  public static final MigLayoutModel VIEWS_vr_2x2 =
+      new MigLayoutModel(
+          "vr_2x2", VIEWS_vr.getUIName() + " (2x2)", 2, 2, View3d.class.getName()); // NON-NLS
+
+  public static final List<MigLayoutModel> LAYOUT_LIST =
+      Stream.of(VIEWS_vr, VIEWS_vr_1x2, VIEWS_vr_2x1, VIEWS_vr_1x3, VIEWS_vr_2x2).toList();
+
+  /**
+   * Single 3D synchronization profile. Stack/Tile (2D-only concepts) are intentionally not exposed.
+   * The action map seeds the per-view sync popup: defaults to PAN, ZOOM, and both rotation forms
+   * enabled (slider rotation via {@link ActionW#ROTATION} and axis selection via {@link
+   * ActionVol#VOL_AXIS}). Every other 3D-relevant action is listed too but starts unchecked, so the
+   * user can opt into syncing W/L, Preset, Opacity, Shading, Rendering Type, etc. via the popup.
+   * Mode is {@code STACK} (TILE is a 2D series-tiling concept).
+   */
+  public static final SynchView SYNCH_VOLUME;
 
   static {
-    HashMap<String, Boolean> actions = new HashMap<>();
-    actions.put(ActionW.RESET.cmd(), true);
+    Map<String, Boolean> actions = new HashMap<>();
+    // Camera-level — on by default ("share the same volume framing").
     actions.put(ActionW.ZOOM.cmd(), true);
-    actions.put(ActionW.WINDOW.cmd(), true);
-    actions.put(ActionW.LEVEL.cmd(), true);
-    actions.put(ActionW.PRESET.cmd(), true);
-    actions.put(ActionW.LUT_SHAPE.cmd(), true);
-    actions.put(ActionVol.VOL_PRESET.cmd(), true);
-    actions.put(ActionW.INVERT_LUT.cmd(), true);
-    actions.put(ActionW.FILTER.cmd(), true);
-    actions.put(ActionVol.MIP_TYPE.cmd(), true);
-    actions.put(ActionVol.MIP_DEPTH.cmd(), true);
-    defaultMpr =
+    actions.put(ActionW.PAN.cmd(), true);
+    actions.put(ActionW.ROTATION.cmd(), true);
+    actions.put(ActionVol.VOL_AXIS.cmd(), true);
+    // Photometric — opt-in.
+    actions.put(ActionW.WINDOW.cmd(), false);
+    actions.put(ActionW.LEVEL.cmd(), false);
+    actions.put(ActionW.PRESET.cmd(), false);
+    actions.put(ActionW.LUT_SHAPE.cmd(), false);
+    actions.put(ActionW.INVERT_LUT.cmd(), false);
+    actions.put(ActionVol.VOL_PRESET.cmd(), false);
+    // Volume rendering — opt-in.
+    actions.put(ActionVol.RENDERING_TYPE.cmd(), false);
+    actions.put(ActionVol.VOL_OPACITY.cmd(), false);
+    actions.put(ActionVol.VOL_SHADING.cmd(), false);
+    actions.put(ActionVol.VOL_PROJECTION.cmd(), false);
+    actions.put(ActionVol.CROSSHAIR_CUT_MODE.cmd(), false);
+    actions.put(ActionVol.SEG_TYPE.cmd(), false);
+    SYNCH_VOLUME =
         new SynchView(
-            org.weasis.dicom.viewer2d.Messages.getString("mpr.synchronisation"),
-            "mpr", // NON-NLS
+            "Volume Synchronization", // NON-NLS
+            "volume", // NON-NLS
             SynchData.Mode.STACK,
-            ActionIcon.TILE,
+            true,
+            ActionIcon.SYNCH,
             actions);
   }
 
-  public static final List<SynchView> SYNCH_LIST = List.of(SynchView.NONE, defaultMpr);
-
-  public static final GridBagLayoutModel VIEWS_vr =
-      new GridBagLayoutModel(
-          "vr", Messages.getString("volume.rendering"), 1, 1, View3d.class.getName()); // NON-NLS
-
-  public static final GridBagLayoutModel VIEWS_vr_1x2 =
-      new GridBagLayoutModel(
-          "vr_1x2", VIEWS_vr.getUIName() + " (1x2)", 1, 2, View3d.class.getName()); // NON-NLS
-  public static final GridBagLayoutModel VIEWS_2x2_mpr =
-      new GridBagLayoutModel(
-          new LinkedHashMap<>(4),
-          "mpr4", // NON-NLS
-          Messages.getString("mpr.volume.rendering"));
-
-  static {
-    Map<LayoutConstraints, Component> constraints = VIEWS_2x2_mpr.getConstraints();
-    constraints.put(
-        new LayoutConstraints(
-            View3d.class.getName(),
-            0,
-            0,
-            0,
-            1,
-            1,
-            0.5,
-            0.5,
-            GridBagConstraints.CENTER,
-            GridBagConstraints.BOTH),
-        null);
-    constraints.put(
-        new LayoutConstraints(
-            View3d.class.getName(),
-            1,
-            1,
-            0,
-            1,
-            1,
-            0.5,
-            0.5,
-            GridBagConstraints.CENTER,
-            GridBagConstraints.BOTH),
-        null);
-    constraints.put(
-        new LayoutConstraints(
-            View3d.class.getName(),
-            2,
-            0,
-            1,
-            1,
-            1,
-            0.5,
-            0.5,
-            GridBagConstraints.CENTER,
-            GridBagConstraints.BOTH),
-        null);
-    constraints.put(
-        new LayoutConstraints(
-            View3d.class.getName(),
-            3,
-            1,
-            1,
-            1,
-            1,
-            0.5,
-            0.5,
-            GridBagConstraints.CENTER,
-            GridBagConstraints.BOTH),
-        null);
-  }
-
-  //  public static final List<GridBagLayoutModel> LAYOUT_LIST =
-  //      Stream.concat(MprContainer.LAYOUT_LIST.stream(), Stream.of(VIEWS_2x2_mpr,
-  // VIEWS_vr)).toList();
-  public static final List<GridBagLayoutModel> LAYOUT_LIST =
-      Stream.of(VIEWS_vr, VIEWS_vr_1x2).toList();
+  /**
+   * 3D popup entries. Pan / Zoom / Rotation are on by default (per {@link #SYNCH_VOLUME}); the rest
+   * are listed so the user can opt into syncing them but start unchecked.
+   */
+  private static final List<SyncOption> SYNC_OPTIONS_3D =
+      List.of(
+          new SyncOption(ActionW.PAN),
+          new SyncOption(ActionW.ZOOM),
+          new SyncOption(
+              ActionW.ROTATION, List.of(ActionW.ROTATION.cmd(), ActionVol.VOL_AXIS.cmd())),
+          new SyncOption(ActionW.WINLEVEL, List.of(ActionW.WINDOW.cmd(), ActionW.LEVEL.cmd())),
+          new SyncOption(ActionW.PRESET),
+          new SyncOption(ActionW.LUT_SHAPE),
+          new SyncOption(ActionW.INVERT_LUT),
+          new SyncOption(ActionVol.VOL_PRESET),
+          new SyncOption(ActionVol.RENDERING_TYPE),
+          new SyncOption(ActionVol.VOL_OPACITY),
+          new SyncOption(ActionVol.VOL_SHADING),
+          new SyncOption(ActionVol.VOL_PROJECTION),
+          new SyncOption(ActionVol.CROSSHAIR_CUT_MODE),
+          new SyncOption(ActionVol.SEG_TYPE));
 
   public static final SeriesViewerUI UI = new SeriesViewerUI(View3DContainer.class);
 
   // protected ControlAxes controlAxes;
   protected final DicomVolTextureFactory factory;
   protected VolumeBuilder volumeBuilder;
-  protected SegmentationTool.Type segType;
+
+  private final Object volumeBuilderLock = new Object();
 
   protected final Map<String, List<SegRegion<?>>> regionMap = new HashMap<>();
 
   public View3DContainer() {
-    this(
-        MprContainer.view1,
-        null,
-        View3DFactory.NAME,
-        ResourceUtil.getIcon(ActionIcon.VOLUME),
-        null);
+    this(VIEWS_vr, null, View3DFactory.NAME, ResourceUtil.getIcon(ActionIcon.VOLUME), null);
   }
 
   public View3DContainer(
-      GridBagLayoutModel layoutModel, String uid, String pluginName, Icon icon, String tooltips) {
+      MigLayoutModel layoutModel, String uid, String pluginName, Icon icon, String tooltips) {
     super(EventManager.getInstance(), layoutModel, uid, pluginName, icon, tooltips);
-    setSynchView(SynchView.NONE);
     this.factory = new DicomVolTextureFactory();
-    this.segType = SegmentationTool.Type.NONE;
     initTools();
-
-    //    final ViewerToolBar toolBar = getViewerToolBar();
-    //    if (toolBar != null) {
-    //      String command = ActionW.CROSSHAIR.cmd();
-    //      MouseActions mouseActions = eventManager.getMouseActions();
-    //      String lastAction = mouseActions.getAction(MouseActions.T_LEFT);
-    //      if (!command.equals(lastAction)) {
-    //        mouseActions.setAction(MouseActions.T_LEFT, command);
-    //        toolBar.changeButtonState(MouseActions.T_LEFT, command);
-    //      }
-    //    }
     factory.addPropertyChangeListener(this);
   }
 
@@ -230,8 +196,7 @@ public class View3DContainer extends DicomViewerPlugin implements PropertyChange
   }
 
   private void initTools() {
-    setSynchView(defaultMpr);
-
+    setSynchView(SYNCH_VOLUME);
     if (!UI.init.getAndSet(true)) {
       List<Toolbar> toolBars = UI.toolBars;
 
@@ -351,16 +316,16 @@ public class View3DContainer extends DicomViewerPlugin implements PropertyChange
         eventManager.addSeriesViewerListener((SeriesViewerListener) tool);
       }
 
-      if (InsertableUtil.getBooleanProperty(
-          preferences,
-          bundleName,
-          componentName,
-          InsertableUtil.getCName(MeasureTool.class),
-          key,
-          true)) {
-        tool = new MeasureTool(eventManager);
-        tools.add(tool);
-      }
+      //      if (InsertableUtil.getBooleanProperty(
+      //          preferences,
+      //          bundleName,
+      //          componentName,
+      //          InsertableUtil.getCName(MeasureTool.class),
+      //          key,
+      //          true)) {
+      //        tool = new MeasureTool(eventManager);
+      //        tools.add(tool);
+      //      }
 
       InsertableUtil.sortInsertable(tools);
 
@@ -388,17 +353,20 @@ public class View3DContainer extends DicomViewerPlugin implements PropertyChange
         MediaSeries<DicomImageElement> oldSequence = null;
         if (volumeBuilder != null) {
           oldSequence = volumeBuilder.getVolTexture().getSeries();
-          GL4 gl4 = OpenglUtils.getGL4();
+          GL2ES2 gl4 = OpenglUtils.getGL();
           if (gl4 != null && !series.equals(oldSequence)) {
             volumeBuilder.getVolTexture().destroy(gl4);
           }
         }
+
         if (!series.equals(oldSequence)) {
           GuiUtils.getUICore().closeSeries(oldSequence);
-          synchronized (this) {
-            this.volumeBuilder = new VolumeBuilder(factory.createImageSeries(series));
-            for (ViewCanvas<DicomImageElement> view : view2ds) {
+          synchronized (volumeBuilderLock) {
+            for (ViewCanvas<DicomImageElement> view : cellManager) {
               if (view instanceof View3d v) {
+                if (volumeBuilder == null) {
+                  this.volumeBuilder = new VolumeBuilder(factory.createImageSeries(series, v));
+                }
                 v.setVolTexture(volumeBuilder.getVolTexture());
               }
             }
@@ -427,7 +395,10 @@ public class View3DContainer extends DicomViewerPlugin implements PropertyChange
   public void reload() {
     if (volumeBuilder != null) {
       MediaSeries<DicomImageElement> oldSequence = volumeBuilder.getVolTexture().getSeries();
-      volumeBuilder.getVolTexture().destroy(OpenglUtils.getGL4());
+      GL2ES2 gl = OpenglUtils.getGL();
+      if (gl != null) {
+        volumeBuilder.getVolTexture().destroy(gl);
+      }
       // Force to rebuild
       this.volumeBuilder = null;
       addSeries(oldSequence);
@@ -449,36 +420,50 @@ public class View3DContainer extends DicomViewerPlugin implements PropertyChange
     return null;
   }
 
+  /**
+   * Returns the {@link Volume} held by this container's {@link DicomVolTexture} when its {@link
+   * OriginalStack} matches the given one, enabling volume sharing between Volume Rendering and MPR
+   * views for the same DICOM series.
+   *
+   * @param originalStack the stack to match; must not be {@code null}
+   * @return the matching volume, or {@code null} if this container has no matching volume
+   */
   @Override
-  protected synchronized void setLayoutModel(GridBagLayoutModel layoutModel) {
+  public Volume<?, ?> getVolumeForStack(OriginalStack originalStack) {
+    DicomVolTexture volTexture = getVolTexture();
+    if (volTexture != null) {
+      Volume<?, ?> volume = volTexture.getVolume();
+      if (volume != null && volume.getStack().equals(originalStack)) {
+        return volume;
+      }
+    }
+    return null;
+  }
+
+  @Override
+  protected synchronized void setLayoutModel(MigLayoutModel layoutModel) {
     super.setLayoutModel(layoutModel);
 
     DicomVolTexture curVolTexture = getVolTexture();
-    final Map<LayoutConstraints, Component> elements = getLayoutModel().getConstraints();
-    Iterator<Component> enumVal = elements.values().iterator();
-    int position = 0;
-    while (enumVal.hasNext()) {
-      Component next = enumVal.next();
-      if (next instanceof View3d vt) {
-        ViewType viewType;
-        if (layoutModel.getConstraints().size() < 3) {
-          viewType = ViewType.VOLUME3D;
-        } else {
-          viewType =
-              switch (position) {
-                case 0 -> ViewType.AXIAL;
-                case 1 -> ViewType.CORONAL;
-                case 2 -> ViewType.SAGITTAL;
-                default -> ViewType.VOLUME3D;
-              };
-        }
-        vt.setViewType(viewType);
-        position++;
+    final List<MigCell> cells = getLayoutModel().getCells();
+    for (MigCell cell : cells) {
+      // Get the component directly from cellManager using the cell's position
+      Component component = cellManager.getComponent(cell.position());
+      if (component instanceof View3d vt) {
         vt.setVolTexture(curVolTexture);
       }
     }
-    eventManager.updateComponentsListener(selectedImagePane);
-    repaint();
+
+    // super.setLayoutModel disposes existing views (View3d.getImage() always returns null, so
+    // none survive ImageViewerPlugin.preserveViewsWithImages) and creates fresh View3d instances
+    // with a null volTexture. The updateComponentsListener call inside super therefore hit the
+    // early-return in EventManager.updateAllListeners and never registered any SYNCH listener.
+    // Now that textures are attached, re-run it so toolbar/slider/mouse actions can deliver
+    // their SynchEvents to the views.
+    var viewCanvas = getSelectedViewCanvas();
+    if (curVolTexture != null && viewCanvas != null) {
+      eventManager.updateComponentsListener(viewCanvas);
+    }
   }
 
   protected void removeContent(final ObservableEvent event) {
@@ -493,15 +478,14 @@ public class View3DContainer extends DicomViewerPlugin implements PropertyChange
     if (menuRoot != null) {
       menuRoot.removeAll();
       if (eventManager instanceof EventManager manager) {
-        GuiUtils.addItemToMenu(menuRoot, manager.getPresetMenu(null));
-        GuiUtils.addItemToMenu(menuRoot, manager.getLutShapeMenu(null));
         GuiUtils.addItemToMenu(menuRoot, manager.getLutMenu(null));
+        GuiUtils.addItemToMenu(menuRoot, manager.getLutShapeMenu(null));
         menuRoot.add(new JSeparator());
         GuiUtils.addItemToMenu(menuRoot, manager.getViewTypeMenu(null));
-        GuiUtils.addItemToMenu(menuRoot, manager.getMipTypeMenu(null));
         GuiUtils.addItemToMenu(menuRoot, manager.getShadingMenu(null));
         GuiUtils.addItemToMenu(menuRoot, manager.getSProjectionMenu(null));
-        GuiUtils.addItemToMenu(menuRoot, manager.getSlicingMenu(null));
+        menuRoot.add(new JSeparator());
+        GuiUtils.addItemToMenu(menuRoot, manager.getMprCutMenu(null));
         menuRoot.add(new JSeparator());
         GuiUtils.addItemToMenu(menuRoot, manager.getZoomMenu(null));
         GuiUtils.addItemToMenu(menuRoot, manager.getOrientationMenu(null));
@@ -519,7 +503,7 @@ public class View3DContainer extends DicomViewerPlugin implements PropertyChange
 
     GuiExecutor.execute(
         () -> {
-          for (ViewCanvas v : view2ds) {
+          for (var v : cellManager) {
             resetMaximizedSelectedImagePane(v);
             v.disposeView();
           }
@@ -532,7 +516,7 @@ public class View3DContainer extends DicomViewerPlugin implements PropertyChange
     boolean fullyLoaded = DicomVolTextureFactory.FULLY_LOADED.equals(command);
     if (fullyLoaded || DicomVolTextureFactory.PARTIALLY_LOADED.equals(command)) {
       if (event.getNewValue() instanceof DicomVolTexture texture) {
-        for (ViewCanvas<DicomImageElement> view : view2ds) {
+        for (var view : cellManager) {
           if (view instanceof View3d v) {
             if (fullyLoaded) {
               v.getCamera().resetAll();
@@ -598,7 +582,7 @@ public class View3DContainer extends DicomViewerPlugin implements PropertyChange
   }
 
   @Override
-  public int getViewTypeNumber(GridBagLayoutModel layout, Class defaultClass) {
+  public int getViewTypeNumber(MigLayoutModel layout, Class defaultClass) {
     return View3DFactory.getViewTypeNumber(layout, defaultClass);
   }
 
@@ -639,7 +623,13 @@ public class View3DContainer extends DicomViewerPlugin implements PropertyChange
   }
 
   @Override
-  public GridBagLayoutModel getDefaultLayoutModel() {
+  public boolean supportsViewportPanes() {
+    // 3D views own their volume rendering and must never be tiled
+    return false;
+  }
+
+  @Override
+  public MigLayoutModel getDefaultLayoutModel() {
     return VIEWS_vr;
   }
 
@@ -659,21 +649,18 @@ public class View3DContainer extends DicomViewerPlugin implements PropertyChange
   }
 
   @Override
-  public List<SynchView> getSynchList() {
-    return SYNCH_LIST;
+  public List<SyncOption> getSyncOptions() {
+    return SYNC_OPTIONS_3D;
   }
 
   @Override
-  public List<GridBagLayoutModel> getLayoutList() {
+  public boolean isAutoSyncContainerScoped() {
+    return true;
+  }
+
+  @Override
+  public List<MigLayoutModel> getLayoutList() {
     return LAYOUT_LIST;
-  }
-
-  public void setSegmentationType(SegmentationTool.Type type) {
-    this.segType = type;
-  }
-
-  public SegmentationTool.Type getSegmentationType() {
-    return segType;
   }
 
   public Map<String, List<SegRegion<?>>> getRegionMap() {

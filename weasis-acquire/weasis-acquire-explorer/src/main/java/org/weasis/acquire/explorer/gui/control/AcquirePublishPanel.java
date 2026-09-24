@@ -11,6 +11,7 @@ package org.weasis.acquire.explorer.gui.control;
 
 import java.beans.PropertyChangeEvent;
 import java.io.File;
+import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -32,11 +33,11 @@ import org.weasis.acquire.explorer.AcquireMediaInfo;
 import org.weasis.acquire.explorer.Messages;
 import org.weasis.acquire.explorer.PublishDicomTask;
 import org.weasis.acquire.explorer.gui.dialog.AcquirePublishDialog;
-import org.weasis.core.api.auth.AuthMethod;
-import org.weasis.core.api.auth.OAuth2ServiceFactory;
 import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.gui.util.WinUtil;
+import org.weasis.core.api.net.auth.AuthMethod;
+import org.weasis.core.api.net.auth.OAuth2ServiceFactory;
 import org.weasis.core.api.util.ThreadUtil;
 import org.weasis.core.ui.tp.raven.spinner.SpinnerProgress;
 import org.weasis.core.util.FileUtil;
@@ -84,7 +85,7 @@ public class AcquirePublishPanel extends JPanel {
       AbstractDicomNode destinationNode,
       String callingAet,
       List<AcquireMediaInfo> toPublish) {
-    SwingWorker<DicomState, File> publishDicomTask = null;
+    SwingWorker<DicomState, Path> publishDicomTask = null;
     if (destinationNode instanceof DefaultDicomNode defaultDicomNode) {
       publishDicomTask =
           publishDicomDimse(exportDirDicom, defaultDicomNode.getDicomNode(), callingAet);
@@ -115,7 +116,7 @@ public class AcquirePublishPanel extends JPanel {
             return CStore.process(
                 params, callingNode, destNode, exportFilesDicomPath, dicomProgress);
           } finally {
-            FileUtil.recursiveDelete(exportDirDicom);
+            FileUtil.recursiveDelete(exportDirDicom.toPath());
           }
         };
     return new PublishDicomTask(publish, dicomProgress);
@@ -124,7 +125,7 @@ public class AcquirePublishPanel extends JPanel {
   public PublishDicomTask publishStow(
       File tempDirDicom, DicomWebNode node, List<AcquireMediaInfo> toPublish) {
     AuthMethod auth = AuthenticationPersistence.getAuthMethod(node.getAuthMethodUid());
-    if (!OAuth2ServiceFactory.noAuth.equals(auth)) {
+    if (!OAuth2ServiceFactory.NO_AUTH.equals(auth)) {
       String oldCode = auth.getCode();
       authMethod = auth;
       if (authMethod.getToken() == null) {
@@ -155,7 +156,7 @@ public class AcquirePublishPanel extends JPanel {
             LOGGER.error("STOW-RS publish", e);
             return DicomState.buildMessage(null, e.getMessage(), null);
           } finally {
-            FileUtil.recursiveDelete(tempDirDicom);
+            FileUtil.recursiveDelete(tempDirDicom.toPath());
           }
         };
     return new PublishDicomTask(publish, new DicomProgress());
@@ -204,7 +205,7 @@ public class AcquirePublishPanel extends JPanel {
     } catch (Exception e) {
       LOGGER.error("Export DICOM fils to local", e);
     } finally {
-      FileUtil.recursiveDelete(tempDirDicom);
+      FileUtil.recursiveDelete(tempDirDicom.toPath());
     }
   }
 }

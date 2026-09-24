@@ -9,7 +9,6 @@
  */
 package org.weasis.dicom.qr;
 
-import java.io.File;
 import java.util.Hashtable;
 import org.osgi.service.component.ComponentContext;
 import org.osgi.service.component.annotations.Activate;
@@ -18,9 +17,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.gui.util.GuiUtils;
 import org.weasis.core.api.service.BundlePreferences;
-import org.weasis.core.util.FileUtil;
-import org.weasis.dicom.explorer.DicomImportFactory;
-import org.weasis.dicom.explorer.ImportDicom;
+import org.weasis.core.util.PropertiesUtil;
+import org.weasis.dicom.explorer.imp.DicomImportFactory;
+import org.weasis.dicom.explorer.imp.ImportDicom;
 
 @org.osgi.service.component.annotations.Component(service = DicomImportFactory.class)
 public class DicomQrFactory implements DicomImportFactory {
@@ -42,18 +41,18 @@ public class DicomQrFactory implements DicomImportFactory {
   // ================================================================================
 
   @Activate
-  protected void activate(ComponentContext context) throws Exception {
+  protected void activate(ComponentContext context) {
     LOGGER.info("DICOM Q/R is activated");
-    FileUtil.readProperties(
-        new File(BundlePreferences.getDataFolder(context.getBundleContext()), "import.properties"),
+    PropertiesUtil.loadProperties(
+        BundlePreferences.getFileInDataFolder(context.getBundleContext(), "import.properties"),
         DicomQrView.getPersistence());
   }
 
   @Deactivate
   protected void deactivate(ComponentContext context) {
     LOGGER.info("DICOM Q/R is deactivated");
-    FileUtil.storeProperties(
-        new File(BundlePreferences.getDataFolder(context.getBundleContext()), "import.properties"),
+    PropertiesUtil.storeProperties(
+        BundlePreferences.getFileInDataFolder(context.getBundleContext(), "import.properties"),
         DicomQrView.getPersistence(),
         null);
   }

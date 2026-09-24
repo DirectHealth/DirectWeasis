@@ -11,12 +11,13 @@ package org.weasis.core.ui.util;
 
 import java.awt.FlowLayout;
 import java.awt.Window;
-import java.util.List;
 import java.util.Objects;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultComboBoxModel;
+import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -33,7 +34,7 @@ import org.weasis.core.util.StringUtil;
  * @author Marcelo Porto (marcelo@animati.com.br)
  * @author Nicolas Roduit
  */
-public class PrintDialog<I extends ImageElement> extends javax.swing.JDialog {
+public class PrintDialog<I extends ImageElement> extends JDialog {
 
   private final JCheckBox annotationsCheckBox =
       new JCheckBox(Messages.getString("PrintDialog.annotate"));
@@ -47,8 +48,7 @@ public class PrintDialog<I extends ImageElement> extends javax.swing.JDialog {
   public PrintDialog(Window parent, String title, ImageViewerEventManager<I> eventManager) {
     super(parent, title, ModalityType.APPLICATION_MODAL);
     this.eventManager = eventManager;
-    boolean layout =
-        eventManager.getSelectedView2dContainer().getLayoutModel().getConstraints().size() > 1;
+    boolean layout = eventManager.getSelectedView2dContainer().getLayoutModel().getCellCount() > 1;
     initComponents(layout);
     pack();
   }
@@ -61,7 +61,7 @@ public class PrintDialog<I extends ImageElement> extends javax.swing.JDialog {
 
     JLabel positionLabel = new JLabel(Messages.getString("PrintDialog.pos") + StringUtil.COLON);
     positionComboBox.setModel(
-        new javax.swing.DefaultComboBoxModel<>(
+        new DefaultComboBoxModel<>(
             new String[] {
               Messages.getString("PrintDialog.center"), Messages.getString("PrintDialog.top")
             }));
@@ -79,12 +79,10 @@ public class PrintDialog<I extends ImageElement> extends javax.swing.JDialog {
       panel.add(GuiUtils.getFlowLayoutPanel(2, 5, selectedViewCheckbox));
     }
 
-    javax.swing.JButton cancelButton =
-        new javax.swing.JButton(Messages.getString("PrintDialog.cancel"));
+    JButton cancelButton = new JButton(Messages.getString("PrintDialog.cancel"));
     cancelButton.addActionListener(e -> dispose());
 
-    javax.swing.JButton printButton =
-        new javax.swing.JButton(Messages.getString("PrintDialog.print"));
+    JButton printButton = new JButton(Messages.getString("PrintDialog.print"));
     printButton.addActionListener(e -> printAction());
     getRootPane().setDefaultButton(printButton);
 
@@ -105,9 +103,12 @@ public class PrintDialog<I extends ImageElement> extends javax.swing.JDialog {
             positionComboBox.getSelectedItem(), Messages.getString("PrintDialog.center")));
 
     ImageViewerPlugin<I> container = eventManager.getSelectedView2dContainer();
+    ViewCanvas<I> selectedView = eventManager.getSelectedViewPane();
+    boolean singleView = selectedViewCheckbox.isSelected();
 
-    List<ViewCanvas<I>> views = container.getImagePanels();
-    if (views.isEmpty()) {
+    if (container == null
+        || container.getImagePanels().isEmpty()
+        || (singleView && selectedView == null)) {
       JOptionPane.showMessageDialog(
           WinUtil.getValidComponent(this),
           Messages.getString("PrintDialog.no_print"),
@@ -118,14 +119,9 @@ public class PrintDialog<I extends ImageElement> extends javax.swing.JDialog {
     }
     dispose();
 
-    ExportLayout<I> layout;
-    if (!selectedViewCheckbox.isSelected()) {
-      // Several views
-      layout = new ExportLayout<>(container.getLayoutModel());
-    } else {
-      // One View
-      layout = new ExportLayout<>(eventManager.getSelectedViewPane());
-    }
+    // One view or several views
+    ExportLayout<I> layout =
+        singleView ? new ExportLayout<>(selectedView) : new ExportLayout<>(container);
 
     ImagePrint print = new ImagePrint(layout, printOptions);
     print.print();

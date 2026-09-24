@@ -55,7 +55,7 @@ public class CalibrationView extends JPanel {
   public CalibrationView(LineGraphic line, ViewCanvas<?> view2d, boolean selectSeries) {
     this.line = line;
     this.view2d = view2d;
-    List<Unit> units = Unit.getUnitExceptPixel();
+    List<Unit> units = Unit.getPhysicalUnits();
     this.jComboBoxUnit = new JComboBox<>(units.toArray(new Unit[0]));
     try {
       jbInit();
@@ -137,6 +137,8 @@ public class CalibrationView extends JPanel {
               if (media instanceof ImageElement img && media != image) {
                 img.setPixelSpacingUnit(unit);
                 img.setPixelSize(ratio);
+                img.setPixelSizeCalibrationDescription("Modified by user");
+                img.setPixelSizeModifiedByUser(true);
               }
             }
           }
@@ -144,6 +146,10 @@ public class CalibrationView extends JPanel {
       }
       image.setPixelSize(ratio);
       image.setPixelSpacingUnit(unit);
+      // Set the calibration description to null if the image contains a calibration that needs to
+      // be overridden
+      image.setPixelSizeCalibrationDescription("Modified by user");
+      image.setPixelSizeModifiedByUser(true);
 
       ImageViewerEventManager<?> manager = view2d.getEventManager();
       if (manager.getSelectedViewPane() == view2d) {

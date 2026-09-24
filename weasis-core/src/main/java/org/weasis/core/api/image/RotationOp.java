@@ -10,29 +10,32 @@
 package org.weasis.core.api.image;
 
 import java.util.Objects;
-import java.util.Optional;
 import org.opencv.core.Core;
 import org.opencv.core.Mat;
 import org.opencv.core.Point;
 import org.opencv.core.Rect;
 import org.opencv.core.RotatedRect;
+import org.opencv.geometry.Geometry;
 import org.opencv.imgproc.Imgproc;
 import org.weasis.core.Messages;
 import org.weasis.core.util.MathUtil;
 import org.weasis.opencv.data.ImageCV;
 import org.weasis.opencv.data.PlanarImage;
-import org.weasis.opencv.op.ImageProcessor;
+import org.weasis.opencv.op.ImageTransformer;
 
-public class RotationOp extends AbstractOp {
+/**
+ * Applies rotation transformation to images. Supports optimized right-angle rotations (90°, 180°,
+ * 270°) and arbitrary angle rotations.
+ */
+public final class RotationOp extends AbstractOp {
 
   public static final String OP_NAME = Messages.getString("RotationOperation.title");
+  public static final String P_ROTATE = "rotate";
 
-  /**
-   * Set the clockwise angle value in degree (Required parameter).
-   *
-   * <p>Integer value.
-   */
-  public static final String P_ROTATE = "rotate"; // NON-NLS
+  private static final int FULL_CIRCLE_DEGREES = 360;
+  private static final int ROTATION_90 = 90;
+  private static final int ROTATION_180 = 180;
+  private static final int ROTATION_270 = 270;
 
   public RotationOp() {
     setName(OP_NAME);
@@ -49,50 +52,64 @@ public class RotationOp extends AbstractOp {
 
   @Override
   public void process() throws Exception {
-    PlanarImage source = (PlanarImage) params.get(Param.INPUT_IMG);
-    PlanarImage result = source;
-    int rotationAngle = Optional.ofNullable((Integer) params.get(P_ROTATE)).orElse(0);
-    rotationAngle = rotationAngle % 360;
-
-    if (rotationAngle != 0) {
-      // optimize rotation by right angles
-      Integer rotOp = null;
-      if (rotationAngle == 90) {
-        rotOp = Core.ROTATE_90_CLOCKWISE;
-      } else if (rotationAngle == 180) {
-        rotOp = Core.ROTATE_180;
-      } else if (rotationAngle == 270) {
-        rotOp = Core.ROTATE_90_COUNTERCLOCKWISE;
-      }
-
-      if (rotOp == null) {
-        result =
-            getRotatedImage(
-                source.toMat(), rotationAngle, source.width() / 2.0, source.height() / 2.0);
-      } else {
-        result = ImageProcessor.getRotatedImage(source.toMat(), rotOp);
-      }
-    }
+    var source = getSourceImage();
+    int angle = getNormalizedRotationAngle();
+    var result = angle == 0 ? source : applyRotation(source, angle);
     params.put(Param.OUTPUT_IMG, result);
   }
 
-  public static ImageCV getRotatedImage(Mat source, double angle, double centerx, double centery) {
+  private int getNormalizedRotationAngle() {
+    return switch (params.get(P_ROTATE)) {
+      case Integer angle -> angle % FULL_CIRCLE_DEGREES;
+      case null, default -> 0;
+    };
+  }
+
+  private PlanarImage applyRotation(PlanarImage source, int angle) {
+    return switch (angle) {
+      case ROTATION_90 ->
+          ImageTransformer.getRotatedImage(source.toMat(), Core.ROTATE_90_CLOCKWISE);
+      case ROTATION_180 -> ImageTransformer.getRotatedImage(source.toMat(), Core.ROTATE_180);
+      case ROTATION_270 ->
+          ImageTransformer.getRotatedImage(source.toMat(), Core.ROTATE_90_COUNTERCLOCKWISE);
+      default ->
+          rotateArbitraryAngle(source.toMat(), angle, source.width() / 2.0, source.height() / 2.0);
+    };
+  }
+
+  /**
+   * Rotates an image by an arbitrary angle around a center point.
+   *
+   * @param source the source image matrix
+   * @param angle rotation angle in degrees (clockwise)
+   * @param centerX rotation center X coordinate
+   * @param centerY rotation center Y coordinate
+   * @return the rotated image
+   */
+  public static ImageCV rotateArbitraryAngle(
+      Mat source, double angle, double centerX, double centerY) {
     if (MathUtil.isEqualToZero(angle)) {
-      return ImageCV.toImageCV(source);
+      return ImageCV.fromMat(source);
     }
-    Mat srcImg = Objects.requireNonNull(source);
-    Point ptCenter = new Point(centerx, centery);
-    Mat rot = Imgproc.getRotationMatrix2D(ptCenter, -angle, 1.0);
-    ImageCV dstImg = new ImageCV();
-    // determine bounding rectangle
-    Rect bbox = new RotatedRect(ptCenter, srcImg.size(), -angle).boundingRect();
-    double[] matrix = new double[rot.cols() * rot.rows()];
-    // adjust transformation matrix
-    rot.get(0, 0, matrix);
-    matrix[2] += bbox.width / 2.0 - centerx;
-    matrix[rot.cols() + 2] += bbox.height / 2.0 - centery;
-    rot.put(0, 0, matrix);
-    Imgproc.warpAffine(srcImg, dstImg, rot, bbox.size());
+    var srcImg = Objects.requireNonNull(source, "Source image cannot be null");
+    var center = new Point(centerX, centerY);
+    var rotationMatrix = Geometry.getRotationMatrix2D(center, -angle, 1.0);
+    var bbox = new RotatedRect(center, srcImg.size(), -angle).boundingRect();
+
+    double[] matrix = transformMatrixWithOffset(rotationMatrix, bbox, center);
+    rotationMatrix.put(0, 0, matrix);
+
+    var dstImg = new ImageCV();
+    Imgproc.warpAffine(srcImg, dstImg, rotationMatrix, bbox.size());
     return dstImg;
+  }
+
+  public static double[] transformMatrixWithOffset(
+      Mat rot, Rect bbox, org.opencv.core.Point ptCenter) {
+    double[] m = new double[rot.cols() * rot.rows()];
+    rot.get(0, 0, m);
+    m[2] += bbox.width / 2.0 - ptCenter.x;
+    m[rot.cols() + 2] += bbox.height / 2.0 - ptCenter.y;
+    return m;
   }
 }

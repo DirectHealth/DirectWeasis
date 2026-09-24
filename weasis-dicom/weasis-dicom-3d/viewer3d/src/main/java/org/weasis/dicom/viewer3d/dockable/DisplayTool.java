@@ -10,10 +10,6 @@
 package org.weasis.dicom.viewer3d.dockable;
 
 import bibliothek.gui.dock.common.CLocation;
-import eu.essilab.lablib.checkboxtree.CheckboxTree;
-import eu.essilab.lablib.checkboxtree.TreeCheckingEvent;
-import eu.essilab.lablib.checkboxtree.TreeCheckingModel;
-import eu.essilab.lablib.checkboxtree.TreeCheckingModel.CheckingMode;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.FlowLayout;
@@ -44,6 +40,10 @@ import org.weasis.core.ui.model.layer.AbstractInfoLayer;
 import org.weasis.core.ui.model.layer.LayerAnnotation;
 import org.weasis.core.ui.model.layer.LayerItem;
 import org.weasis.core.ui.util.TreeBuilder;
+import org.weasis.core.ui.util.tree.CheckboxTree;
+import org.weasis.core.ui.util.tree.TreeCheckingEvent;
+import org.weasis.core.ui.util.tree.TreeCheckingModel;
+import org.weasis.core.ui.util.tree.TreeCheckingModel.CheckingMode;
 import org.weasis.dicom.codec.DicomImageElement;
 import org.weasis.dicom.viewer3d.EventManager;
 import org.weasis.dicom.viewer3d.Messages;
@@ -140,8 +140,8 @@ public class DisplayTool extends PluginTool implements SeriesViewerListener {
 
   private void treeValueChanged(TreeCheckingEvent e) {
     if (!initPathSelection) {
-      TreePath path = e.getPath();
-      boolean selected = e.isCheckedPath();
+      TreePath path = e.path();
+      boolean selected = e.checked();
       Object selObject = path.getLastPathComponent();
       Object parent = null;
       if (path.getParentPath() != null) {
@@ -181,7 +181,7 @@ public class DisplayTool extends PluginTool implements SeriesViewerListener {
               // Send message to listeners, only selected view
               ImageViewerPlugin<DicomImageElement> container =
                   EventManager.getInstance().getSelectedView2dContainer();
-              ViewCanvas<DicomImageElement> v = container.getSelectedImagePane();
+              ViewCanvas<DicomImageElement> v = container.getSelectedViewCanvas();
               Series<?> series = (Series<?>) v.getSeries();
               EventManager.getInstance()
                   .fireSeriesViewerListeners(
@@ -263,7 +263,7 @@ public class DisplayTool extends PluginTool implements SeriesViewerListener {
     // TODO should recieved layer changes
     EVENT e = event.getEventType();
     if (EVENT.SELECT_VIEW.equals(e) && event.getSeriesViewer() instanceof ImageViewerPlugin) {
-      iniTreeValues(((ImageViewerPlugin<?>) event.getSeriesViewer()).getSelectedImagePane());
+      iniTreeValues(((ImageViewerPlugin<?>) event.getSeriesViewer()).getSelectedViewCanvas());
     } else if (EVENT.TOGGLE_INFO.equals(e)) {
       TreeCheckingModel model = tree.getCheckingModel();
       TreePath path = new TreePath(dicomInfo.getPath());

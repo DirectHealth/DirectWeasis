@@ -9,27 +9,26 @@
  */
 package org.weasis.dicom.viewer2d;
 
+import com.formdev.flatlaf.util.SystemFileChooser;
+import com.formdev.flatlaf.util.SystemFileChooser.FileNameExtensionFilter;
 import java.awt.event.ActionEvent;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import javax.swing.Action;
 import javax.swing.Icon;
-import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
 import org.dcm4che3.data.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.weasis.core.api.explorer.DataExplorerView;
+import org.weasis.core.api.explorer.model.DataExplorerModel;
+import org.weasis.core.api.gui.layout.MigCell;
+import org.weasis.core.api.gui.layout.MigLayoutModel;
 import org.weasis.core.api.gui.util.ActionW;
 import org.weasis.core.api.gui.util.ComboItemListener;
-import org.weasis.core.api.gui.util.FileFormatFilter;
 import org.weasis.core.api.gui.util.GuiUtils;
-import org.weasis.core.api.image.GridBagLayoutModel;
-import org.weasis.core.api.image.LayoutConstraints;
 import org.weasis.core.api.media.MimeInspector;
 import org.weasis.core.api.media.data.Codec;
 import org.weasis.core.api.media.data.MediaElement;
@@ -40,8 +39,10 @@ import org.weasis.core.api.service.BundleTools;
 import org.weasis.core.api.service.WProperties;
 import org.weasis.core.api.util.ResourceUtil;
 import org.weasis.core.api.util.ResourceUtil.OtherIcon;
+import org.weasis.core.ui.editor.MediaFactory;
 import org.weasis.core.ui.editor.SeriesViewer;
 import org.weasis.core.ui.editor.SeriesViewerFactory;
+import org.weasis.core.ui.editor.ViewerOpenOptions;
 import org.weasis.core.ui.editor.ViewerPluginBuilder;
 import org.weasis.core.ui.editor.image.ImageViewerPlugin;
 import org.weasis.core.ui.editor.image.ImageViewerPlugin.LayoutModel;
@@ -49,7 +50,7 @@ import org.weasis.core.ui.util.DefaultAction;
 import org.weasis.dicom.codec.DicomCodec;
 import org.weasis.dicom.codec.DicomMediaIO;
 import org.weasis.dicom.codec.TagD;
-import org.weasis.dicom.explorer.DicomExplorer;
+import org.weasis.dicom.explorer.main.DicomExplorer;
 
 @org.osgi.service.component.annotations.Component(service = SeriesViewerFactory.class)
 public class View2dFactory implements SeriesViewerFactory {
@@ -81,26 +82,25 @@ public class View2dFactory implements SeriesViewerFactory {
   }
 
   @Override
-  public SeriesViewer<?> createSeriesViewer(Map<String, Object> properties) {
-    ComboItemListener<GridBagLayoutModel> layoutAction =
+  public SeriesViewer<?> createSeriesViewer(ViewerOpenOptions options, DataExplorerModel model) {
+    ComboItemListener<MigLayoutModel> layoutAction =
         EventManager.getInstance().getAction(ActionW.LAYOUT).orElse(null);
     LayoutModel layout =
-        ImageViewerPlugin.getLayoutModel(properties, ImageViewerPlugin.VIEWS_1x1, layoutAction);
+        ImageViewerPlugin.getLayoutModel(options, ImageViewerPlugin.VIEWS_1x1, layoutAction);
 
     View2dContainer instance =
         new View2dContainer(layout.model(), layout.uid(), getUIName(), getIcon(), null);
-    ImageViewerPlugin.registerInDataExplorerModel(properties, instance);
+    ImageViewerPlugin.registerInDataExplorerModel(model, instance);
 
     return instance;
   }
 
-  public static int getViewTypeNumber(GridBagLayoutModel layout, Class<?> defaultClass) {
+  public static int getViewTypeNumber(MigLayoutModel layout, Class<?> defaultClass) {
     int val = 0;
     if (layout != null && defaultClass != null) {
-      Iterator<LayoutConstraints> enumVal = layout.getConstraints().keySet().iterator();
-      while (enumVal.hasNext()) {
+      for (MigCell cell : layout.getCells()) {
         try {
-          Class<?> clazz = Class.forName(enumVal.next().getType());
+          Class<?> clazz = Class.forName(cell.type());
           if (defaultClass.isAssignableFrom(clazz)) {
             val++;
           }
@@ -158,19 +158,18 @@ public class View2dFactory implements SeriesViewerFactory {
   private static void getOpenImageAction(ActionEvent e) {
     WProperties localPersistence = GuiUtils.getUICore().getLocalPersistence();
     String directory = localPersistence.getProperty("last.open.dicom.dir", ""); // NON-NLS
-    JFileChooser fileChooser = new JFileChooser(directory);
+    SystemFileChooser fileChooser = new SystemFileChooser(directory);
 
-    fileChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+    fileChooser.setFileSelectionMode(SystemFileChooser.FILES_ONLY);
     fileChooser.setMultiSelectionEnabled(true);
-    FileFormatFilter filter =
-        new FileFormatFilter(new String[] {"dcm", "dicm"}, "DICOM"); // NON-NLS
+    FileNameExtensionFilter filter = new FileNameExtensionFilter("DICOM", "dcm", "dicm"); // NON-NLS
     fileChooser.addChoosableFileFilter(filter);
     fileChooser.setAcceptAllFileFilterUsed(true);
     fileChooser.setFileFilter(filter);
 
     File[] selectedFiles;
     if (fileChooser.showOpenDialog(GuiUtils.getUICore().getApplicationWindow())
-            != JFileChooser.APPROVE_OPTION
+            != SystemFileChooser.APPROVE_OPTION
         || (selectedFiles = fileChooser.getSelectedFiles()) == null) {
       return;
     } else {
@@ -191,8 +190,7 @@ public class View2dFactory implements SeriesViewerFactory {
               String tvalue = (String) reader.getTagValue(tname);
 
               MediaSeries<MediaElement> s =
-                  ViewerPluginBuilder.buildMediaSeriesWithDefaultModel(
-                      reader, gUID, tname, tvalue, sUID);
+                  MediaFactory.buildMediaSeriesWithDefaultModel(reader, gUID, tname, tvalue, sUID);
 
               if (s != null && !list.contains(s)) {
                 list.add(s);
@@ -201,8 +199,8 @@ public class View2dFactory implements SeriesViewerFactory {
           }
         }
         if (!list.isEmpty()) {
-          ViewerPluginBuilder.openSequenceInDefaultPlugin(
-              list, ViewerPluginBuilder.DefaultDataModel, true, true);
+          ViewerPluginBuilder.openInDefaultViewer(
+              list, ViewerPluginBuilder.DefaultDataModel, ViewerOpenOptions.defaults());
         } else {
           JOptionPane.showMessageDialog(
               GuiUtils.getUICore().getApplicationWindow(),

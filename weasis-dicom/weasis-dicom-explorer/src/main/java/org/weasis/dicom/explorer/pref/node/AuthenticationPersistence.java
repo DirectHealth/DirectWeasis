@@ -27,16 +27,16 @@ import javax.xml.stream.XMLStreamWriter;
 import org.osgi.framework.BundleContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.weasis.core.api.auth.AuthMethod;
-import org.weasis.core.api.auth.AuthProvider;
-import org.weasis.core.api.auth.AuthRegistration;
-import org.weasis.core.api.auth.DefaultAuthMethod;
-import org.weasis.core.api.auth.OAuth2ServiceFactory;
 import org.weasis.core.api.gui.util.AppProperties;
+import org.weasis.core.api.net.auth.AuthMethod;
+import org.weasis.core.api.net.auth.AuthProvider;
+import org.weasis.core.api.net.auth.AuthRegistration;
+import org.weasis.core.api.net.auth.DefaultAuthMethod;
+import org.weasis.core.api.net.auth.OAuth2ServiceFactory;
 import org.weasis.core.api.service.BundlePreferences;
 import org.weasis.core.api.util.ResourceUtil;
-import org.weasis.core.util.FileUtil;
 import org.weasis.core.util.LangUtil;
+import org.weasis.core.util.StreamUtil;
 import org.weasis.core.util.StringUtil;
 
 public class AuthenticationPersistence {
@@ -57,6 +57,7 @@ public class AuthenticationPersistence {
   private static final String T_REVOKE_URI = "revoke"; // NON-NLS
   private static final String T_OPENID = "openid"; // NON-NLS
   private static final String T_AUDIENCE = "audience"; // NON-NLS
+  private static final String T_GRANT_TYPE = "grantType"; // NON-NLS
 
   private static final Map<String, AuthMethod> methods = new HashMap<>();
 
@@ -66,7 +67,7 @@ public class AuthenticationPersistence {
     if (methods.isEmpty()) {
       loadMethods();
     }
-    return methods.getOrDefault(serviceId, OAuth2ServiceFactory.noAuth);
+    return methods.getOrDefault(serviceId, OAuth2ServiceFactory.NO_AUTH);
   }
 
   public static Map<String, AuthMethod> getMethods() {
@@ -87,7 +88,7 @@ public class AuthenticationPersistence {
 
       // Load nodes from local data
       final BundleContext context = AppProperties.getBundleContext(AbstractDicomNode.class);
-      loadMethods(list, new File(BundlePreferences.getDataFolder(context), FILENAME), true);
+      loadMethods(list, BundlePreferences.getFileInDataFolder(context, FILENAME).toFile(), true);
       for (AuthMethod m : list) {
         methods.put(m.getUid(), m);
       }
@@ -97,10 +98,35 @@ public class AuthenticationPersistence {
   }
 
   public static void loadMethods(JComboBox<AuthMethod> comboBox) {
-    comboBox.addItem(OAuth2ServiceFactory.noAuth);
+    comboBox.addItem(OAuth2ServiceFactory.NO_AUTH);
     Collection<AuthMethod> list = loadMethods();
     for (AuthMethod node : list) {
       comboBox.addItem(node);
+    }
+  }
+
+  public static void addOrUpdateMethod(AuthMethod method) {
+    if (method == null || !StringUtil.hasText(method.getUid())) {
+      return;
+    }
+    if (methods.isEmpty()) {
+      loadMethods();
+    }
+    methods.put(method.getUid(), method);
+    OAuth2ServiceFactory.invalidateService(method.getUid());
+    saveMethod();
+  }
+
+  public static void removeMethod(AuthMethod method) {
+    if (method == null || !StringUtil.hasText(method.getUid())) {
+      return;
+    }
+    if (methods.isEmpty()) {
+      loadMethods();
+    }
+    if (methods.remove(method.getUid()) != null) {
+      OAuth2ServiceFactory.invalidateService(method.getUid());
+      saveMethod();
     }
   }
 
@@ -111,7 +137,8 @@ public class AuthenticationPersistence {
     try {
       writer =
           factory.createXMLStreamWriter(
-              new FileOutputStream(new File(BundlePreferences.getDataFolder(context), FILENAME)),
+              new FileOutputStream(
+                  BundlePreferences.getFileInDataFolder(context, FILENAME).toFile()),
               "UTF-8"); // NON-NLS
 
       writer.writeStartDocument("UTF-8", "1.0"); // NON-NLS
@@ -124,19 +151,20 @@ public class AuthenticationPersistence {
 
           AuthProvider p = node.getAuthProvider();
           writer.writeStartElement(T_PROVIDER);
-          writeNode(writer, T_NAME, p.getName());
-          writeNode(writer, T_AUTH_URI, p.getAuthorizationUri());
-          writeNode(writer, T_TOKEN_URI, p.getTokenUri());
-          writeNode(writer, T_REVOKE_URI, p.getRevokeTokenUri());
-          writer.writeAttribute(T_OPENID, Boolean.toString(p.getOpenId()));
+          writeNode(writer, T_NAME, p.name());
+          writeNode(writer, T_AUTH_URI, p.authorizationUri());
+          writeNode(writer, T_TOKEN_URI, p.tokenUri());
+          writeNode(writer, T_REVOKE_URI, p.revokeTokenUri());
+          writer.writeAttribute(T_OPENID, Boolean.toString(p.openId()));
           writer.writeEndElement();
 
           AuthRegistration reg = node.getAuthRegistration();
           writer.writeStartElement(T_REGISTRATION);
-          writeNode(writer, T_CLIENT_ID, reg.getClientId());
-          writeNode(writer, T_CLIENT_SECRET, reg.getClientSecret());
-          writeNode(writer, T_SCOPE, reg.getScope());
-          writeNode(writer, T_AUDIENCE, reg.getAudience());
+          writeNode(writer, T_CLIENT_ID, reg.clientId());
+          writeNode(writer, T_CLIENT_SECRET, reg.clientSecret());
+          writeNode(writer, T_SCOPE, reg.scope());
+          writeNode(writer, T_AUDIENCE, reg.audience());
+          writeNode(writer, T_GRANT_TYPE, reg.getAuthorizationGrantType());
           writer.writeEndElement();
 
           writer.writeEndElement();
@@ -148,7 +176,7 @@ public class AuthenticationPersistence {
     } catch (Exception e) {
       LOGGER.error("Error on writing DICOM node file", e);
     } finally {
-      FileUtil.safeClose(writer);
+      StreamUtil.safeClose(writer);
     }
   }
 
@@ -176,7 +204,7 @@ public class AuthenticationPersistence {
       } catch (Exception e) {
         LOGGER.error("Error on reading DICOM node file", e);
       } finally {
-        FileUtil.safeClose(xmler);
+        StreamUtil.safeClose(xmler);
       }
     }
   }
@@ -201,18 +229,22 @@ public class AuthenticationPersistence {
         String uid = xmler.getAttributeValue(null, T_UID);
         String code = xmler.getAttributeValue(null, T_CODE);
 
-        AuthProvider p = new AuthProvider(null, null, null, null, false);
-        AuthRegistration reg = new AuthRegistration();
-        DefaultAuthMethod node = new DefaultAuthMethod(uid, p, reg);
+        AuthProviderBuilder providerBuilder = new AuthProviderBuilder();
+        AuthRegistrationBuilder registrationBuilder = new AuthRegistrationBuilder();
         while (xmler.hasNext()) {
           int eventType = xmler.next();
           if (eventType == XMLStreamConstants.START_ELEMENT) {
-            readSubElements(xmler, node);
+            readSubElements(xmler, providerBuilder, registrationBuilder);
           } else if (eventType == XMLStreamConstants.END_ELEMENT
               && T_REGISTRATION.equals(xmler.getName().getLocalPart())) {
             break;
           }
         }
+        // Create immutable records from collected values
+        AuthProvider provider = providerBuilder.build();
+        AuthRegistration registration = registrationBuilder.build();
+
+        DefaultAuthMethod node = new DefaultAuthMethod(uid, provider, registration);
         node.setCode(code);
         node.setLocal(local);
         list.add(node);
@@ -222,21 +254,48 @@ public class AuthenticationPersistence {
     }
   }
 
-  private static void readSubElements(XMLStreamReader xmler, DefaultAuthMethod node) {
+  private static void readSubElements(
+      XMLStreamReader xmler,
+      AuthProviderBuilder providerBuilder,
+      AuthRegistrationBuilder registrationBuilder) {
     String key = xmler.getName().getLocalPart();
     if (T_PROVIDER.equals(key)) {
-      AuthProvider p = node.getAuthProvider();
-      p.setName(xmler.getAttributeValue(null, T_NAME));
-      p.setAuthorizationUri(xmler.getAttributeValue(null, T_AUTH_URI));
-      p.setTokenUri(xmler.getAttributeValue(null, T_TOKEN_URI));
-      p.setRevokeTokenUri(xmler.getAttributeValue(null, T_REVOKE_URI));
-      p.setOpenId(LangUtil.getEmptytoFalse(xmler.getAttributeValue(null, T_OPENID)));
+      providerBuilder.name = xmler.getAttributeValue(null, T_NAME);
+      providerBuilder.authorizationUri = xmler.getAttributeValue(null, T_AUTH_URI);
+      providerBuilder.tokenUri = xmler.getAttributeValue(null, T_TOKEN_URI);
+      providerBuilder.revokeTokenUri = xmler.getAttributeValue(null, T_REVOKE_URI);
+      providerBuilder.openId = LangUtil.emptyToFalse(xmler.getAttributeValue(null, T_OPENID));
     } else if (T_REGISTRATION.equals(key)) {
-      AuthRegistration reg = node.getAuthRegistration();
-      reg.setClientId(xmler.getAttributeValue(null, T_CLIENT_ID));
-      reg.setClientSecret(xmler.getAttributeValue(null, T_CLIENT_SECRET));
-      reg.setScope(xmler.getAttributeValue(null, T_SCOPE));
-      reg.setAudience(xmler.getAttributeValue(null, T_AUDIENCE));
+      registrationBuilder.clientId = xmler.getAttributeValue(null, T_CLIENT_ID);
+      registrationBuilder.clientSecret = xmler.getAttributeValue(null, T_CLIENT_SECRET);
+      registrationBuilder.scope = xmler.getAttributeValue(null, T_SCOPE);
+      registrationBuilder.audience = xmler.getAttributeValue(null, T_AUDIENCE);
+      registrationBuilder.grantType = xmler.getAttributeValue(null, T_GRANT_TYPE);
+    }
+  }
+
+  // Helper builder classes for collecting values
+  private static class AuthProviderBuilder {
+    String name;
+    String authorizationUri;
+    String tokenUri;
+    String revokeTokenUri;
+    boolean openId;
+
+    AuthProvider build() {
+      return new AuthProvider(name, authorizationUri, tokenUri, revokeTokenUri, openId);
+    }
+  }
+
+  private static class AuthRegistrationBuilder {
+    String clientId;
+    String clientSecret;
+    String scope;
+    String audience;
+    String grantType;
+
+    AuthRegistration build() {
+      return new AuthRegistration(clientId, clientSecret, scope, audience, null, grantType);
     }
   }
 }

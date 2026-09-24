@@ -9,6 +9,7 @@
  */
 package org.weasis.acquire.dockable.components.actions.contrast;
 
+import java.util.Optional;
 import javax.swing.BoxLayout;
 import javax.swing.JCheckBox;
 import javax.swing.event.ChangeEvent;
@@ -101,13 +102,13 @@ public class ContrastPanel extends AbstractAcquireActionPanel
   @Override
   public void applyNextValues() {
     AcquireImageInfo imageInfo = AcquireObject.getImageInfo();
-    ImageOpNode node = imageInfo.getPostProcessOpManager().getNode(BrightnessOp.OP_NAME);
-    if (node != null) {
-      node.clearIOCache();
-      node.setParam(
+    Optional<ImageOpNode> node = imageInfo.getPostProcessOpManager().getNode(BrightnessOp.OP_NAME);
+    if (node.isPresent()) {
+      ImageOpNode n = node.get();
+      n.clearIOCache();
+      n.setParam(
           BrightnessOp.P_BRIGHTNESS_VALUE, (double) imageInfo.getNextValues().getBrightness());
-      node.setParam(
-          BrightnessOp.P_CONTRAST_VALUE, (double) imageInfo.getNextValues().getContrast());
+      n.setParam(BrightnessOp.P_CONTRAST_VALUE, (double) imageInfo.getNextValues().getContrast());
     }
   }
 }

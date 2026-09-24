@@ -10,14 +10,24 @@
 package org.weasis.core.api.image;
 
 import org.weasis.opencv.data.PlanarImage;
-import org.weasis.opencv.op.ImageProcessor;
+import org.weasis.opencv.op.ImageTransformer;
 
+/**
+ * Image operation for adjusting brightness and contrast.
+ *
+ * <p>This operation applies rescaling transformations to modify the brightness and contrast of an
+ * image. Default values (contrast=1.0, brightness=0.0) result in no transformation.
+ */
 public class BrightnessOp extends AbstractOp {
 
   public static final String OP_NAME = "rescale"; // NON-NLS
 
   public static final String P_BRIGHTNESS_VALUE = "rescale.brightness";
   public static final String P_CONTRAST_VALUE = "rescale.contrast";
+
+  private static final double CONTRAST_SCALE_FACTOR = 100.0;
+  private static final double DEFAULT_CONTRAST = 1.0;
+  private static final double DEFAULT_BRIGHTNESS = 0.0;
 
   public BrightnessOp() {
     setName(OP_NAME);
@@ -34,16 +44,15 @@ public class BrightnessOp extends AbstractOp {
 
   @Override
   public void process() throws Exception {
-    PlanarImage source = (PlanarImage) params.get(Param.INPUT_IMG);
-    PlanarImage result = source;
+    PlanarImage source = getSourceImage();
+    double contrast = getParam(P_CONTRAST_VALUE, Double.class, DEFAULT_CONTRAST);
+    double brightness = getParam(P_BRIGHTNESS_VALUE, Double.class, DEFAULT_BRIGHTNESS);
 
-    Double contrast = (Double) params.get(P_CONTRAST_VALUE);
-    Double brightness = (Double) params.get(P_BRIGHTNESS_VALUE);
-
-    if (contrast != null && brightness != null) {
-      result = ImageProcessor.rescaleToByte(source.toImageCV(), contrast / 100.0, brightness);
-    }
-
+    PlanarImage result =
+        (contrast == DEFAULT_CONTRAST && brightness == DEFAULT_BRIGHTNESS)
+            ? source
+            : ImageTransformer.rescaleToByte(
+                source.toImageCV(), contrast / CONTRAST_SCALE_FACTOR, brightness);
     params.put(Param.OUTPUT_IMG, result);
   }
 }

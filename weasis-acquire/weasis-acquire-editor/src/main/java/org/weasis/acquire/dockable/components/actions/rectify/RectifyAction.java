@@ -75,7 +75,7 @@ public class RectifyAction extends AbstractAcquireAction {
             });
 
     for (GraphicLayer layer : new ArrayList<>(model.getLayers())) {
-      if (LangUtil.getNULLtoFalse(layer.getSerializable())) {
+      if (LangUtil.nullToFalse(layer.getSerializable())) {
         model.deleteByLayer(layer);
       }
     }
@@ -139,7 +139,9 @@ public class RectifyAction extends AbstractAcquireAction {
     imageInfo.removeLayer(view);
     this.centralPanel.restoreLastAction();
 
-    if (view.getImageLayer() instanceof RenderedImageLayer && currentCropArea != null) {
+    if (view != null
+        && view.getImageLayer() instanceof RenderedImageLayer
+        && currentCropArea != null) {
       view.getGraphicManager().deleteByLayerType(LayerType.DICOM_PR);
       applyGraphicsTransformation(view, null, getAffineTransform(imageInfo, false));
 

@@ -49,12 +49,12 @@ public class OverlayOp extends AbstractOp {
 
   @Override
   public void handleImageOpEvent(ImageOpEvent event) {
-    OpEvent type = event.getEventType();
+    OpEvent type = event.eventType();
     if (OpEvent.IMAGE_CHANGE.equals(type) || OpEvent.RESET_DISPLAY.equals(type)) {
       setParam(WindowAndPresetsOp.P_PR_ELEMENT, null);
-      setParam(P_IMAGE_ELEMENT, event.getImage());
+      setParam(P_IMAGE_ELEMENT, event.image());
     } else if (OpEvent.APPLY_PR.equals(type)) {
-      Map<String, Object> p = event.getParams();
+      Map<String, Object> p = event.params();
       if (p != null) {
         PRSpecialElement pr =
             Optional.ofNullable(p.get(ActionW.PR_STATE.cmd()))
@@ -62,14 +62,14 @@ public class OverlayOp extends AbstractOp {
                 .map(PRSpecialElement.class::cast)
                 .orElse(null);
         setParam(WindowAndPresetsOp.P_PR_ELEMENT, pr == null ? null : pr.getPrDicomObject());
-        setParam(P_IMAGE_ELEMENT, event.getImage());
+        setParam(P_IMAGE_ELEMENT, event.image());
       }
     }
   }
 
   @Override
   public void process() throws Exception {
-    PlanarImage source = (PlanarImage) params.get(Param.INPUT_IMG);
+    PlanarImage source = getSourceImage();
     PlanarImage result = source;
     Boolean overlay = (Boolean) params.get(P_SHOW);
 

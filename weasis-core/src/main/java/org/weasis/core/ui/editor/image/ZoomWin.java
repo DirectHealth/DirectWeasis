@@ -43,7 +43,6 @@ import org.weasis.core.api.image.SimpleOpManager;
 import org.weasis.core.api.image.ZoomOp.Interpolation;
 import org.weasis.core.api.image.util.ImageLayer;
 import org.weasis.core.api.media.data.ImageElement;
-import org.weasis.core.ui.editor.image.SynchData.Mode;
 import org.weasis.core.ui.editor.image.dockable.MeasureTool;
 import org.weasis.core.ui.model.layer.imp.RenderedImageLayer;
 import org.weasis.core.ui.model.utils.ImageLayerChangeListener;
@@ -104,7 +103,7 @@ public class ZoomWin<E extends ImageElement> extends GraphicsPane
     disOp.setParamValue(
         AffineTransformOp.OP_NAME,
         AffineTransformOp.P_INTERPOLATION,
-        Interpolation.getInterpolation(z.getInterpolation()));
+        Interpolation.fromPosition(z.getInterpolation()));
     disOp.setParamValue(AffineTransformOp.OP_NAME, AffineTransformOp.P_AFFINE_MATRIX, null);
 
     actionsInView.put(SYNCH_CMD, z.isLensSynchronize());
@@ -217,7 +216,7 @@ public class ZoomWin<E extends ImageElement> extends GraphicsPane
 
   public void drawLayers(
       Graphics2D g2d, AffineTransform transform, AffineTransform inverseTransform) {
-    if (LangUtil.getNULLtoTrue((Boolean) actionsInView.get(ActionW.DRAWINGS.cmd()))) {
+    if (LangUtil.nullToTrue((Boolean) actionsInView.get(ActionW.DRAWINGS.cmd()))) {
       Object[] oldRenderingHints =
           GuiUtils.setRenderingHints(g2d, true, false, view2d.requiredTextAntialiasing());
       Rectangle2D b = new Rectangle2D.Double(0.0, 0.0, getWidth(), getHeight());
@@ -234,8 +233,8 @@ public class ZoomWin<E extends ImageElement> extends GraphicsPane
     // Set the position from the center of the image
     getViewModel().setModelOffset(getOffsetCenterX(), getOffsetCenterY());
 
-    ImageOpNode node = getDisplayOpManager().getNode(AffineTransformOp.OP_NAME);
-    super.updateAffineTransform(view2d, node, imageLayer, -2.0);
+    Optional<ImageOpNode> node = getDisplayOpManager().getNode(AffineTransformOp.OP_NAME);
+    super.updateAffineTransform(view2d, node.orElse(null), imageLayer, -2.0);
   }
 
   public void setLensDecoration(
@@ -276,9 +275,10 @@ public class ZoomWin<E extends ImageElement> extends GraphicsPane
   @Override
   public void zoom(Double viewScale) {
     E img = imageLayer.getSourceImage();
-    ImageOpNode node = imageLayer.getDisplayOpManager().getNode(AffineTransformOp.OP_NAME);
-    if (img != null && node != null) {
-      node.setParam(Param.INPUT_IMG, getSourceImage());
+    Optional<ImageOpNode> node =
+        imageLayer.getDisplayOpManager().getNode(AffineTransformOp.OP_NAME);
+    if (img != null && node.isPresent()) {
+      node.get().setParam(Param.INPUT_IMG, getSourceImage());
       actionsInView.put(ActionW.ZOOM.cmd(), viewScale);
       super.zoom(Math.abs(viewScale));
       updateAffineTransform();
@@ -306,16 +306,16 @@ public class ZoomWin<E extends ImageElement> extends GraphicsPane
   protected PlanarImage getSourceImage() {
     SyncType type = (SyncType) actionsInView.get(ZoomWin.FREEZE_CMD);
     if (SyncType.PARENT_PARAMETERS.equals(type) || SyncType.PARENT_IMAGE.equals(type)) {
-      return freezeOperations.getLastNodeOutputImage();
+      return freezeOperations.getLastNodeOutputImage().orElse(null);
     }
 
     // return the image before the zoom operation from the parent view
-    ImageOpNode node =
+    Optional<ImageOpNode> node =
         view2d.getImageLayer().getDisplayOpManager().getNode(AffineTransformOp.OP_NAME);
-    if (node != null) {
-      return (PlanarImage) node.getParam(Param.INPUT_IMG);
+    if (node.isPresent()) {
+      return (PlanarImage) node.get().getParam(Param.INPUT_IMG);
     }
-    return view2d.getImageLayer().getDisplayOpManager().getLastNodeOutputImage();
+    return view2d.getImageLayer().getDisplayOpManager().getLastNodeOutputImage().orElse(null);
   }
 
   public void setFreezeImage(SyncType type) {
@@ -463,7 +463,7 @@ public class ZoomWin<E extends ImageElement> extends GraphicsPane
     if (ActionW.SYNCH.cmd().equals(command) && value instanceof SynchEvent synchEvent) {
       if (!(value instanceof SynchCineEvent)) {
         SynchData synchData = (SynchData) view2d.getActionValue(ActionW.SYNCH_LINK.cmd());
-        if (synchData != null && Mode.NONE.equals(synchData.getMode())) {
+        if (synchData != null && !synchData.isSynchActivated()) {
           return;
         }
 

@@ -11,8 +11,13 @@ package org.weasis.core.ui.model.graphic.imp.seg;
 
 import java.awt.Color;
 import java.util.List;
+import org.weasis.core.api.gui.util.DecFormatter;
+import org.weasis.core.api.gui.util.GuiUtils;
+import org.weasis.core.api.image.measure.MeasurementsAdapter;
 import org.weasis.core.api.media.data.ImageElement;
 import org.weasis.core.api.util.Copyable;
+import org.weasis.core.ui.util.StructToolTipTreeNode;
+import org.weasis.core.util.StringUtil;
 import org.weasis.opencv.seg.RegionAttributes;
 
 public class SegRegion<E extends ImageElement> extends RegionAttributes
@@ -23,6 +28,7 @@ public class SegRegion<E extends ImageElement> extends RegionAttributes
   private String algorithmName;
   private List<String> anatomicRegionCodes;
   private List<String> categories;
+  private String fractionalType;
 
   public SegRegion(int id, String label, Color color) {
     super(id, label, color);
@@ -32,19 +38,23 @@ public class SegRegion<E extends ImageElement> extends RegionAttributes
 
   public SegRegion(SegRegion<E> region) {
     super(region.getId(), region.getLabel(), new Color(region.getColor().getRGB()));
-    this.setDescription(region.getDescription());
-    this.setType(region.getType());
-    this.setFilled(region.isFilled());
-    this.setLineThickness(region.getLineThickness());
-    this.setVisible(region.isVisible());
-    this.setInteriorOpacity(region.getInteriorOpacity());
-    this.algorithmName = region.algorithmName;
-    this.anatomicRegionCodes = region.anatomicRegionCodes;
-    this.categories = region.categories;
+    copyAttributesFrom(region);
+  }
 
-    this.numberOfPixels = region.numberOfPixels;
-    this.selected = region.selected;
-    this.measurableLayer = region.measurableLayer;
+  private void copyAttributesFrom(SegRegion<E> other) {
+    setDescription(other.getDescription());
+    setType(other.getType());
+    setFilled(other.isFilled());
+    setLineThickness(other.getLineThickness());
+    setVisible(other.isVisible());
+    setInteriorOpacity(other.getInteriorOpacity());
+    this.algorithmName = other.algorithmName;
+    this.anatomicRegionCodes = other.anatomicRegionCodes;
+    this.categories = other.categories;
+    this.fractionalType = other.fractionalType;
+    this.numberOfPixels = other.numberOfPixels;
+    this.selected = other.selected;
+    this.measurableLayer = other.measurableLayer;
   }
 
   public SegMeasurableLayer<E> getMeasurableLayer() {
@@ -63,6 +73,10 @@ public class SegRegion<E extends ImageElement> extends RegionAttributes
     this.selected = selected;
   }
 
+  public void setNumberOfPixels(long numberOfPixels) {
+    this.numberOfPixels = numberOfPixels;
+  }
+
   @Override
   public SegRegion<E> copy() {
     return new SegRegion<>(this);
@@ -77,7 +91,7 @@ public class SegRegion<E extends ImageElement> extends RegionAttributes
   }
 
   public void setAnatomicRegionCodes(List<String> anatomicRegions) {
-    this.anatomicRegionCodes = anatomicRegions;
+    this.anatomicRegionCodes = anatomicRegions == null ? null : List.copyOf(anatomicRegions);
   }
 
   public List<String> getAnatomicRegionCodes() {
@@ -85,10 +99,101 @@ public class SegRegion<E extends ImageElement> extends RegionAttributes
   }
 
   public void setCategories(List<String> categories) {
-    this.categories = categories;
+    this.categories = categories == null ? null : List.copyOf(categories);
   }
 
   public List<String> getCategories() {
     return categories;
+  }
+
+  /** Returns the fractional type (PROBABILITY or OCCUPANCY) or null for BINARY segmentations. */
+  public String getFractionalType() {
+    return fractionalType;
+  }
+
+  public void setFractionalType(String fractionalType) {
+    this.fractionalType = fractionalType;
+  }
+
+  /** Returns true if this region is from a FRACTIONAL segmentation. */
+  public boolean isFractional() {
+    return fractionalType != null;
+  }
+
+  /**
+   * Builds the HTML description of this region, shared by the region tree tooltips and the hover
+   * popup displayed over the image.
+   */
+  public String getToolTipHtml() {
+    StringBuilder buf = new StringBuilder();
+    buf.append(GuiUtils.HTML_START).append("<b>").append(getLabel()).append("</b>");
+    buf.append(GuiUtils.HTML_BR);
+    appendLine(buf, "Algorithm type", getType());
+    appendLine(buf, "Algorithm name", algorithmName);
+    appendList(buf, "Categories", categories);
+    appendList(buf, "Anatomic regions", anatomicRegionCodes);
+    appendVoxelCount(buf);
+    appendVolume(buf);
+    if (isFractional()) {
+      appendFractionalLut(buf);
+    }
+    buf.append(GuiUtils.HTML_END);
+    return buf.toString();
+  }
+
+  protected static void appendLine(StringBuilder buf, String label, String value) {
+    if (StringUtil.hasText(value)) {
+      buf.append(label).append(StringUtil.COLON_AND_SPACE).append(value).append(GuiUtils.HTML_BR);
+    }
+  }
+
+  protected static void appendList(StringBuilder buf, String label, List<String> values) {
+    if (values != null && !values.isEmpty()) {
+      buf.append(label)
+          .append(StringUtil.COLON_AND_SPACE)
+          .append(String.join(", ", values))
+          .append(GuiUtils.HTML_BR);
+    }
+  }
+
+  private void appendVoxelCount(StringBuilder buf) {
+    buf.append("Voxel count");
+    if (isFractional()) {
+      buf.append(" (weighted");
+      if (StringUtil.hasText(fractionalType)) {
+        buf.append(", ").append(fractionalType.toLowerCase());
+      }
+      buf.append(")");
+    }
+    buf.append(StringUtil.COLON_AND_SPACE)
+        .append(DecFormatter.allNumber(getNumberOfPixels()))
+        .append(GuiUtils.HTML_BR);
+  }
+
+  private void appendVolume(StringBuilder buf) {
+    if (measurableLayer == null) {
+      return;
+    }
+    MeasurementsAdapter adapter =
+        measurableLayer.getMeasurementAdapter(
+            measurableLayer.getSourceImage().getPixelSpacingUnit());
+    double ratio = adapter.calibrationRatio();
+    buf.append("Volume (%s3)".formatted(adapter.unit()))
+        .append(StringUtil.COLON_AND_SPACE)
+        .append(
+            DecFormatter.twoDecimal(
+                getNumberOfPixels() * ratio * ratio * measurableLayer.getThickness()))
+        .append(GuiUtils.HTML_BR);
+  }
+
+  private void appendFractionalLut(StringBuilder buf) {
+    boolean occupancy = "OCCUPANCY".equalsIgnoreCase(fractionalType);
+    String unit = occupancy ? " %" : "";
+    String minLabel = "0" + unit;
+    String maxLabel = (occupancy ? "100" : "1") + unit;
+    buf.append("LUT")
+        .append(StringUtil.COLON_AND_SPACE)
+        .append(GuiUtils.HTML_BR)
+        .append(StructToolTipTreeNode.buildHorizontalLutBar(getColor(), 24, minLabel, maxLabel));
   }
 }
